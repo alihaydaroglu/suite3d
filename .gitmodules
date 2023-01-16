@@ -1,4 +1,4 @@
 [submodule "suite2p"]
 	path = suite2p
 	url = git@github.com:alihaydaroglu/suite2p.git
-	branch = s2p-lbm
+	branch = main
