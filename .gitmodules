@@ -1,4 +1,0 @@
-[submodule "suite2p"]
-	path = suite2p
-	url = git@github.com:alihaydaroglu/suite2p.git
-	branch = main
