@@ -1,7 +1,6 @@
 import mrcfile
 import numpy as n
 import os
-import win32api
 import psutil
 from skimage import io as skio
 from multiprocessing import Pool
@@ -118,30 +117,6 @@ def npy_to_dask(files, name='', axis=1):
     arr = darr.Array(dsk, name, chunks, dtype)
 
     return arr
-
-
-def get_subjects_by_drive_name(drive_name, find_subjects=True, specified_subdir=None):
-
-    drive_letters = win32api.GetLogicalDriveStrings().split('\x00')[:-1]
-
-    drive_names = [win32api.GetVolumeInformation(
-        drive)[0] for drive in drive_letters]
-
-    drive_letter = None
-    for i, drive in enumerate(drive_names):
-        if drive == drive_name:
-            drive_letter = drive_letters[i]
-
-    if find_subjects:
-        if specified_subdir is not None:
-            drive_letter = os.path.join(drive_letter, specified_subdir)
-        for root, subdir, files in os.walk(drive_letter):
-            if 'Subjects' in subdir:
-                return os.path.join(root, 'Subjects')
-        print("Subjects not found, returning root of drive")
-        return drive_letter
-
-    return drive_letter
 
 
 
