@@ -3,14 +3,16 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-  - mkl
-  - numba
-  - numpy
-  - h5py=2.10.0
-  - tbb
-  - python[version='>=3.8,<3.9']
   - pip
-  - scikit-learn
-  - matplotlib
+  - python=3.8
+  - dask-image
+  - tensorflow
+  - tbb
   - ipykernel
-  - napari
+  - mkl_fft
+  - mkl
+  - h5py==2.10.0
+  - scikit-image
+  - imreg_dft
+  - mrcfile
+prefix: C:\Users\ali\anaconda3\envs\s2p-lbm
