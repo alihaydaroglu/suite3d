@@ -27,3 +27,6 @@ conda install tensorflow
 conda install dask-image
 conda install mrcfile
 ```
+
+### Sample Data
+Here's a sample tiff file to test the code on. If you can't access the dropbox let me know, we might need to get Alipasha to add you to the folder. https://www.dropbox.com/sh/qp1otwnipiufjqz/AABf3iEq5ggAUVh0P_WwnuSPa?dl=0
