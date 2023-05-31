@@ -15,7 +15,7 @@ from suite2p.io import lbm as lbmio
 from matplotlib import pyplot as plt
 
 def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize=(8,6), dpi=150, alpha=None,
-             ticks=False, ax = None, px_py=None, exact_pixels=False, vmax_percentile = 99.0, vminmax = None):
+             ticks=False, ax = None, px_py=None, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None):
     f = None
 
     if exact_pixels:
@@ -27,12 +27,13 @@ def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize
     ax.grid(False)
     if 'interpolation' not in other_args.keys():
         other_args['interpolation'] = 'nearest'
-    if vmax_percentile is not None and vminmax is None:
-        other_args['vmin'] = im.min()
-        other_args['vmax'] = n.percentile(im, vmax_percentile)
+    if vminmax_percentile is not None and vminmax is None:
+        other_args['vmin'] = n.percentile(im, vminmax_percentile[0])
+        other_args['vmax'] = n.percentile(im, vminmax_percentile[1])
     if vminmax is not None:
         other_args['vmin'] = vminmax[0]
         other_args['vmax'] = vminmax[1]
+
     if px_py is not None:
         other_args['aspect'] = px_py[1]/px_py[0]
     if alpha is not None:
