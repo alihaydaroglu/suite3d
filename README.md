@@ -31,6 +31,19 @@ conda install mrcfile
 ### Sample Data
 Here's a sample tiff file to test the code on. If you can't access the dropbox let me know, we might need to get Alipasha to add you to the folder. https://www.dropbox.com/sh/qp1otwnipiufjqz/AABf3iEq5ggAUVh0P_WwnuSPa?dl=0
 
+
+## UI only installation
+If you want to only visualize results on your local laptop, you can install a lightweight script that doesn't have any of the computational dependencies. 
+
+```
+git clone --recurse-submodules git@github.com:alihaydaroglu/s2p-lbm.git
+conda create -y -n s3d-vis -c conda-forge python=3.9
+conda activate s3d-vis
+pip install "napari[pyqt5]"
+pip install notebook
+conda install pyqtgraph
+conda install -c conda-forge matplotlib
+```
 ## UI only installation
 If you want to only visualize results on your local laptop, you can install a lightweight script that doesn't have any of the computational dependencies. 
 
