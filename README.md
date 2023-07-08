@@ -20,7 +20,7 @@ conda create -n s2p-lbm
 conda activate s2p-lbm
 conda install python=3.8 pip
 pip install -e .
-conda install mkl numba numpy=2.13.5 h5py=2.10.0 tbb scikit-learn matplotlib ipykernel napari
+conda install mkl numba numpy=1.23.5 h5py=2.10.0 tbb scikit-learn matplotlib ipykernel napari
 conda install mkl_fft
 conda install imreg_dft
 conda install tensorflow
