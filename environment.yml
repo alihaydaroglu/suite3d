@@ -1,7 +1,6 @@
 name: s2p-lbm
 channels:
-  - pytorch
-  - numba
+  - defaults
   - conda-forge
 dependencies:
   - python>=3.8,<3.9
@@ -11,24 +10,20 @@ dependencies:
   - numpy
   - numba
   - napari
-  - imreg_dft
-  - mrcfile
   - matplotlib
   - scikit-learn
-  - h5py=2.10.0
-  - pip:
+  - mrcfile
+  - mkl_fft
+  - dask-image
+  - pip: 
     - scipy>=1.4.0
-    - pyqt5
-    - pyqt5.sip
-    - pyqt5-toolscond 
     - torch>=1.7.1
     - natsort
     - rastermap>0.1.0
     - tifffile
     - scanimage-tiff-reader>=1.4.1
-    - pyqtgraph
     - importlib-metadata
     - paramiko
     - pynwb
     - sbxreader
-    - suite2p
+    - imreg-dft-nw

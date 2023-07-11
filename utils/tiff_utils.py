@@ -11,7 +11,7 @@ import tifffile
 import dask.array as darr
 from itertools import product
 from suite2p.io import lbm as lbmio
-
+import json
 from matplotlib import pyplot as plt
 
 def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize=(8,6), dpi=150, alpha=None,
@@ -68,8 +68,40 @@ def get_tif_paths(dir_path, regex_filter=None):
             if re.search(regex_filter, tif_path) is not None:
                 tif_paths_filtered.append(tif_path)
         tif_paths = tif_paths_filtered
-    return n.array(tif_paths)
 
+    # print(tif_paths)
+    return (tif_paths)
+
+def get_meso_rois(tif_path, max_roi_width_pix=145):
+    tf = tifffile.TiffFile(tif_path)
+    artists_json = tf.pages[0].tags["Artist"].value
+
+    si_rois = json.loads(artists_json)['RoiGroups']['imagingRoiGroup']['rois']
+
+    rois = []
+    warned = False
+    for roi in si_rois:
+        if type(roi['scanfields']) != list:
+            scanfield = roi['scanfields']
+        else: 
+            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==0)[0][0]]
+
+    #     print(scanfield)
+        roi_dict = {}
+        roi_dict['uid'] = scanfield['roiUuid']
+        roi_dict['center'] = n.array(scanfield['centerXY'])
+        roi_dict['sizeXY'] = n.array(scanfield['sizeXY'])
+        roi_dict['pixXY'] = n.array(scanfield['pixelResolutionXY'])
+        if roi_dict['pixXY'][0] > max_roi_width_pix and not warned:
+            print("SI ROI pix count in x is %d, which is impossible, setting it to %d" % (roi_dict['pixXY'][0],max_roi_width_pix))
+            warned=True
+            roi_dict['pixXY'][0] = max_roi_width_pix
+    #         print(scanfield)
+        rois.append(roi_dict)
+    #     print(len(roi['scanfields']))
+
+    roi_pixs = n.array([r['pixXY'] for r in rois])
+    return rois
 
 def get_tif_tag(tif_path, tag_name=None, number=True):
     tf = tifffile.TiffFile(tif_path)
