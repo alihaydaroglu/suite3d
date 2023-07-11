@@ -2,6 +2,7 @@
 FROM continuumio/miniconda3
 
 # Metadata
+# Thanks to Max Gagnon for the template
 LABEL maintainer='Ali Haydaroglu <ali.haydaroglu@outlook.com>'
 
 # Create conda environment with Python 3.8
