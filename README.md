@@ -6,9 +6,14 @@ conda activate s2p-lbm
 cd suite2p
 pip install -e .
 ```
+Note: it might take a while to solve the environment... Not sure how to fix it, I blame napari (?). Also, it's important that you don't forget the `-e` in the pip command, this allows the installation to be editable.
+
+## Updating
+Everytime you do `git pull`, you should also do `git submodule update` to pull the latest version of my suite2p branch, which is a submodule of this repo. 
+If you find this annoying, you can [make git do it automatically](https://stackoverflow.com/questions/4611512/is-there-a-way-to-make-git-pull-automatically-update-submodules)
 
 ## Usage
-Run a jupyter notebook in this envinronment, either by installing jupyter in the s2p-lbm environment, or running a jupyter server from a different conda env and selecting this environment for the kernel (https://medium.com/@nrk25693/how-to-add-your-conda-environment-to-your-jupyter-notebook-in-just-4-steps-abeab8b8d084).
+Run a jupyter notebook in this envinronment, either by installing jupyter in the s2p-lbm environment, or running a jupyter server from a different conda env and selecting this environment for the kernel ([see here])(https://medium.com/@nrk25693/how-to-add-your-conda-environment-to-your-jupyter-notebook-in-just-4-steps-abeab8b8d084).
 
 Then, run the Demo notebook.
 
