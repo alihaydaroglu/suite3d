@@ -105,7 +105,7 @@ def get_tif_paths(dir_path, regex_filter=None, sort=True):
         tif_paths = tif_paths_filtered
 
     # print(tif_paths)
-    if sort: tif_paths = list(n.sort(tif_paths))
+    if sort: tif_paths = sorted(tif_paths) #list(n.sort(tif_paths))
     return (tif_paths)
 
 def get_meso_rois(tif_path, max_roi_width_pix=145):
