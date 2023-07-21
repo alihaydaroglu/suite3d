@@ -1,0 +1,102 @@
+FROM --platform=linux/amd64 ubuntu:22.04 AS s2p-lbm
+# if you change the Ubuntu version, remember to update
+# the APT definitions for Xpra below so it reflects the
+# new codename (e.g. 20.04 was focal, 22.04 had jammy)
+
+# below env var required to install libglib2.0-0 non-interactively
+ENV TZ=America/Los_Angeles
+ARG DEBIAN_FRONTEND=noninteractive
+
+# install python resources + graphical libraries used by qt and vispy
+RUN apt-get update && \
+    apt-get install -qqy  \
+        build-essential \
+        python3.9 \
+        python3-pip \
+        git \
+        mesa-utils \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+        libfontconfig1 \
+        libxrender1 \
+        libdbus-1-3 \
+        libxkbcommon-x11-0 \
+        libxi6 \
+        libxcb-icccm4 \
+        libxcb-image0 \
+        libxcb-keysyms1 \
+        libxcb-randr0 \
+        libxcb-render-util0 \
+        libxcb-xinerama0 \
+        libxcb-xinput0 \
+        libxcb-xfixes0 \
+        libxcb-shape0 \
+        && apt-get clean
+
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+ENV PATH /opt/conda/bin:$PATH
+
+RUN apt-get update --fix-missing && \
+    apt-get install -y wget bzip2 ca-certificates curl git && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-4.5.11-Linux-x86_64.sh -O ~/miniconda.sh && \
+    /bin/bash ~/miniconda.sh -b -p /opt/conda && \
+    rm ~/miniconda.sh && \
+    /opt/conda/bin/conda clean -tipsy && \
+    ln -s /opt/conda/etc/profile.d/conda.sh /etc/profile.d/conda.sh && \
+    echo ". /opt/conda/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate base" >> ~/.bashrc
+
+ENV TINI_VERSION v0.16.1
+ADD https://github.com/krallin/tini/releases/download/${TINI_VERSION}/tini /usr/bin/tini
+RUN chmod +x /usr/bin/tini
+
+
+# Create conda environment with Python 3.8
+RUN conda create --name s2p-lbm python=3.8
+
+# Activate the Conda Environment
+SHELL ["conda", "run", "-n", "s2p-lbm", "/bin/bash", "-c"]
+
+RUN conda install -c conda-forge git pip mkl tbb numpy numba napari matplotlib scikit-learn mrcfile mkl_fft dask-image
+RUN pip install scipy>=1.4.0 torch>=1.7.1 natsort rastermap>0.1.0 tifffile scanimage-tiff-reader>=1.4.1 importlib-metadata paramiko pynwb sbxreader imreg-dft-nw
+
+
+# Install Xpra and dependencies
+RUN apt-get install -y wget gnupg2 apt-transport-https && \
+    wget -O - https://xpra.org/gpg.asc | apt-key add - && \
+    echo "deb https://xpra.org/ jammy main" > /etc/apt/sources.list.d/xpra.list
+
+RUN apt-get update && \
+    apt-get install -yqq \
+        xpra \
+        xvfb \
+        xterm \
+        sshfs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV DISPLAY=:100
+ENV XPRA_PORT=9876
+ENV XPRA_START="python3 -m napari"
+ENV XPRA_EXIT_WITH_CLIENT="yes"
+ENV XPRA_XVFB_SCREEN="1920x1080x24+32"
+EXPOSE 9876
+
+CMD echo "Launching napari on Xpra. Connect via http://localhost:$XPRA_PORT"; \
+    xpra start \
+    --bind-tcp=0.0.0.0:$XPRA_PORT \
+    --html=on \
+    --start="$XPRA_START" \
+    --exit-with-client="$XPRA_EXIT_WITH_CLIENT" \
+    --daemon=no \
+    --xvfb="/usr/bin/Xvfb +extension Composite -screen 0 $XPRA_XVFB_SCREEN -nolisten tcp -noreset" \
+    --pulseaudio=no \
+    --notifications=no \
+    --bell=no \
+    $DISPLAY
+
+ENTRYPOINT []
