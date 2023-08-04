@@ -150,6 +150,10 @@ def run_init_pass(job):
         job.log("No crosstalk estimation or subtraction")
         cross_coeff = None
 
+    job.log("Estimating fusing shifts")
+    __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True)
+    fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
+
     job.log("Building ops file")
     # return
     reg_ops = utils.build_ops('', {}, {'smooth_sigma' : job.params['smooth_sigma'],
@@ -174,6 +178,8 @@ def run_init_pass(job):
         'refs_and_masks' : all_refs_masks,
         'all_ops' : all_ops,
         'min_pix_vals' : min_pix_vals,
+        'fuse_shifts' : fuse_shifts,
+        'fuse_ccs' : fuse_ccs,
     }
     summary_path = os.path.join(job.dirs['summary'], 'summary.npy')
     job.log("Saving summary to %s" % summary_path)
@@ -194,3 +200,4 @@ def run_init_pass(job):
 
 
     job.log("Initial pass complete. See %s for details" % job.dirs['summary'])
+

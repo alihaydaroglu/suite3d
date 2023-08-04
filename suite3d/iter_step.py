@@ -496,6 +496,11 @@ def subtract_crosstalk_worker(shmem_params, coeff, deep_plane_idx, shallow_plane
     
     
 
+def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
+    min_pix_vals = summary['min_pix_vals']
+    crosstalk_coeff = summary['crosstalk_coeff']
+    refs_and_masks = summary['refs_and_masks']
+    all_ops = summary['all_ops']
 
 def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
                     start_batch_idx = 0):

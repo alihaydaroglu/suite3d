@@ -142,6 +142,10 @@ class Job:
             f3,ax = plt.subplots(figsize=(im.shape[0] // 200, im.shape[1] // 200), dpi=150);
             ax.imshow(im); ax.set_axis_off()
 
+        
+        if 'fuse_shifts' in summary.keys() and 'fuse_ccs' in summary.keys():
+            utils.plot_fuse_shifts(summary['fuse_shifts'], summary['fuse_ccs'])
+
                 
 
     def load_summary(self):

@@ -24,7 +24,8 @@ def log_gpu_memory(mempool=None):
              % (n_blocks, used_pool_gb, total_pool_gb)
     return string
 
-def nonrigid_2d_reg_gpu(mov_gpu, refs_nr_f, yblocks, xblocks, snr_thresh, smooth_mat, 
+def nonrigid_2d_reg_gpu(mov_gpu, mult_mask, add_mask, refs_nr_f, yblocks, xblocks, snr_thresh, smooth_mat, 
+                        rmins=None, rmaxs=None,
                         max_shift=10, npad=3, n_smooth_iters=2, subpixel=5,
                         n_gpu_threads_per_block=512, log_cb = default_log):
     nr = max_shift + npad
@@ -38,13 +39,26 @@ def nonrigid_2d_reg_gpu(mov_gpu, refs_nr_f, yblocks, xblocks, snr_thresh, smooth
     refs_nr_f = cp.asarray(refs_nr_f, cp.complex64)
     smooth_mat = cp.asarray(smooth_mat, cp.float32)
     mov_blocks = cp.zeros((nt,nz,nb,nby,nbx), cp.complex64)
+    mult_mask = cp.asarray(mult_mask)
+    add_mask = cp.asarray(add_mask)
 
     load_t = time.time()
     log_cb("Allocated GPU array for non-rigid reg in %.2f sec" % ((load_t-start_t),), 3)
+    log_cb("Blocked movie is %2.2fGB" % (mov_blocks.nbytes/1024**3), 4)
     log_cb(log_gpu_memory(mempool),4)
-    
+    # print(mov_gpu.std())
+    if rmins is not None and rmaxs is not None:
+        clip_t = time.time()
+        for zidx in range(nz):
+            mov_gpu[:,zidx] = clip_and_mask_mov(mov_gpu[:,zidx], rmins[zidx], rmaxs[zidx])
+        log_cb("Clipped movie in %.2f sec" % (time.time() - clip_t))
+    # print(mov_gpu.std())
+
     block_t = time.time()
     mov_blocks[:] = block_mov(mov_gpu, mov_blocks, yblocks, xblocks)
+    mov_blocks *= mult_mask
+    mov_blocks += add_mask
+    
     log_cb("Split movie into blocks in %.2f sec" % (time.time() - block_t))
 
     fft_t = time.time()
@@ -79,8 +93,8 @@ def get_subpixel_shifts(pc, max_shift=10, npad=3, subpixel=5, n_thread_per_block
 
     # print(ymaxs.std())
     # print(ymaxs_sub.std())
-    ymaxs = ymaxs.astype(cp.float32) + (ymaxs_sub - mid)/subpixel
-    xmaxs = xmaxs.astype(cp.float32) + (xmaxs_sub - mid)/subpixel
+    ymaxs = ymaxs.astype(cp.float32) + (ymaxs_sub.astype(cp.float32) - mid)/subpixel
+    xmaxs = xmaxs.astype(cp.float32) + (xmaxs_sub.astype(cp.float32) - mid)/subpixel
 
     return ymaxs, xmaxs
 
@@ -95,7 +109,7 @@ def block_mov(mov_gpu, mov_blocks, yblocks, xblocks):
 
 def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
                     rmins, rmaxs, crosstalk_coeff = None, shift=True, 
-                    log_cb=default_log):
+                    min_pix_vals = None, log_cb=default_log):
     
     nz, nt, ny, nx = mov_cpu.shape
     start_t = time.time()
@@ -104,22 +118,27 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     mult_mask_gpu = cp.asarray(mult_mask)
     add_mask_gpu = cp.asarray(add_mask)
     refs_f_gpu = cp.asarray(refs_f)
-    ymaxs = cp.zeros((nz, nt))
-    xmaxs = cp.zeros((nz, nt))
+    ymaxs = cp.zeros((nz, nt), dtype=cp.float32)
+    xmaxs = cp.zeros((nz, nt), dtype=cp.float32)
     ncc = max_reg_xy * 2 + 1
     phase_corr = cp.zeros((nt, ncc, ncc))
 
     load_t = time.time()
     log_cb("Loaded mov and masks to GPU for rigid reg in %.2f sec" % ((load_t-start_t),), 3)
 
-    if shift:
-        log_cb("Allocating memory for shifted movie", 3)
-        mov_shifted = cp.zeros((nt,nz,ny,nx), dtype=cp.float32)
-        mov_shifted[:] = mov_gpu.real.swapaxes(0,1)
+    if min_pix_vals is not None:
+        log_cb("Subtracting min pix vals to enforce positivity", 3)
+        min_pix_vals = cp.asarray(min_pix_vals, dtype=mov_gpu.dtype)
+        mov_gpu[:] -= min_pix_vals[:nz, cp.newaxis, cp.newaxis, cp.newaxis]
+
     if crosstalk_coeff is not None: 
         log_cb("Subtracting crosstalk", 3)
         mov_gpu = crosstalk_subtract(mov_gpu, crosstalk_coeff)
     
+    if shift:
+        log_cb("Allocating memory for shifted movie", 3)
+        mov_shifted = cp.zeros((nt,nz,ny,nx), dtype=cp.float32)
+        mov_shifted[:] = mov_gpu.real.swapaxes(0,1)
     log_cb(log_gpu_memory(mempool), 4)
     reg_t = 0; shift_t = 0;
     for zidx in range(nz):

@@ -371,3 +371,43 @@ def npy_to_dask(files, name='', axis=1):
     arr = darr.Array(dsk, name, chunks, dtype)
 
     return arr
+
+
+def get_fusing_shifts(raw_img, borders, n_strip = 60, x0 = 0, plot=True):
+    borders = n.sort(borders)[1:]
+    n_border = len(borders)
+    nz, ny, nx = raw_img.shape
+
+    best_shifts = n.zeros((nz, n_border))
+    cc_maxs = n.zeros((nz, n_border))
+    for zidx in range(nz):
+        for border_idx in range(n_border):
+            xx = borders[border_idx]
+            lstrip = raw_img[zidx, :, xx - n_strip : xx]
+            rstrip = raw_img[zidx, :, xx : xx + n_strip]
+            rstrip_norm = rstrip / n.linalg.norm(rstrip, axis=0)
+            l0 = lstrip[:,n_strip-1-x0]
+            l0_norm = l0 / n.linalg.norm(l0)
+            cc_full = (l0_norm[:,n.newaxis] *  rstrip_norm)
+            cc = cc_full.sum(axis=0)
+            best_shifts[zidx, border_idx] = cc.argmax()
+            cc_maxs[zidx, border_idx] = cc.max()
+    if plot:
+        plot_fuse_shifts(best_shifts, cc_maxs)
+    return best_shifts, cc_maxs
+
+def plot_fuse_shifts(best_shifts, cc_maxs):
+    f,axs = plt.subplots(1,2, figsize=(10,4))
+
+    ls = axs[0].plot(cc_maxs, color='k', alpha=0.2)
+    lx = axs[0].plot(cc_maxs.mean(axis=1), linewidth=3, color='k', label='mean')
+    axs[0].legend(ls[:1] + lx, ['individual strips', 'mean'])
+    axs[0].set_xlabel("Plane #")
+    axs[0].set_ylabel("CC between matching columns")
+
+    ls = axs[1].plot(best_shifts, color='k', alpha=0.2)
+    lx = axs[1].plot(best_shifts.mean(axis=1), linewidth=3, color='k', label='mean')
+    axs[1].legend(ls[:1] + lx, ['individual strips', 'mean'])
+    axs[1].set_xlabel("Plane #")
+    axs[1].set_ylabel("# pix between strips")
+    return f
