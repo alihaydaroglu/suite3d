@@ -21,7 +21,7 @@ from suite2p.extraction import dcnv
 from . import init_pass
 from . import utils 
 from . import lbmio
-from .iter_step import register_dataset, fuse_and_save_reg_file, calculate_corrmap, calculate_corrmap_from_svd
+from .iter_step import register_dataset, fuse_and_save_reg_file, calculate_corrmap, calculate_corrmap_from_svd, register_dataset_gpu
 from . import extension as ext
 from .default_params import get_default_params
 from . import svd_utils as svu
@@ -278,6 +278,16 @@ class Job:
             tifs = self.tifs
         register_dataset(tifs, params, self.dirs, summary, self.log, start_batch_idx = start_batch_idx)
 
+
+    def register_gpu(self, tifs=None):
+        params = self.params
+        summary = self.load_summary()
+        save_dir = self.make_new_dir('registered_fused_data')
+        if tifs is None:
+            tifs = self.tifs
+        register_dataset_gpu(tifs, params, self.dirs, summary, self.log)
+        
+        
 
 
 
@@ -661,18 +671,30 @@ class Job:
             fused_files = n.concatenate(fused_files, axis=1)
         return fused_files
 
-    def svd_decompose_movie(self, svd_dir_tag, run_svd=True, end_batch=None, mov=None):
+    def svd_decompose_movie(self, svd_dir_tag, run_svd=True, end_batch=None, mov=None,
+                            mov_shape_tfirst=False):
         svd_dir = self.dirs[svd_dir_tag]
         self.save_params(copy_dir=svd_dir_tag)
+
+
         if mov is None:
-            mov = self.get_registered_movie('registered_fused_data','fused')
+            if not mov_shape_tfirst: 
+                mov = self.get_registered_movie('registered_fused_data','fused')
+            else:
+                mov = self.get_registered_movie('registered_fused_data', 'fused', axis=0)
         if self.params.get('svd_crop', None) is not None:
             crop = self.params['svd_crop']
-            mov = mov[crop[0][0]:crop[0][1], :,crop[1][0]:crop[1][1], crop[2][0]:crop[2][1]]
+            if not mov_shape_tfirst:
+                mov = mov[crop[0][0]:crop[0][1], :,crop[1][0]:crop[1][1], crop[2][0]:crop[2][1]]
+            else:
+                mov = mov[:, crop[0][0]:crop[0][1], crop[1][0]:crop[1][1], crop[2][0]:crop[2][1]]
             self.log("Cropped to size %s" % str(mov.shape))
         if self.params.get('svd_time_crop', None) is not None:
             svd_time_crop = self.params.get('svd_time_crop', None)
-            mov = mov[:,svd_time_crop[0]:svd_time_crop[1]]
+            if not mov_shape_tfirst: 
+                mov = mov[:,svd_time_crop[0]:svd_time_crop[1]]
+            else:
+                mov = mov[svd_time_crop[0]:svd_time_crop[1]]
             self.log("Time-cropped to size %s" % str(mov.shape))
         
         if self.params.get('svd_pix_chunk') is None:
@@ -695,7 +717,7 @@ class Job:
                                t_save_chunk = self.params['svd_save_time_chunk'],
                                comp_chunk = self.params['svd_save_comp_chunk'],
                                n_svd_blocks_per_batch = self.params['n_svd_blocks_per_batch'],
-                               log_cb = self.log, end_batch=end_batch,
+                               log_cb = self.log, end_batch=end_batch, flip_shape=mov_shape_tfirst,
                                svd_dir = svd_dir, run_svd=run_svd)
         return svd_info
 

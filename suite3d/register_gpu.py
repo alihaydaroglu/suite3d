@@ -107,14 +107,22 @@ def block_mov(mov_gpu, mov_blocks, yblocks, xblocks):
         mov_blocks[:,:,bidx] = mov_gpu[:,:,by0:by1,bx0:bx1]
     return mov_blocks
 
+
+def register_gpu():
+    pass
+
+
 def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
                     rmins, rmaxs, crosstalk_coeff = None, shift=True, 
-                    min_pix_vals = None, log_cb=default_log):
+                    min_pix_vals = None, fuse_and_pad=False, ypad=None, 
+                    xpad=None, fuse_shift=None, new_xs=None, old_xs=None,
+                    log_cb=default_log):
     
     nz, nt, ny, nx = mov_cpu.shape
     start_t = time.time()
     mempool = cp.get_default_memory_pool()
-    mov_gpu = cp.asarray(mov_cpu, dtype=cp.complex64)
+    if not fuse_and_pad: mov_gpu = cp.asarray(mov_cpu, dtype=cp.complex64)
+    if fuse_and_pad: mov_gpu = cp.asarray(mov_cpu, dtype=cp.float32)
     mult_mask_gpu = cp.asarray(mult_mask)
     add_mask_gpu = cp.asarray(add_mask)
     refs_f_gpu = cp.asarray(refs_f)
@@ -135,6 +143,14 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         log_cb("Subtracting crosstalk", 3)
         mov_gpu = crosstalk_subtract(mov_gpu, crosstalk_coeff)
     
+    if fuse_and_pad:
+        log_cb("Fusing and padding movie",3)
+        mov_gpu = fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs)
+        nz,nt,ny,nx = mov_gpu.shape
+        log_cb("Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),3)
+        mempool.free_all_blocks()
+        log_cb(log_gpu_memory(mempool), 4)
+
     if shift:
         log_cb("Allocating memory for shifted movie", 3)
         mov_shifted = cp.zeros((nt,nz,ny,nx), dtype=cp.float32)
@@ -143,7 +159,7 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     reg_t = 0; shift_t = 0;
     for zidx in range(nz):
         reg_tic = time.time()
-        log_cb("Registering plane %d" % (zidx,), 4)
+        # log_cb("Registering plane %d" % (zidx,), 4)
         mov_gpu[zidx] = clip_and_mask_mov(mov_gpu[zidx], rmins[zidx], rmaxs[zidx],
                           mult_mask_gpu[zidx], add_mask_gpu[zidx])
         mov_gpu[zidx] = convolve_2d_gpu(mov_gpu[zidx], refs_f_gpu[zidx])
@@ -153,7 +169,7 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         
         if shift:
             shift_tic = time.time()
-            log_cb("Shifting plane %d" % (zidx,), 4)
+            # log_cb("Shifting plane %d" % (zidx,), 4)
             xmax_z, ymax_z = xmaxs[zidx].get(), ymaxs[zidx].get()
             for frame_idx in range(nt):
                 mov_shifted[frame_idx, zidx] = shift_frame(mov_shifted[frame_idx, zidx],
@@ -164,6 +180,8 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         log_cb("Shifted batch in %.2f sec" % shift_t, 3)
     log_cb(log_gpu_memory(mempool), 4)
     mempool.free_all_blocks()
+    log_cb("Freeing all blocks", 3)
+    log_cb(log_gpu_memory(mempool), 4)
     if shift:
         return mov_shifted, ymaxs, xmaxs
     return ymaxs, xmaxs
@@ -192,6 +210,8 @@ def rigid_2d_reg_cpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
             for frame_idx in range(nt):
                 mov_shifted[frame_idx, zidx] = shift_frame(mov_shifted[frame_idx, zidx],
                                 dy=ymaxs[zidx, frame_idx], dx=xmaxs[zidx, frame_idx], cp=n)
+                
+    
     if shift:
         return mov_shifted, ymaxs, xmaxs
     return ymaxs, xmaxs
@@ -258,7 +278,8 @@ def convolve_1d_gpu(mov, ref_f, phasenorm=False):
 
 def convolve_2d_gpu(mov, ref_f, axes=(1,2)):
     mov[:] = cufft.fft2(mov, axes=axes, overwrite_x=True)
-    mov /= cp.abs(mov) + cp.complex64(1e-5)
+    for i in range(mov.shape[0]): # loop to reduce memory usage
+        mov[i] /= cp.abs(mov[i]) + cp.complex64(1e-5)
     mov *= ref_f
     mov[:] = cufft.ifft2(mov, axes=axes, overwrite_x=True)
     return mov
@@ -279,6 +300,21 @@ def crosstalk_subtract(mov, crosstalk_coeff):
         mov[i + 15] -= crosstalk_coeff * mov[i]
     return mov
 
+
+def fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs):
+    nz, nt, ny, nx = mov_gpu.shape
+    n_stitches = len(new_xs) - 1
+    n_xpix_lost_fusing = n_stitches * fuse_shift
+    nyn = ny + ypad.sum()
+    nxn = nx + xpad.sum() - n_xpix_lost_fusing
+
+    mov_pad = cp.zeros((nz, nt, nyn, nxn), dtype=cp.complex64)
+    for strip_idx in range(len(new_xs)):
+        nx0,nx1 = new_xs[strip_idx]
+        ox0,ox1 = old_xs[strip_idx]
+        mov_pad[:,:,:ny, nx0:nx1] = mov_gpu[:,:,:,ox0:ox1]
+
+    return mov_pad
 
 def shift_frame(frame, dy, dx, cp = cp):
 

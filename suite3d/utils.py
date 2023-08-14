@@ -17,6 +17,43 @@ from skimage.measure import moments
 from suite2p.registration.nonrigid import make_blocks
 import pickle
 
+def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
+    nz, nt, nyo, nxo = mov.shape
+    n_stitches = len(xs) - 1
+    n_xpix_lost_for_fusing = n_stitches * fuse_shift
+
+    plane_shifts = n.round(plane_shifts).astype(int)
+
+    xrange = plane_shifts[:,0].min(), plane_shifts[:,0].max()
+    yrange = plane_shifts[:,1].min(), plane_shifts[:,1].max()
+
+    ypad = n.ceil(n.abs(yrange)).astype(int)[::-1]
+    xpad = n.ceil(n.abs(xrange)).astype(int)[::-1]
+    nyn = nyo + ypad.sum()
+    nxn = nxo + xpad.sum() - n_xpix_lost_for_fusing
+
+    mov_pad = n.zeros((nz,nt,nyn,nxn), n.float32)
+
+    lshift = fuse_shift // 2
+    rshift = fuse_shift - lshift
+    xn0 = 0
+    og_xs = []
+    new_xs = []
+    for i in range(n_stitches+1):
+        x0 = xs[i]
+        if i > 0: x0 += lshift
+        if i == n_stitches: 
+            x1 = nxo
+        else:
+            x1 = xs[i+1] - rshift
+        dx = x1 - x0
+        print(x0,x1, xn0, xn0+dx, mov_pad.shape, mov.shape)
+        mov_pad[:,:,:nyo, xn0:xn0+dx] = mov[:,:,:,x0:x1]
+        new_xs.append((xn0, xn0+dx))
+        og_xs.append((x0,x1))
+        xn0 += dx
+    return mov_pad, xpad, ypad, new_xs, og_xs
+
 def make_blocks_3d(nz, ny, nx, block_shape, z_overlap=True):
     ybls, xbls,(n_y_bls, n_x_bls), __, __ = make_blocks(ny, nx, block_size=block_shape[1:])
     z_bl_starts = n.arange(0, nz - int(z_overlap), block_shape[0] - int(z_overlap))
@@ -33,8 +70,15 @@ def make_blocks_3d(nz, ny, nx, block_shape, z_overlap=True):
 def get_shifts_3d(im3d, n_procs = 12, filter_pcorr=0):
     sims = []
     i = 0
-    p = Pool(n_procs)
-    sims = p.starmap(get_shifts_3d_worker, [(idx, im3d, filter_pcorr) for idx in range(im3d.shape[0]-1)])
+    print(n_procs)
+    if n_procs > 1:
+        p = Pool(n_procs)
+        sims = p.starmap(get_shifts_3d_worker, [(idx, im3d, filter_pcorr) for idx in range(im3d.shape[0]-1)])
+    else:
+        sims = []
+        for idx in range(im3d.shape[0]-1):
+            # print(idx)
+            sims.append(get_shifts_3d_worker(idx, im3d, filter_pcorr))
     tvecs = n.array([sim['tvec'] for sim in sims])
     tvecs_cum = n.cumsum(tvecs,axis=0)
     return tvecs_cum
@@ -407,7 +451,8 @@ def plot_fuse_shifts(best_shifts, cc_maxs):
 
     ls = axs[1].plot(best_shifts, color='k', alpha=0.2)
     lx = axs[1].plot(best_shifts.mean(axis=1), linewidth=3, color='k', label='mean')
-    axs[1].legend(ls[:1] + lx, ['individual strips', 'mean'])
+    lm = axs[1].axhline(int(n.round(best_shifts.mean())), linewidth=2, alpha=0.5, color='k', linestyle='--')
+    axs[1].legend(ls[:1] + lx + [lm], ['individual strips', 'mean per plane', 'mean'])
     axs[1].set_xlabel("Plane #")
     axs[1].set_ylabel("# pix between strips")
     return f

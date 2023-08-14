@@ -37,6 +37,8 @@ params = {
     'init_n_frames' : None,
     # make sure the mean image is all positive (add the offsets)
     'enforce_positivity' : True,
+    # fix the plane shifts for top few planes that might be outside the brain
+    'fix_shallow_plane_shift_estimates' : True,
 
     # Crosstalk subtraction from pairs of planes 15 apart
 
@@ -57,6 +59,17 @@ params = {
 
     ### Registration ###
 
+    # number of pixels to skip between strips - None will auto estimate
+    'fuse_shift_override' : None, 
+    # maximum rigid shift in pixels (includes plane-to-plane LBM shift, so make sure it's larger than that!)
+    'max_rigid_shift_pix' : 100,
+    # number of frames per batch in gpu registration
+    'gpu_reg_batchsize' : 10,
+    'max_shift_nr' : 3,
+    'nr_npad' :  3,
+    'nr_subpixel' : 10,
+    'nr_smooth_iters' : 2,
+
     # parameters from suite2p
     'nonrigid' : True,
     'smooth_sigma' : 1.15,
@@ -71,7 +84,7 @@ params = {
     # Larger batches require more memory, doesn't speed things up, so just leave it
     'tif_batch_size' : 1,
 
-    ### Fusing ###
+    ### Fusing (ONLY FOR STANDALONE FUSING - USE REGISTRATION PARAMS FOR FUSING DURING REGISTRATION!) ###
     # number of pixels to skip when stitching two strips together
     'n_skip' : 13,
     'fuse_crop' : None,

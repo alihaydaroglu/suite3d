@@ -278,7 +278,7 @@ def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_star
     prep_tic = time.time()
 
     if get_roi_start_pix:
-        return roi_start_pix_y, roi_start_pix_x
+        return n.sort(roi_start_pix_y), n.sort(roi_start_pix_x)
 
     if mean_img:
         n_t = 1

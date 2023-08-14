@@ -7,16 +7,23 @@ from scipy.ndimage import uniform_filter
 from dask import array as darr
 import time
 from suite2p.registration import register
+from suite2p.registration import nonrigid
 # from . import deepinterp as dp
 
 from . import detection3d as det3d
 from . import svd_utils as svu
 from . import lbmio
 from . import utils
+from . import register_gpu as reg_gpu
 
 import traceback
 import gc
 import threading
+
+try:
+    import cupy as cp
+except:
+    print("CUPY not installed! ")
 
 def default_log(string, *args, **kwargs): 
     print(string)
@@ -497,10 +504,162 @@ def subtract_crosstalk_worker(shmem_params, coeff, deep_plane_idx, shallow_plane
     
 
 def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
-    min_pix_vals = summary['min_pix_vals']
-    crosstalk_coeff = summary['crosstalk_coeff']
-    refs_and_masks = summary['refs_and_masks']
-    all_ops = summary['all_ops']
+    refs_and_masks     = summary['refs_and_masks']
+    ref_img_3d         = summary['ref_img_3d']
+    min_pix_vals       = summary['min_pix_vals']
+    crosstalk_coeff    = summary['crosstalk_coeff']
+    all_ops            = summary['all_ops']
+    xpad               = summary['xpad']
+    ypad               = summary['ypad']
+    fuse_shift         = summary['fuse_shift']
+    new_xs             = summary['new_xs']
+    old_xs             = summary['og_xs']
+    mask_mul, mask_offset, ref_2ds = n.stack([r[:3] for r in refs_and_masks],axis=1)
+    mask_mul_nr, mask_offset_nr, ref_nr = n.stack([r[3:] for r in refs_and_masks],axis=1)
+    rmins = n.array([op['rmin'] for op in all_ops])
+    rmaxs = n.array([op['rmax'] for op in all_ops])
+    snr_thresh = all_ops[0]['snr_thresh']
+    NRsm = all_ops[0]['NRsm'].astype(n.float32)
+    yblocks, xblocks = all_ops[0]['yblock'], all_ops[0]['xblock']
+    nblocks = all_ops[0]['nblocks']
+    max_shift_nr = 5
+
+    job_iter_dir       = dirs['iters']
+    job_reg_data_dir   = dirs['registered_fused_data']
+
+    n_tifs_to_analyze  = params.get('total_tifs_to_analyze', len(tifs))
+    tif_batch_size     = params['tif_batch_size']
+    planes             = params['planes']
+    notch_filt         = params['notch_filt']
+    enforce_positivity = params.get('enforce_positivity', False)
+    mov_dtype          = params['dtype']
+    split_tif_size     = params.get('split_tif_size', None)
+    n_ch_tif           = params.get('n_ch_tif', 30)
+    max_rigid_shift    = params.get('max_rigid_shift_pix', 75)
+    gpu_reg_batchsize  = params.get('gpu_reg_batchsize', 10)
+    max_shift_nr       = params.get('max_shift_nr', 3)
+    nr_npad            = params.get('nr_npad', 3)
+    nr_subpixel        = params.get('nr_subpixel', 10)
+    nr_smooth_iters    = params.get('nr_smooth_iters', 2)
+
+    convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True)
+
+    batches = init_batches(tifs, tif_batch_size, n_tifs_to_analyze)
+    n_batches = len(batches)
+    __, offset_paths = init_batch_files(job_iter_dir, job_reg_data_dir, n_batches, makedirs=False, filename='offsets')
+    reg_data_paths = []
+
+    log_cb("Will analyze %d tifs in %d batches" % (len(n.concatenate(batches)), len(batches)),0)
+    if enforce_positivity: log_cb("Enforcing positivity", 1)
+
+    loaded_movs = [n.zeros(1)]
+    def io_thread_loader(tifs, batch_idx):
+        tic_thread = time.time()
+        log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
+        loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,
+                                                convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
+        loaded_movs[0] = loaded_mov
+        log_cb("[Thread] Thread for batch %d ready to join after %2.2f sec \n" % (batch_idx, time.time()-tic_thread), 5)
+        # log_cb("loaded mov: ")
+        # log_cb(str(loaded_mov.shape))
+    log_cb("Launching IO thread")
+    io_thread = threading.Thread(target=io_thread_loader, args=(batches[0], 0))
+    io_thread.start()
+
+    file_idx = 0
+    for batch_idx in range(n_batches):
+        log_cb("Memory at batch %d." % batch_idx, level=3, log_mem_usage=True)
+        offset_path = offset_paths[batch_idx]
+        log_cb("Loading Batch %d of %d" % (batch_idx, n_batches-1), 0)
+        io_thread.join()
+        log_cb("Batch %d IO thread joined" % (batch_idx))
+        log_cb('Memory after IO thread join', level=3,log_mem_usage=True )
+        
+        
+        mov_cpu = loaded_movs[0].copy()
+
+        if batch_idx + 1 < n_batches:
+            log_cb("Launching IO thread for next batch")
+            io_thread = threading.Thread(target=io_thread_loader, args=(batches[batch_idx+1], batch_idx+1))
+            io_thread.start()
+            log_cb("After IO thread launch:", level=3,log_mem_usage=True )
+        nt = mov_cpu.shape[1]
+        ymaxs_rr = []; xmaxs_rr = []; mov_shifted = []
+        ymaxs_nr = []; xmaxs_nr = [];
+        # print(mov_cpu.shape)
+        log_cb("Loaded batch of size %s" % ((str(mov_cpu.shape))),2)
+        for gpu_batch_idx in range(int(n.ceil(nt / gpu_reg_batchsize))):
+            idx0 = gpu_reg_batchsize * gpu_batch_idx
+            idx1 = min(idx0 + gpu_reg_batchsize, nt)
+            log_cb("Sending idx %d-%d to GPU for rigid registration" % (idx0, idx1), 2)
+            tic_rigid = time.time()
+            mov_shifted_gpu, ymaxs_rr_gpu, xmaxs_rr_gpu = reg_gpu.rigid_2d_reg_gpu(mov_cpu[:,idx0:idx1], 
+                                    mask_mul, mask_offset, 
+                                    ref_2ds, max_reg_xy=max_rigid_shift,  min_pix_vals=min_pix_vals,
+                                    rmins=rmins, rmaxs=rmaxs, crosstalk_coeff=crosstalk_coeff, shift=True,
+                                    xpad=xpad, ypad=ypad, fuse_shift=fuse_shift, new_xs=new_xs, old_xs=old_xs,
+                                    fuse_and_pad = True, log_cb = log_cb)
+            log_cb("Completed rigid registration in %.2f sec" % (time.time() - tic_rigid), 2)
+            tic_nonrigid = time.time()
+            ymaxs_nr_gpu, xmaxs_nr_gpu, snrs = reg_gpu.nonrigid_2d_reg_gpu(mov_shifted_gpu, mask_mul_nr[:,:,0], mask_offset_nr[:,:,0],
+                                      ref_nr[:,:,0], yblocks, xblocks, snr_thresh, NRsm, rmins, rmaxs,
+                                      max_shift=max_shift_nr, npad=nr_npad, n_smooth_iters=nr_smooth_iters, subpixel=nr_subpixel,
+                                      log_cb=log_cb)
+            log_cb("Computed non-rigid shifts in %.2f sec" % (time.time() - tic_rigid), 2)
+
+            tic_get = time.time()
+            ymaxs_nr_cpu = ymaxs_nr_gpu.get()
+            xmaxs_nr_cpu = xmaxs_nr_gpu.get()
+            ymaxs_rr_cpu = ymaxs_rr_gpu.get()
+            xmaxs_rr_cpu = xmaxs_rr_gpu.get()
+            mov_shifted_cpu = mov_shifted_gpu.get()
+            # print("SHAPE")
+            # print(mov_shifted_cpu.shape)
+            del mov_shifted_gpu
+            log_cb("Transferred to CPU in %.2f sec" % (time.time() - tic_get), 2)
+
+            shift_tic = time.time()
+            nz = mov_shifted_cpu.shape[1]
+            for zidx in range(nz):
+                # print("SHIFITNG: %d" % zidx)
+                mov_shifted_cpu[:,zidx] = nonrigid.transform_data(mov_shifted_cpu[:,zidx], nblocks, 
+                                                                  xblock=xblocks, yblock=yblocks, ymax1=ymaxs_nr_cpu[:,zidx],
+                                                                  xmax1=xmaxs_nr_cpu[:,zidx])
+            log_cb("Non rigid transformed (on CPU) in %.2f sec" % (time.time() - shift_tic))
+
+            mov_shifted.append(mov_shifted_cpu)
+            ymaxs_rr.append(ymaxs_rr_cpu); xmaxs_rr.append(xmaxs_rr_cpu)
+            ymaxs_nr.append(ymaxs_nr_cpu); xmaxs_nr.append(xmaxs_nr_cpu)
+
+            mempool = cp.get_default_memory_pool()
+            mempool.free_all_blocks()
+        concat_t = time.time()
+        log_cb("Concatenating movie",2)
+        mov_shifted = n.concatenate(mov_shifted,axis=0)
+        # print("CONCAT")
+        # print(mov_shifted.shape)
+        log_cb("Concat in %.2f sec" % (time.time() - concat_t), 3)
+        all_offsets = {}
+        all_offsets['xmaxs_rr'] = n.concatenate(xmaxs_rr_cpu,axis=0)
+        all_offsets['ymaxs_rr'] = n.concatenate(ymaxs_rr_cpu,axis=0)
+        all_offsets['xmaxs_nr'] = n.concatenate(xmaxs_nr_cpu,axis=0)
+        all_offsets['ymaxs_nr'] = n.concatenate(ymaxs_nr_cpu,axis=0)
+
+        if split_tif_size is None:
+            split_tif_size = mov_shifted.shape[0]
+        for i in range(0, mov_shifted.shape[0], split_tif_size):
+            reg_data_path = os.path.join(job_reg_data_dir, 'fused_reg_data%04d.npy' % file_idx)
+            reg_data_paths.append(reg_data_path)
+            end_idx = min(mov_shifted.shape[0], i + split_tif_size)
+            log_cb("Saving fused, registered file of shape %s to %s" % (str( mov_shifted[i:end_idx].shape), reg_data_path), 2)
+            n.save(reg_data_path, mov_shifted[i:end_idx])
+            file_idx += 1
+        n.save(offset_path, all_offsets)
+    
+
+
+
+
 
 def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
                     start_batch_idx = 0):
@@ -538,14 +697,15 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
 
     loaded_movs = [0]
 
+
     def io_thread_loader(tifs, batch_idx):
-        log_cb("   [Thread] Loading batch %d \n" % batch_idx, 20)
+        log_cb("   [Thread] Loading batch %d \n" % batch_idx, 5)
         loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,
                                                 convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
-        log_cb("   [Thread] Loaded batch %d \n" % batch_idx, 20)
+        log_cb("   [Thread] Loaded batch %d \n" % batch_idx, 5)
         loaded_movs[0] = loaded_mov
         
-        log_cb("   [Thread] Thread for batch %d ready to join \n" % batch_idx, 20)
+        log_cb("   [Thread] Thread for batch %d ready to join \n" % batch_idx, 5)
     log_cb("Launching IO thread")
     io_thread = threading.Thread(target=io_thread_loader, args=(batches[start_batch_idx], start_batch_idx))
     io_thread.start()

@@ -24,7 +24,7 @@ def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method='even'
         sample_file_ids = n.linspace(0, len(init_file_pool), n_init_files + 2, dtype=int)[1:-1]
         sample_tifs = n.array(init_file_pool)[sample_file_ids]
     elif method == 'random':
-        n.random.seed(seed)
+        # n.random.seed(seed)
         sample_tifs = n.random.choice(init_file_pool, n_init_files, replace=False)
 
     return sample_tifs
@@ -142,8 +142,8 @@ def run_init_pass(job):
                 plane_idx = n.where(n.array(params['planes']) == plane)[0][0]
                 sub_plane_idx = n.where(n.array(params['planes']) == plane - 15)[0][0]
                 
-                job.log("    Subtracting plane %d from %d" % (plane-15, plane), 2)
-                job.log("        Corresponds to index %d from %d" % (sub_plane_idx, plane_idx))
+                job.log("Subtracting plane %d from %d" % (plane-15, plane), 3)
+                # job.log("        Corresponds to index %d from %d" % (sub_plane_idx, plane_idx))
                 init_mov[plane_idx] = init_mov[plane_idx] - init_mov[sub_plane_idx] * cross_coeff
         im3d = init_mov.mean(axis=1)
     else:
@@ -153,33 +153,59 @@ def run_init_pass(job):
     job.log("Estimating fusing shifts")
     __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True)
     fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
-
+    fuse_shift = int(n.round(fuse_shifts.mean()))
+    if job.params.get('fuse_shift_override', None) is not None:
+        fuse_shift = int(job.params['fuse_shift_override'])
+        job.log("Overriding", 2)
+    job.log("Using best fuse shift of %d" % fuse_shift)
     job.log("Building ops file")
     # return
-    reg_ops = utils.build_ops('', {}, {'smooth_sigma' : job.params['smooth_sigma'],
-                                        'maxregshift' : job.params['maxregshift'],
-                                        'Ly' : ny, 'Lx' : nx,
-                                        'nonrigid' : job.params['nonrigid']})
+
 
     summary_mov_path = os.path.join(job.dirs['summary'], 'init_mov.npy')
     n.save(summary_mov_path, init_mov)
     job.log("Saved init mov to %s" % summary_mov_path)
 
-    job.log("Aligning planes and calculating reference images")
-    tvecs, ref_img_3d, all_ops, all_refs_masks, ref_img_3d_unaligned = prep_registration(init_mov, reg_ops, job.log, filter_pcorr=params['reg_filter_pcorr'], force_plane_shifts = params.get('force_plane_shifts', None))
+    job.log("Aligning planes")
+    print(im3d.dtype)
+    tvecs = n.concatenate([[[0,0]], utils.get_shifts_3d(im3d.astype(int), filter_pcorr = params['reg_filter_pcorr'],
+                                                        n_procs = job.params['n_proc_corr'])])
+    
+    if params.get('fix_shallow_plane_shift_estimates', True):
+        peaks = n.abs(tvecs[10:15]).max(axis=0)
+        tvecs[20:][tvecs[20:] > peaks] = 0
+        job.log("Fixing plane alignment outliers", 2)
+    job.log("Fusing and padding init mov")
+    init_mov, xpad, ypad, new_xs, og_xs = utils.pad_and_fuse(init_mov, plane_shifts=tvecs, fuse_shift=fuse_shift, xs=xs)
+    img_pad = init_mov.mean(axis=1)
+    __, __, ny, nx = init_mov.shape
+
+    reg_ops = utils.build_ops('', {}, {'smooth_sigma' : job.params['smooth_sigma'],
+                                        'maxregshift' : job.params['maxregshift'],
+                                        'Ly' : ny, 'Lx' : nx,
+                                        'nonrigid' : job.params['nonrigid']})
+    tvecs, ref_img_3d, all_ops, all_refs_masks, ref_img_3d_unaligned = prep_registration(init_mov, reg_ops, job.log, force_plane_shifts=tvecs)
+    # ref_img_3d, ref_img_3d_unaligned, all_refs_masks, all_ops = None, None, None, None
 
     summary = {
-        'ref_img_3d' : ref_img_3d,
-        'ref_img_3d_unaligned' : ref_img_3d_unaligned,
-        'raw_img' : im3d_raw,
-        'img' : im3d,
+        'ref_img_3d' : ref_img_3d, # ctalk-sub and padded and plane-shifted
+        'ref_img_3d_unaligned' : ref_img_3d_unaligned, #ctalk-sub and padded
+        'raw_img' : im3d_raw, # right from the tiff file
+        'img' : im3d, # crosstalk-subtracted
+        'img_pad' : img_pad, #ctalk-sub and padded
         'crosstalk_coeff' : cross_coeff,
         'plane_shifts' : tvecs,
         'refs_and_masks' : all_refs_masks,
         'all_ops' : all_ops,
         'min_pix_vals' : min_pix_vals,
         'fuse_shifts' : fuse_shifts,
+        'fuse_shift' : fuse_shift,
         'fuse_ccs' : fuse_ccs,
+        'tiffile_xs' : xs,
+        'xpad': xpad,
+        'ypad' : ypad,
+        'new_xs' : new_xs,
+        'og_xs' : og_xs
     }
     summary_path = os.path.join(job.dirs['summary'], 'summary.npy')
     job.log("Saving summary to %s" % summary_path)
