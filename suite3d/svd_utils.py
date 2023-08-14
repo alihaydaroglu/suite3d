@@ -15,6 +15,10 @@ def block_and_svd(mov_reg, n_comp, block_shape= (1, 128, 128), block_overlaps=(0
                   t_chunk=4000, pix_chunk= None,t_save_chunk=100, comp_chunk=100, n_svd_blocks_per_batch = 4, svd_dir=None,
                   block_validity=None, log_cb=default_log, flip_shape=False, end_batch=None,
                   start_batch = 0, run_svd=True, other_info = {}):
+    
+    if mov_reg.shape[0] > 30:
+        log_cb("Not possible to have more than 30 planes -> inferring that shape must be flipped")
+        flip_shape = True
     if not flip_shape:
         nz, nt, ny, nx = mov_reg.shape
     elif flip_shape:
