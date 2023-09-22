@@ -104,15 +104,15 @@ def create_ui(outputs, cmap='Set3', lam_max = 0.3, scale=(15,4,4), iscell_label=
     return v, layers
 
 import datetime
-def add_callbacks_to_ui(v, layers, outputs, savedir, add_sliders = True, filters=None, add_curation=True):
-    spks = outputs['spks']; F = outputs.get('F', n.zeros_like(spks)); Fneu = outputs.get('Fneu', n.zeros_like(spks))
+def add_callbacks_to_ui(v, layers, outputs, savedir, add_sliders = True, filters=None, add_curation=True, overwrite=False):
+    spks = outputs.get('spks', n.zeros((len(outputs['stats']), 100))); F = outputs.get('F', n.zeros_like(spks)); Fneu = outputs.get('Fneu', n.zeros_like(spks))
 
     if add_curation:
-        iscell = outputs['iscell_extracted']
+        iscell = outputs.get('iscell_extracted', n.ones(len(outputs['stats'])))
         if len(iscell.shape) < 2:
             iscell = iscell[:, n.newaxis]
         iscell_savepath = os.path.join(savedir, 'iscell_curated.npy')
-        if os.path.exists(iscell_savepath):
+        if not overwrite and os.path.exists(iscell_savepath):
             string = datetime.datetime.now().strftime('%d-%m-%y_%H-%M-%S')
             iscell_curated = n.load(iscell_savepath)
             print("Found old curated iscell with %d of %d marked as cells" %
@@ -144,7 +144,7 @@ def add_callbacks_to_ui(v, layers, outputs, savedir, add_sliders = True, filters
     if add_sliders:
         iscell_slider_path = os.path.join(savedir, 'iscell_curated_slider.npy')
         n.save(iscell_slider_path, iscell_curated)
-        if os.path.exists(iscell_slider_path):
+        if not overwrite and os.path.exists(iscell_slider_path):
             string = datetime.datetime.now().strftime('%d-%m-%y_%H-%M-%S')
             iscell_curated_slider_old = n.load(iscell_slider_path)
             print("Found old curated + slider-ed iscell with %d of %d marked as cells" %
@@ -499,3 +499,32 @@ def mark_cell(cell_idx, mark_as, iscell=None, napari_cell_layer=None, napari_not
             napari_not_cell_layer.refresh()
     if iscell is not None:
         iscell[cell_idx] = int(mark_as)
+
+
+
+def fill_cells_vol(coords, fill_vals, shape=None, empty=n.nan, filt=None, squeeze=True):
+    expanded = False
+    if len(fill_vals.shape) == 1: 
+        fill_vals = fill_vals[n.newaxis]
+        expanded = True
+        # print(fill_vals.shape)
+    n_dims = fill_vals.shape[0]
+    vols = []
+    for idx in range(n_dims):
+        if shape is None:
+            shape = n.array([n.max(n.concatenate([c[i] for c in coords]) + 1) for i in  range(3)])
+        vol = n.zeros(shape) * empty
+        i = -1
+        for coord,fill_val in zip(coords, fill_vals[idx]):
+            i+=1
+            if filt is not None:
+                if not filt[i]: 
+                    continue
+            vol[coord[0],coord[1], coord[2]] = fill_val
+        vols.append(vol)
+
+        # print(n.nanmean(vol))
+    vols = n.array(vols)
+    if expanded and squeeze: 
+        vols = vols[0]
+    return vols

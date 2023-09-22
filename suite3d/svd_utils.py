@@ -165,6 +165,7 @@ def reconstruct_overlapping_movie(svd_info, t_indices, filt_size = None, block_c
     all_blocks_batch = all_blocks.compute()
     log_cb("Dask reconstruction complete", 3, log_mem_usage=True)
     # print("RECONSTRUCT - DASK COMPLETE at t %.2f" % (time.time()-tic))
+    # TODO this is slow! 
     for i in range(n_blocks):
         zz,yy,xx = block_limits[:,i]
         block = all_blocks_batch[i].reshape(
