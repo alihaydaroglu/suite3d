@@ -47,7 +47,7 @@ def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
         else:
             x1 = xs[i+1] - rshift
         dx = x1 - x0
-        print(x0,x1, xn0, xn0+dx, mov_pad.shape, mov.shape)
+        # print(x0,x1, xn0, xn0+dx, mov_pad.shape, mov.shape)
         mov_pad[:,:,:nyo, xn0:xn0+dx] = mov[:,:,:,x0:x1]
         new_xs.append((xn0, xn0+dx))
         og_xs.append((x0,x1))
@@ -171,9 +171,9 @@ def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,
         # print(i,idx, col_id, row_id)
         ax = axs[row_id][col_id]
         ax.set_aspect('equal')
-        ax.hist2d(X, Y, bins = bins, norm=colors.LogNorm());
         ax.plot(bins[0], m_opt * bins[0], alpha=0.5, linestyle='--')
         ax.plot(bins[0], m_first * bins[0], alpha=0.5, linestyle='--')
+        ax.hist2d(X, Y, bins = bins, norm=colors.LogNorm())
         axsins2 = inset_axes(ax, width="30%", height="40%", loc='upper right')
         axsins2.grid(False)
         axsins2.plot(ms, liks, label='Min: %.2f, 1st: %.2f' % (m_opt, m_first))
