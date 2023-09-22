@@ -1,16 +1,22 @@
-name: s2p-lbm
+name: suite3d-gpu
 channels:
-  - defaults
   - conda-forge
+  - defaults
 dependencies:
   - python>=3.8,<3.9
   - pip
   - mkl
   - tbb
+  - cupy
   - numpy
-  - numba
   - napari
+  - pyqt
+  - pyqtgraph
+  - numba
   - matplotlib
+  - ipykernel
+  - jupyter
+  - nb_conda_kernels
   - scikit-learn
   - mrcfile
   - mkl_fft
