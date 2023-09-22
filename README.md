@@ -6,17 +6,14 @@ conda activate s2p-lbm
 cd suite2p
 pip install -e .
 ```
-If installation gets stuck around "Solving Environment", you should [use libmamba](https://conda.github.io/conda-libmamba-solver/libmamba-vs-classic/), install it using the [instructions here])(https://www.anaconda.com/blog/a-faster-conda-for-a-growing-community). Also, set the conda channel priority to be strict: `conda config --set channel_priority strict`
-
-
-It's important that you don't forget the `-e` in the pip command, this allows the suite2p installation to be editable.
+If installation gets stuck around "Solving Environment", you should use libmamba ([explanation](https://conda.github.io/conda-libmamba-solver/libmamba-vs-classic/)), install it using the [instructions here](https://www.anaconda.com/blog/a-faster-conda-for-a-growing-community). Also, set the conda channel priority to be strict: `conda config --set channel_priority strict`. It's important that you don't forget the `-e` in the pip command, this allows the suite2p installation to be editable.
 
 ## Updating
 Everytime you do `git pull`, you should also do `git submodule update` to pull the latest version of my suite2p branch, which is a submodule of this repo. 
 If you find this annoying, you can [make git do it automatically](https://stackoverflow.com/questions/4611512/is-there-a-way-to-make-git-pull-automatically-update-submodules)
 
 ## Usage
-Run a jupyter notebook in this envinronment, either by installing jupyter in the s2p-lbm environment, or running a jupyter server from a different conda env and selecting this environment for the kernel ([see here])(https://medium.com/@nrk25693/how-to-add-your-conda-environment-to-your-jupyter-notebook-in-just-4-steps-abeab8b8d084).
+Run a jupyter notebook in this envinronment, either by running `jupyter notebook` in the suite3d-gpu conda environment or running a jupyter server from a different conda env and selecting this environment for the kernel ([see here](https://medium.com/@nrk25693/how-to-add-your-conda-environment-to-your-jupyter-notebook-in-just-4-steps-abeab8b8d084)). Make sure you use the correct environment!
 
 Then, run the Demo notebook.
 

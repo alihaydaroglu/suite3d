@@ -15,7 +15,8 @@ dependencies:
   - numba
   - matplotlib
   - ipykernel
-  - notebook
+  - jupyter
+  - nb_conda_kernels
   - scikit-learn
   - mrcfile
   - mkl_fft
