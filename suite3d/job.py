@@ -317,12 +317,12 @@ class Job:
                 self.save_params(copy_dir='mov_sub', update_main_params=False)
                 mov = mov[crop[0][0]:crop[0][1], :, crop[1][0]:crop[1][1], crop[2][0]:crop[2][1]]
                 self.log("Cropped movie to shape: %s" % str(mov.shape))
-            out =  calculate_corrmap(mov, self.params, self.dirs, self.log, return_mov_filt=return_mov_filt, save=save,
+            vmap, mean_img, max_img =  calculate_corrmap(mov, self.params, self.dirs, self.log, return_mov_filt=return_mov_filt, save=save,
                                     iter_limit=iter_limit, iter_dir_tag=iter_dir_tag, mov_sub_dir_tag=mov_sub_dir_tag)
         
-        return out, mov_sub_dir, self.dirs[iter_dir_tag]
+        return (vmap, mean_img, max_img), mov_sub_dir, self.dirs[iter_dir_tag]
 
-    def patch_and_detect(self, corrmap_dir_tag='', do_patch_idxs=None, compute_npil_masks=True, ts=(), combined_name='combined'):
+    def patch_and_detect(self, corrmap_dir_tag='', do_patch_idxs=None, compute_npil_masks=False, ts=(), combined_name='combined'):
         connector = '-' if len(corrmap_dir_tag) > 0 else ''
         mov_sub = self.get_registered_movie(corrmap_dir_tag + connector + 'mov_sub', 'mov', axis=0)
         vmap = self.load_iter_results(-1, dir_tag=corrmap_dir_tag + connector + 'iters')['vmap2'] ** 0.5
@@ -345,12 +345,22 @@ class Job:
                                                                 ts = self.params.get('detection_time_crop', (None,None)))
             patch_idxs.append(patch_idx)
 
-        combined_dir = self.combine_patches(patch_idxs, parent_dir_tag = corrmap_dir_tag + connector + 'detection', 
-                                   combined_name=combined_name)
+        combined_dir = self.combine_patches(patch_idxs, parent_dir_tag = corrmap_dir_tag + connector + 'detection', combined_name=combined_name)
+        
         return combined_dir
+    
+    def compute_npil_masks(self, stats_dir, corrmap_dir_tag=''):
+        connector = '-' if len(corrmap_dir_tag) > 0 else ''
+        mov_sub = self.get_registered_movie(corrmap_dir_tag + connector + 'mov_sub', 'mov', axis=0)
+        nt,nz,ny,nx = mov_sub.shape
+        stats = n.load(os.path.join(stats_dir, 'stats.npy'),allow_pickle=True)
+        stats = ext.compute_npil_masks_mp(stats, (nz,ny,nx), n_proc=self.params['n_proc_corr'])
+        n.save(os.path.join(stats_dir, 'stats.npy'), stats)
+        return stats_dir
+
 
     def detect_cells_from_patch(self, patch_idx = 0, coords = None,vmap_coords = None,
-                                vmap=None, mov=None, compute_npil_masks=True,n_proc = 8, ts=(None, None),
+                                vmap=None, mov=None, compute_npil_masks=False,n_proc = 8, ts=(None, None),
                                 parent_dir = None, extra_tag = None):
         # print('test')
         self.save_params()
@@ -435,11 +445,11 @@ class Job:
         # print(zs, ys, xs)
         if n_proc == 1:
             stats = ext.detect_cells(mov, vmap, **self.params, log=self.log, 
-                             offset = (zs[0], ys[0], xs[0]), savepath=stats_path)
+                             offset = (zs[0], ys[0], xs[0]), savepath=stats_path, patch_idx=patch_idx)
         else:
             stats = ext.detect_cells_mp(mov, vmap, **self.params, log=self.log,
-                                        offset=(zs[0], ys[0], xs[0]), savepath=stats_path, n_proc=n_proc)
-        if compute_npil_masks:
+                                        offset=(zs[0], ys[0], xs[0]), savepath=stats_path, n_proc=n_proc, patch_idx=patch_idx)
+        if compute_npil_masks and len(stats) > 0:
             self.log("Computing neuropil masks")
             if n_proc == 1:
                 stats = ext.compute_npil_masks(stats, (nz,ny,nx))
@@ -454,7 +464,7 @@ class Job:
 
     def extract_and_deconvolve(self, patch_idx=0, mov=None, batchsize_frames = 500, stats = None, offset=None, 
                                n_frames=None, stats_dir=None, iscell = None, ts=None, load_F_from_dir=False,
-                               parent_dir_tag=None, save_dir = None, crop=True):
+                               parent_dir_tag=None, save_dir = None, crop=True, mov_shape_tfirst=False):
         self.save_params()
         if stats_dir is None:
             stats_dir = self.get_patch_dir(patch_idx, parent_dir_tag=parent_dir_tag)
@@ -476,13 +486,22 @@ class Job:
 
         # return stats
         if mov is None:
-            mov = self.get_registered_movie('registered_fused_data','fused')
+            if not mov_shape_tfirst: 
+                mov = self.get_registered_movie('registered_fused_data','fused')
+            else:
+                mov = self.get_registered_movie('registered_fused_data','fused',axis=0)
         if crop:
             cz, cy, cx = self.params['svd_crop']
             self.log("Cropping with bounds: %s" % (str(self.params['svd_crop'])))
-            mov = mov[cz[0]:cz[1], :, cy[0]:cy[1], cx[0]:cx[1]]
+            if mov_shape_tfirst:
+                mov = mov[:,cz[0]:cz[1], cy[0]:cy[1], cx[0]:cx[1]]
+            else:
+                mov = mov[cz[0]:cz[1], :, cy[0]:cy[1], cx[0]:cx[1]]
         if ts is not None:
-            mov = mov[:,ts[0]:ts[1]]
+            if mov_shape_tfirst:
+                mov = mov[ts[0]:ts[1]]
+            else:
+                mov = mov[:,ts[0]:ts[1]]
         self.log("Movie shape: %s" % (str(mov.shape)))
         if save_dir is None: save_dir = stats_dir
         if iscell is None: 
@@ -504,7 +523,7 @@ class Job:
         # return mov, stats
         if not load_F_from_dir:
             self.log("Extracting activity")
-            F_roi, F_neu = ext.extract_activity(mov, stats, batchsize_frames=batchsize_frames, offset=offset, n_frames=n_frames, intermediate_save_dir=save_dir)
+            F_roi, F_neu = ext.extract_activity(mov, stats, batchsize_frames=batchsize_frames, offset=offset, n_frames=n_frames, intermediate_save_dir=save_dir, mov_shape_tfirst=mov_shape_tfirst)
             n.save(os.path.join(save_dir, 'F.npy'), F_roi)
             n.save(os.path.join(save_dir, 'Fneu.npy'), F_neu)
         else:
@@ -558,7 +577,8 @@ class Job:
                                                   dir_tag = parent_dir_tag + '-' + combined_name)
         stats = []
         iscells = []
-        keep_stats_keys = ['idx','threshold', 'coords', 'lam','med','peak_val', 'npcoords']
+        keep_stats_keys = ['idx','threshold', 'coords', 'lam','med',
+                           'peak_val', 'npcoords', 'patch_idx', 'med_patch']
         if extra_stats_keys is not None:
             keep_stats_keys += extra_stats_keys
 
@@ -682,6 +702,7 @@ class Job:
                 mov = self.get_registered_movie('registered_fused_data','fused')
             else:
                 mov = self.get_registered_movie('registered_fused_data', 'fused', axis=0)
+            self.log("Loaded mov of size %s" % str(mov.shape))
         if self.params.get('svd_crop', None) is not None:
             crop = self.params['svd_crop']
             if not mov_shape_tfirst:
