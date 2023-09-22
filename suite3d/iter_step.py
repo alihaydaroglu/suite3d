@@ -229,11 +229,12 @@ def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return
         st_idx = batch_idx * t_batch_size
         end_idx = min(nt, st_idx + t_batch_size)
         n_frames_proc += end_idx - st_idx
+        log_cb("Will process %d frames (%d-%d, t_batch_size: %d)" % (end_idx-st_idx, st_idx, end_idx, t_batch_size), 3)
         if reconstruct_svd:
             recon_tic = time.time()
             log_cb("Reconstructing from svd (re-loading spatial components each iteration)", 3)
             movx = svu.reconstruct_overlapping_movie(svd_info, t_indices = (st_idx, end_idx),n_comps=n_comps, crop_z = crop)
-            log_cb("Reconstructed in %.2f seconds" % (time.time() - recon_tic),3 )
+            log_cb("Reconstructed %s mov in %.2f seconds" % (str(movx.shape), time.time() - recon_tic),3 )
         else:
             if flip_shape:
                 movx = mov[:,st_idx:end_idx]
@@ -591,7 +592,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
         for gpu_batch_idx in range(int(n.ceil(nt / gpu_reg_batchsize))):
             idx0 = gpu_reg_batchsize * gpu_batch_idx
             idx1 = min(idx0 + gpu_reg_batchsize, nt)
-            log_cb("Sending idx %d-%d to GPU for rigid registration" % (idx0, idx1), 2)
+            log_cb("Sending frames %d-%d to GPU for rigid registration" % (idx0, idx1), 2)
             tic_rigid = time.time()
             mov_shifted_gpu, ymaxs_rr_gpu, xmaxs_rr_gpu = reg_gpu.rigid_2d_reg_gpu(mov_cpu[:,idx0:idx1], 
                                     mask_mul, mask_offset, 
@@ -651,8 +652,12 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
             reg_data_path = os.path.join(job_reg_data_dir, 'fused_reg_data%04d.npy' % file_idx)
             reg_data_paths.append(reg_data_path)
             end_idx = min(mov_shifted.shape[0], i + split_tif_size)
-            log_cb("Saving fused, registered file of shape %s to %s" % (str( mov_shifted[i:end_idx].shape), reg_data_path), 2)
-            n.save(reg_data_path, mov_shifted[i:end_idx])
+            mov_save = mov_shifted[i:end_idx]
+            mov_save = n.swapaxes(mov_save, 0, 1)
+            save_t = time.time()
+            log_cb("Saving fused, registered file of shape %s to %s" % (str(mov_save.shape), reg_data_path), 2)
+            n.save(reg_data_path, mov_save)
+            log_cb("Saved in %.2f sec" % (time.time() - save_t), 3)
             file_idx += 1
         n.save(offset_path, all_offsets)
     

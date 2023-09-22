@@ -169,7 +169,7 @@ def run_init_pass(job):
     job.log("Aligning planes")
     print(im3d.dtype)
     tvecs = n.concatenate([[[0,0]], utils.get_shifts_3d(im3d.astype(int), filter_pcorr = params['reg_filter_pcorr'],
-                                                        n_procs = job.params['n_proc_corr'])])
+                                                        n_procs = params['n_proc_corr'])])
     
     if params.get('fix_shallow_plane_shift_estimates', True):
         peaks = n.abs(tvecs[10:15]).max(axis=0)
