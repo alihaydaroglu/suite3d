@@ -130,10 +130,10 @@ params = {
     # blood vessels etc. in the correlation map
     'sdnorm_exp' : 1.0,
 
-    # Type (gaussian, uniform) and xy/z extents of neuropil filter
-    'npil_filt_type' : 'gaussian',
+    # Type (gaussian, unif) and xy/z extents of neuropil filter
+    'npil_filt_type' : 'unif',
     'npil_filt_xy' : 5.0,
-    'npil_filt_z' : 1.0,
+    'npil_filt_z' : 1.5,
     # Type and xy/z extents of the cell detection filter
     'conv_filt_type' : 'gaussian',
     'conv_filt_xy' : 1.0,
