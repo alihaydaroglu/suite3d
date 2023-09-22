@@ -11,7 +11,8 @@ def default_log(string, *args, **kwargs):
 
 def detect_cells(patch, vmap, max_iter = 10000, peak_thresh = 2.5, activity_thresh = 2.5, extend_thresh=0.2, allow_overlap=True,
                     roi_ext_iterations=2, max_ext_iters=20, percentile=0, log=default_log, 
-                    recompute_v = False, offset=(0,0,0), savepath=None, debug=False,**kwargs):
+                    recompute_v = False, offset=(0,0,0), savepath=None, debug=False,
+                    patch_idx = -1, **kwargs):
     nt, nz, ny, nx = patch.shape
     stats = []
 
@@ -65,12 +66,14 @@ def detect_cells(patch, vmap, max_iter = 10000, peak_thresh = 2.5, activity_thre
             'lam' : lam,
             'med_patch' : med,
             'med' : (med[0] + offset[0], med[1] + offset[1], med[2] + offset[2]),
-            'active_frames' : active_frames
+            'active_frames' : active_frames,
+            'patch_idx' : patch_idx,
+
         }
         stats.append(stat)
         # 
         # log("Cell %d activity_thresh %.3f, peak_thresh: %.3f, %d active_frames" % (iter_idx+1, threshold, peak_thresh, len(active_frames)), 2)
-        log("Added cell %d at %02d, %03d, %03d, peak: %0.3f, %d frames, %d pixels" % (len(stats), med[0],med[1],med[2], peak_val, len(active_frames), npix), 2)
+        log("Added cell %d at %02d, %03d, %03d, peak: %0.3f, %d frames, %d pixels" % (len(stats), stat['med'][0],stat['med'][1],stat['med'][2], peak_val, len(active_frames), npix), 2)
         if savepath is not None and iter_idx % 250 == 0 and iter_idx > 0:
             n.save(savepath,stats)
             log("Saving checkpoint to %s" % savepath)
@@ -88,7 +91,7 @@ def detect_cells(patch, vmap, max_iter = 10000, peak_thresh = 2.5, activity_thre
 
 def detect_cells_mp(patch, vmap, n_proc = 8, max_iter = 10000, peak_thresh = 2.5, activity_thresh = 2.5, extend_thresh=0.2, 
                     roi_ext_iterations=2, max_ext_iters=20, percentile=0, log=default_log, max_pix = 250,
-                    recompute_v = False, allow_overlap = True, offset=(0,0,0), savepath=None, debug=False,**kwargs):
+                    recompute_v = False, allow_overlap = True, offset=(0,0,0), savepath=None, debug=False,patch_idx = -1, **kwargs):
     stats = []
     log("Loading movie patch to shared memory")
     shmem_patch, shmem_par_patch, patch = utils.create_shmem_from_arr(patch, copy=True)
@@ -109,7 +112,8 @@ def detect_cells_mp(patch, vmap, n_proc = 8, max_iter = 10000, peak_thresh = 2.5
             good_outs = [] 
             for out in outs:
                 if out[-1] < peak_thresh:
-                    log("Skipping", 3)
+                    skip = True
+                    # log("Skipping", 3)
                 else:
                     good_outs.append(out)
             if len(good_outs) < 1:
@@ -119,7 +123,7 @@ def detect_cells_mp(patch, vmap, n_proc = 8, max_iter = 10000, peak_thresh = 2.5
             roi_idxs = n.arange(len(good_outs)) + roi_idx + 1
 
             returns = p.starmap(detect_cells_worker, 
-                    [(widxs[i], roi_idxs[i], shmem_par_patch, good_outs[i], Th2, percentile, roi_ext_iterations, extend_thresh, max_ext_iters, offset, max_pix) for i in range(len(good_outs))])
+                    [(widxs[i], roi_idxs[i], shmem_par_patch, good_outs[i], Th2, percentile, roi_ext_iterations, extend_thresh, max_ext_iters, offset, max_pix, patch_idx) for i in range(len(good_outs))])
             # print("RETUNRED")
             # print(vmap.shape)
             for i in range(len(returns)):
@@ -160,15 +164,15 @@ def detect_cells_mp(patch, vmap, n_proc = 8, max_iter = 10000, peak_thresh = 2.5
         n.save(is_cell_path, is_cell)
     return stats
     
-def detect_cells_worker(worker_idx, roi_idx, patch_par, out, Th2, percentile, roi_ext_iterations, extend_thresh, max_ext_iters, offset, max_pix = 1000):
+def detect_cells_worker(worker_idx, roi_idx, patch_par, out, Th2, percentile, roi_ext_iterations, extend_thresh, max_ext_iters, offset, max_pix = 1000, patch_idx = -1):
     patch_sh, patch = utils.load_shmem(patch_par)
     med, zz, yy, xx, lam, peak_val = out
     tproj = patch[:, zz, yy, xx] @ lam
     threshold = min(Th2, n.percentile(tproj, percentile)) if percentile > 0 else Th2
 
-    default_log("W%02d: Cell %d at with peak %.3f, activity_thresh %.3f, max %0.3f" % (worker_idx, roi_idx+1, peak_val, threshold, tproj.max()), 2)
+    # default_log("W%02d: Cell %d at with peak %.3f, activity_thresh %.3f, max %0.3f" % (worker_idx, roi_idx+1, peak_val, threshold, tproj.max()), 2)
     active_frames = n.nonzero(tproj > threshold)[0]
-    default_log("W%02d, Cell %d. Thresh: %.3f, Active frames: %d" % (worker_idx, roi_idx + 1, threshold, len(active_frames)))
+    # default_log("W%02d, Cell %d. Thresh: %.3f, Active frames: %d" % (worker_idx, roi_idx + 1, threshold, len(active_frames)))
 
     for i in range(roi_ext_iterations):
         # default_log("%d active frames" % (len(active_frames)), 3)
@@ -178,7 +182,7 @@ def detect_cells_worker(worker_idx, roi_idx, patch_par, out, Th2, percentile, ro
                                         max_ext_iters=max_ext_iters, max_pix = max_pix)
         tproj = patch[:,zz,yy,xx] @ lam
         active_frames = n.nonzero(tproj > threshold)[0]
-        default_log("W%02d, Cell %d. Iter: %d, %d pix. Thresh: %.3f, Active frames: %d" % (worker_idx, roi_idx + 1, i, len(lam), threshold, len(active_frames)))
+        # default_log("W%02d, Cell %d. Iter: %d, %d pix. Thresh: %.3f, Active frames: %d" % (worker_idx, roi_idx + 1, i, len(lam), threshold, len(active_frames)))
         npix = len(lam)
     
     sub = n.zeros((patch.shape[0],npix))
@@ -190,8 +194,10 @@ def detect_cells_worker(worker_idx, roi_idx, patch_par, out, Th2, percentile, ro
         'coords_patch' : (zz,yy,xx),
         'coords' : (zz+offset[0],yy+offset[1],xx+offset[2]),
         'lam' : lam,
-        'med' : med,
         'peak_val' : peak_val,
+        'med_patch' : med,
+        'med' : (med[0] + offset[0], med[1] + offset[1], med[2] + offset[2]),
+        'patch_idx' : patch_idx,
         'active_frames' : active_frames}
 
     return stat, sub
@@ -471,18 +477,26 @@ def extract_activity_mp(mov, stats, batchsize_frames=500, log=default_log, offse
 def extract_helper(mov_shmem):
     pass
 
-def extract_activity(mov, stats, batchsize_frames=500, log=default_log, offset=None, n_frames = None, intermediate_save_dir=None):
+def extract_activity(mov, stats, batchsize_frames=500, log=default_log, offset=None, n_frames = None, intermediate_save_dir=None, mov_shape_tfirst=False):
     # if you run out of memory, reduce batchsize_frames
     # if offset is not None:
         # mov = mov[offset[0][0]:offset[0][1],offset[1][0]:offset[1][1],offset[2][0]:offset[2][1]]
     
-    nz,nt,ny,nx = mov.shape
+    if mov_shape_tfirst:
+        nt,nz,ny,nx = mov.shape
+    else:
+        nz,nt,ny,nx = mov.shape
+
     if n_frames is None:
         n_frames = nt
     else:
         log("Only extracting %d frames" % n_frames)
-        mov = mov[:,:n_frames]
-        nt = mov.shape[1]
+        if mov_shape_tfirst:
+            mov = mov[:n_frames]
+            nt = mov.shape[0]
+        else:
+            mov = mov[:,:n_frames]
+            nt = mov.shape[1]
     # print(mov.shape)
     ns = len(stats)
     F_roi = n.zeros((ns, nt))
@@ -498,7 +512,10 @@ def extract_activity(mov, stats, batchsize_frames=500, log=default_log, offset=N
         start = batch_idx * batchsize_frames
         end = min(nt, start + batchsize_frames)
         try:
-            mov_batch = mov[:,start:end].compute()
+            if mov_shape_tfirst:
+                mov_batch = mov[start:end].swapaxes(0,1).compute()
+            else:
+                mov_batch = mov[:,start:end].compute()
         except:
             log("NOT A DASK ARRAY!",3)
             mov_batch = mov[:,start:end]
