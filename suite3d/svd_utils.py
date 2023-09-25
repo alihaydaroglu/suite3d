@@ -97,7 +97,7 @@ def block_and_svd(mov_reg, n_comp, block_shape= (1, 128, 128), block_overlaps=(0
         if batch_idx == 1:
             rolling_mean_batch_time = full_toc
         else:
-            alpha = 0.8
+            alpha = 0.2
             rolling_mean_batch_time = full_toc * \
                 (1-alpha) + rolling_mean_batch_time * alpha
         est_remaining_time = ((n_batches - batch_idx)
