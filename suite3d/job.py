@@ -897,3 +897,83 @@ class Job:
         v.dims.axis_labels = tuple(param_names + ['z','y','x'])
         return v
     
+
+    def get_logged_mem_usage(self):
+        mem_log_lines = []
+        with open(self.logfile, 'r') as logf:
+            lines = logf.readlines()
+            for line in lines:
+                if line.find("Virtual Available") > -1:
+                    mem_log_lines.append(line)
+
+        timestamps = []
+        used_mem = []
+        used_swp = []
+        used_vrt = []
+        avail_vrt = []
+        descriptors = []
+
+        for line in mem_log_lines:
+            try:
+                tstamp = datetime.datetime.strptime(line[1:20], '%Y-%m-%d %H:%M:%S')
+                timestamps.append(tstamp)
+            except:
+                #print("Could not parse line %s" % line)
+                continue
+            
+            
+            tag = 'Total Used: '
+            num_len = 7
+            num_idx = line.find(tag) + len(tag)
+            num_str = line[num_idx:num_idx + 7]
+            num_float = float(num_str)
+            used_mem.append(num_float)
+
+            descriptors.append(line[25:num_idx-len(tag)].strip())
+            
+            tag = 'Swap Used: '
+            num_idx = line.find(tag) + len(tag)
+            num_str = line[num_idx:num_idx + 7]
+            num_float = float(num_str)
+            used_swp.append(num_float)
+            
+            tag = 'Virtual Used: '
+            num_idx = line.find(tag) + len(tag)
+            num_str = line[num_idx:num_idx + 7]
+            num_float = float(num_str)
+            used_vrt.append(num_float)
+            
+            tag = 'Virtual Available: '
+            num_idx = line.find(tag) + len(tag)
+            num_str = line[num_idx:num_idx + 7]
+            num_float = float(num_str)
+            avail_vrt.append(num_float)
+
+        return timestamps, used_mem, used_swp, used_vrt, avail_vrt, descriptors
+    
+    def plot_memory_usage(self, show_descriptors_pctile=None):
+        timestamps, used_mem, used_swp, used_vrt, avail_vrt, descriptors = self.get_logged_mem_usage()
+        f,axs = plt.subplots(2,1,sharex=True, figsize=(8,8))
+
+        ax = axs[0]
+        ax.plot(timestamps, used_mem, label='Used')
+        ax.plot(timestamps, used_swp, label='Swap')
+        ax.plot(timestamps, used_vrt, label='Used (virtual)')
+        ax.plot(timestamps, avail_vrt, label=("Available (virtual)"))
+        ax.set_ylabel("Memory usage (GB)")
+        ax.legend()
+
+        ax = axs[1]
+        deltas = n.diff(used_mem)
+        ax.scatter(timestamps[1:],deltas) 
+        ax.set_ylabel("Change in memory usage (GB)")
+        ax.set_xlabel("Timestamp")
+
+        if show_descriptors_pctile is not None:
+            top_deltas = n.where(deltas > n.percentile(deltas, show_descriptors_pctile))[0]
+            for top_idx in top_deltas:
+                ax.text(timestamps[top_idx+1],deltas[top_idx], descriptors[top_idx], rotation=-45, rotation_mode='anchor')
+                ax.scatter([timestamps[top_idx+1]],[deltas[top_idx]], s=5, color='red')
+
+        # plt.show()
+        return f,axs
