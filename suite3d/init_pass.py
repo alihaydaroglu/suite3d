@@ -150,7 +150,7 @@ def run_init_pass(job):
         job.log("No crosstalk estimation or subtraction")
         cross_coeff = None
 
-    if job.params['fuse_strips']:
+    if job.params.get('fuse_strips',True):
         job.log("Estimating fusing shifts")
         __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True)
         fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
@@ -181,7 +181,7 @@ def run_init_pass(job):
         tvecs[20:][tvecs[20:] > peaks] = 0
         job.log("Fixing plane alignment outliers", 2)
     job.log("Fusing and padding init mov")
-    if job.params['fuse_strips']:
+    if job.params.get('fuse_strips',True):
         init_mov, xpad, ypad, new_xs, og_xs = utils.pad_and_fuse(init_mov, plane_shifts=tvecs, fuse_shift=fuse_shift, xs=xs)
     else:
         xpad = None; ypad = None; new_xs = None; og_xs = None
