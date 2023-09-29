@@ -15,7 +15,7 @@ params = {
     'planes': n.arange(0, 30),
     # If you have less than 30 planes or you don't want to correct the channel mappings, set to False
     'convert_plane_ids_to_channel_ids' : True,
-    'n_ch_tif' : 30, # number of channels in the recording
+    'n_ch_tif' : 30, # number of planes in the recording
 
 
     ### File I/O ### 
@@ -59,6 +59,8 @@ params = {
 
     ### Registration ###
 
+    # whether or not to fuse the mesoscope strips
+    'fuse_strips' : True, 
     # number of pixels to skip between strips - None will auto estimate
     'fuse_shift_override' : None, 
     # maximum rigid shift in pixels (includes plane-to-plane LBM shift, so make sure it's larger than that!)

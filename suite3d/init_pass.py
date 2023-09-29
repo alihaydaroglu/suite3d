@@ -150,14 +150,19 @@ def run_init_pass(job):
         job.log("No crosstalk estimation or subtraction")
         cross_coeff = None
 
-    job.log("Estimating fusing shifts")
-    __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True)
-    fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
-    fuse_shift = int(n.round(fuse_shifts.mean()))
-    if job.params.get('fuse_shift_override', None) is not None:
-        fuse_shift = int(job.params['fuse_shift_override'])
-        job.log("Overriding", 2)
-    job.log("Using best fuse shift of %d" % fuse_shift)
+    if job.params['fuse_strips']:
+        job.log("Estimating fusing shifts")
+        __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True)
+        fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
+        fuse_shift = int(n.round(fuse_shifts.mean()))
+        if job.params.get('fuse_shift_override', None) is not None:
+            fuse_shift = int(job.params['fuse_shift_override'])
+            job.log("Overriding", 2)
+        job.log("Using best fuse shift of %d" % fuse_shift)
+    else:
+        fuse_shift = 0
+        fuse_shifts = None
+        fuse_ccs = None
     job.log("Building ops file")
     # return
 
@@ -176,7 +181,10 @@ def run_init_pass(job):
         tvecs[20:][tvecs[20:] > peaks] = 0
         job.log("Fixing plane alignment outliers", 2)
     job.log("Fusing and padding init mov")
-    init_mov, xpad, ypad, new_xs, og_xs = utils.pad_and_fuse(init_mov, plane_shifts=tvecs, fuse_shift=fuse_shift, xs=xs)
+    if job.params['fuse_strips']:
+        init_mov, xpad, ypad, new_xs, og_xs = utils.pad_and_fuse(init_mov, plane_shifts=tvecs, fuse_shift=fuse_shift, xs=xs)
+    else:
+        xpad = None; ypad = None; new_xs = None; og_xs = None
     img_pad = init_mov.mean(axis=1)
     __, __, ny, nx = init_mov.shape
 

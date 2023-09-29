@@ -144,7 +144,8 @@ class Job:
 
         
         if 'fuse_shifts' in summary.keys() and 'fuse_ccs' in summary.keys():
-            utils.plot_fuse_shifts(summary['fuse_shifts'], summary['fuse_ccs'])
+            if summary['fuse_shifts'] is not None:
+                utils.plot_fuse_shifts(summary['fuse_shifts'], summary['fuse_ccs'])
 
                 
 

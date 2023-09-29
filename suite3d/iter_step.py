@@ -542,6 +542,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     nr_npad            = params.get('nr_npad', 3)
     nr_subpixel        = params.get('nr_subpixel', 10)
     nr_smooth_iters    = params.get('nr_smooth_iters', 2)
+    fuse_strips        = params.get('fuse_strips', True)
 
     convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True)
 
@@ -599,7 +600,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
                                     ref_2ds, max_reg_xy=max_rigid_shift,  min_pix_vals=min_pix_vals,
                                     rmins=rmins, rmaxs=rmaxs, crosstalk_coeff=crosstalk_coeff, shift=True,
                                     xpad=xpad, ypad=ypad, fuse_shift=fuse_shift, new_xs=new_xs, old_xs=old_xs,
-                                    fuse_and_pad = True, log_cb = log_cb)
+                                    fuse_and_pad = fuse_strips, log_cb = log_cb)
             log_cb("Completed rigid registration in %.2f sec" % (time.time() - tic_rigid), 2)
             tic_nonrigid = time.time()
             ymaxs_nr_gpu, xmaxs_nr_gpu, snrs = reg_gpu.nonrigid_2d_reg_gpu(mov_shifted_gpu, mask_mul_nr[:,:,0], mask_offset_nr[:,:,0],
