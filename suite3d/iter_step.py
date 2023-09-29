@@ -558,10 +558,12 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     def io_thread_loader(tifs, batch_idx):
         tic_thread = time.time()
         log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
+        log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
         loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,
                                                 convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
         loaded_movs[0] = loaded_mov
         log_cb("[Thread] Thread for batch %d ready to join after %2.2f sec \n" % (batch_idx, time.time()-tic_thread), 5)
+        log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
         # log_cb("loaded mov: ")
         # log_cb(str(loaded_mov.shape))
     log_cb("Launching IO thread")
@@ -579,6 +581,10 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
         
         
         mov_cpu = loaded_movs[0].copy()
+        log_cb('Memory after movie copied from thread', level=3,log_mem_usage=True )
+        loaded_movs[0] = n.zeros(1)
+        gc.collect()
+        log_cb('Memory after thread memory cleared', level=3,log_mem_usage=True )
 
         if batch_idx + 1 < n_batches:
             log_cb("Launching IO thread for next batch")
@@ -588,6 +594,8 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
         nt = mov_cpu.shape[1]
         ymaxs_rr = []; xmaxs_rr = []; mov_shifted = []
         ymaxs_nr = []; xmaxs_nr = [];
+
+        mov_shifted = None
         # print(mov_cpu.shape)
         log_cb("Loaded batch of size %s" % ((str(mov_cpu.shape))),2)
         for gpu_batch_idx in range(int(n.ceil(nt / gpu_reg_batchsize))):
@@ -618,26 +626,36 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
             # print("SHAPE")
             # print(mov_shifted_cpu.shape)
             del mov_shifted_gpu
-            log_cb("Transferred to CPU in %.2f sec" % (time.time() - tic_get), 2)
+            log_cb("Transferred shifted mov of shape %s to CPU in %.2f sec" % (str(mov_shifted_cpu.shape), time.time() - tic_get), 2)
+
+            if mov_shifted is None:
+                mov_shifted = n.zeros((mov_shifted_cpu.shape[1], nt, mov_shifted_cpu.shape[2], mov_shifted_cpu.shape[3]), n.float32)
+                log_cb("Allocated array of shape %s to store CPU movie" % str(mov_shifted.shape), 2)
+                log_cb("After array alloc:", level=3,log_mem_usage=True )
+                
 
             shift_tic = time.time()
             nz = mov_shifted_cpu.shape[1]
             for zidx in range(nz):
                 # print("SHIFITNG: %d" % zidx)
-                mov_shifted_cpu[:,zidx] = nonrigid.transform_data(mov_shifted_cpu[:,zidx], nblocks, 
+                mov_shifted[zidx, idx0:idx1] = nonrigid.transform_data(mov_shifted_cpu[:,zidx], nblocks, 
                                                                   xblock=xblocks, yblock=yblocks, ymax1=ymaxs_nr_cpu[:,zidx],
                                                                   xmax1=xmaxs_nr_cpu[:,zidx])
             log_cb("Non rigid transformed (on CPU) in %.2f sec" % (time.time() - shift_tic))
 
-            mov_shifted.append(mov_shifted_cpu)
+            # mov_shifted.append(mov_shifted_cpu)
             ymaxs_rr.append(ymaxs_rr_cpu); xmaxs_rr.append(xmaxs_rr_cpu)
             ymaxs_nr.append(ymaxs_nr_cpu); xmaxs_nr.append(xmaxs_nr_cpu)
 
             mempool = cp.get_default_memory_pool()
             mempool.free_all_blocks()
+            
+            
+            log_cb("After GPU Batch:", level=3,log_mem_usage=True )
+
         concat_t = time.time()
         log_cb("Concatenating movie",2)
-        mov_shifted = n.concatenate(mov_shifted,axis=0)
+        # mov_shifted = mov_shifted_cpu # n.concatenate(mov_shifted,axis=0)
         # print("CONCAT")
         # print(mov_shifted.shape)
         log_cb("Concat in %.2f sec" % (time.time() - concat_t), 3)
@@ -646,21 +664,25 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
         all_offsets['ymaxs_rr'] = n.concatenate(ymaxs_rr_cpu,axis=0)
         all_offsets['xmaxs_nr'] = n.concatenate(xmaxs_nr_cpu,axis=0)
         all_offsets['ymaxs_nr'] = n.concatenate(ymaxs_nr_cpu,axis=0)
+        
+        log_cb("After all GPU Batches:", level=3,log_mem_usage=True )
 
         if split_tif_size is None:
             split_tif_size = mov_shifted.shape[0]
-        for i in range(0, mov_shifted.shape[0], split_tif_size):
+        for i in range(0, mov_shifted.shape[1], split_tif_size):
             reg_data_path = os.path.join(job_reg_data_dir, 'fused_reg_data%04d.npy' % file_idx)
             reg_data_paths.append(reg_data_path)
-            end_idx = min(mov_shifted.shape[0], i + split_tif_size)
-            mov_save = mov_shifted[i:end_idx]
-            mov_save = n.swapaxes(mov_save, 0, 1)
+            end_idx = min(mov_shifted.shape[1], i + split_tif_size)
+            mov_save = mov_shifted[:, i:end_idx]
+            # mov_save = n.swapaxes(mov_save, 0, 1)
             save_t = time.time()
             log_cb("Saving fused, registered file of shape %s to %s" % (str(mov_save.shape), reg_data_path), 2)
             n.save(reg_data_path, mov_save)
             log_cb("Saved in %.2f sec" % (time.time() - save_t), 3)
             file_idx += 1
         n.save(offset_path, all_offsets)
+        
+        log_cb("After full batch saving:", level=3,log_mem_usage=True )
     
 
 
@@ -706,11 +728,12 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
 
     def io_thread_loader(tifs, batch_idx):
         log_cb("   [Thread] Loading batch %d \n" % batch_idx, 5)
+        log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
         loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,
                                                 convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
         log_cb("   [Thread] Loaded batch %d \n" % batch_idx, 5)
+        log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
         loaded_movs[0] = loaded_mov
-        
         log_cb("   [Thread] Thread for batch %d ready to join \n" % batch_idx, 5)
     log_cb("Launching IO thread")
     io_thread = threading.Thread(target=io_thread_loader, args=(batches[start_batch_idx], start_batch_idx))
