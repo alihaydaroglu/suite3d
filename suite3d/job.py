@@ -1003,3 +1003,9 @@ class Job:
         nonrigid_ys = n.concatenate(nonrigid_ys, axis=0)
 
         return rigid_xs, rigid_ys, nonrigid_xs, nonrigid_ys
+    
+
+    def get_plane_shifts(self):
+        summary = self.load_summary()
+        return summary['plane_shifts']
+

@@ -39,6 +39,9 @@ params = {
     'enforce_positivity' : True,
     # fix the plane shifts for top few planes that might be outside the brain
     'fix_shallow_plane_shift_estimates' : True,
+    'fix_shallow_plane_shift_esimate_threshold' : 20,
+    # 'overwrite_plane_shifts: set as a float array of size n_planes x 2 with (y,x) shifts for each plane
+    'overwrite_plane_shifts':None,
 
     # Crosstalk subtraction from pairs of planes 15 apart
 
