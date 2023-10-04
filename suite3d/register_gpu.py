@@ -156,10 +156,10 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         mov_shifted = cp.zeros((nt,nz,ny,nx), dtype=cp.float32)
         mov_shifted[:] = mov_gpu.real.swapaxes(0,1)
     log_cb(log_gpu_memory(mempool), 4)
-    reg_t = 0; shift_t = 0;
+    reg_t = 0; shift_t = 0
     for zidx in range(nz):
         reg_tic = time.time()
-        # log_cb("Registering plane %d" % (zidx,), 4)
+        log_cb("Registering plane %d" % (zidx,), 4)
         mov_gpu[zidx] = clip_and_mask_mov(mov_gpu[zidx], rmins[zidx], rmaxs[zidx],
                           mult_mask_gpu[zidx], add_mask_gpu[zidx])
         mov_gpu[zidx] = convolve_2d_gpu(mov_gpu[zidx], refs_f_gpu[zidx])
@@ -169,7 +169,7 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         
         if shift:
             shift_tic = time.time()
-            # log_cb("Shifting plane %d" % (zidx,), 4)
+            log_cb("Shifting plane %d" % (zidx,), 4)
             xmax_z, ymax_z = xmaxs[zidx].get(), ymaxs[zidx].get()
             for frame_idx in range(nt):
                 mov_shifted[frame_idx, zidx] = shift_frame(mov_shifted[frame_idx, zidx],
@@ -242,17 +242,21 @@ def unwrap_fft_2d(mov_float, nr, out=None, cp=cp):
     idxs_mov = [slice(None) for i in range(ndim)]
 
     idxs_out[-2] = slice(0, nr);   idxs_out[-1] = slice(0,nr)
-    idxs_mov[-2] = slice(-nr, ny); idxs_mov[-1] = slice(-nr, ny)
-    # print(idxs_mov)
+    idxs_mov[-2] = slice(-nr, ny); idxs_mov[-1] = slice(-nr, nx)
+    # print(nr, ny)
     # print(idxs_out)
+    # print(idxs_mov)
+    # print(mov_float.shape)
+    # print(out[tuple(idxs_out)].shape)
+    # print(mov_float[tuple(idxs_mov)].shape)
     out[tuple(idxs_out)] = mov_float[tuple(idxs_mov)]
-    idxs_out[-2] = slice(nr,ny);   idxs_out[-1] = slice(0,nr)
-    idxs_mov[-2] = slice(0,nr+1); idxs_mov[-1] = slice(-nr, ny)
+    idxs_out[-2] = slice(nr,ncc);   idxs_out[-1] = slice(0,nr)
+    idxs_mov[-2] = slice(0,nr+1); idxs_mov[-1] = slice(-nr, nx)
     out[tuple(idxs_out)] = mov_float[tuple(idxs_mov)]
-    idxs_out[-2] = slice(0, nr);   idxs_out[-1] = slice(nr,ny)
+    idxs_out[-2] = slice(0, nr);   idxs_out[-1] = slice(nr,ncc)
     idxs_mov[-2] = slice(-nr, ny); idxs_mov[-1] = slice(0, nr+1)
     out[tuple(idxs_out)] = mov_float[tuple(idxs_mov)]
-    idxs_out[-2] = slice(nr, ny);   idxs_out[-1] = slice(nr,ny)
+    idxs_out[-2] = slice(nr, ncc);   idxs_out[-1] = slice(nr,ncc)
     idxs_mov[-2] = slice(0, nr+1);  idxs_mov[-1] = slice(0, nr+1)
     out[tuple(idxs_out)] = mov_float[tuple(idxs_mov)]
 

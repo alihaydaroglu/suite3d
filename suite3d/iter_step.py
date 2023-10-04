@@ -512,6 +512,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     all_ops            = summary['all_ops']
     xpad               = summary['xpad']
     ypad               = summary['ypad']
+    plane_shifts       = summary['plane_shifts']
     fuse_shift         = summary['fuse_shift']
     new_xs             = summary['new_xs']
     old_xs             = summary['og_xs']
@@ -524,6 +525,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     yblocks, xblocks = all_ops[0]['yblock'], all_ops[0]['xblock']
     nblocks = all_ops[0]['nblocks']
     max_shift_nr = 5
+    
 
     if params['fuse_shift_override'] is not None:
         fuse_shift = params['fuse_shift_override']
@@ -547,6 +549,9 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     nr_subpixel        = params.get('nr_subpixel', 10)
     nr_smooth_iters    = params.get('nr_smooth_iters', 2)
     fuse_strips        = params.get('fuse_strips', True)
+
+    if max_rigid_shift < n.ceil(n.max(n.abs(summary['plane_shifts']))) + 5:
+        max_rigid_shift = n.ceil(n.max(n.abs(summary['plane_shifts']))) + 5
 
     convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True)
 

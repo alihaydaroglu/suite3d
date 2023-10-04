@@ -24,11 +24,13 @@ def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
 
     plane_shifts = n.round(plane_shifts).astype(int)
 
-    xrange = plane_shifts[:,0].min(), plane_shifts[:,0].max()
-    yrange = plane_shifts[:,1].min(), plane_shifts[:,1].max()
+    xrange = plane_shifts[:,1].min(), plane_shifts[:,1].max()
+    yrange = plane_shifts[:,0].min(), plane_shifts[:,0].max()
 
-    ypad = n.ceil(n.abs(yrange)).astype(int)[::-1]
-    xpad = n.ceil(n.abs(xrange)).astype(int)[::-1]
+    ypad = n.ceil(n.abs(n.diff(yrange))).astype(int)[::-1]
+    yshift = n.ceil(n.abs((yrange[0]))).astype(int)
+    xpad = n.ceil(n.abs(n.diff(xrange))).astype(int)[::-1]
+    xshift = n.ceil(n.abs((xrange[0]))).astype(int)
     nyn = nyo + ypad.sum()
     nxn = nxo + xpad.sum() - n_xpix_lost_for_fusing
 
@@ -48,7 +50,7 @@ def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
             x1 = xs[i+1] - rshift
         dx = x1 - x0
         # print(x0,x1, xn0, xn0+dx, mov_pad.shape, mov.shape)
-        mov_pad[:,:,:nyo, xn0:xn0+dx] = mov[:,:,:,x0:x1]
+        mov_pad[:,:,yshift:yshift+nyo, xshift+xn0:xshift+xn0+dx] = mov[:,:,:,x0:x1]
         new_xs.append((xn0, xn0+dx))
         og_xs.append((x0,x1))
         xn0 += dx
