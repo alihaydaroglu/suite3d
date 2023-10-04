@@ -660,10 +660,10 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
         # print(mov_shifted.shape)
         log_cb("Concat in %.2f sec" % (time.time() - concat_t), 3)
         all_offsets = {}
-        all_offsets['xmaxs_rr'] = n.concatenate(xmaxs_rr_cpu,axis=0)
-        all_offsets['ymaxs_rr'] = n.concatenate(ymaxs_rr_cpu,axis=0)
-        all_offsets['xmaxs_nr'] = n.concatenate(xmaxs_nr_cpu,axis=0)
-        all_offsets['ymaxs_nr'] = n.concatenate(ymaxs_nr_cpu,axis=0)
+        all_offsets['xmaxs_rr'] = n.concatenate(xmaxs_rr,axis=0)
+        all_offsets['ymaxs_rr'] = n.concatenate(ymaxs_rr,axis=0)
+        all_offsets['xmaxs_nr'] = n.concatenate(xmaxs_nr,axis=0)
+        all_offsets['ymaxs_nr'] = n.concatenate(ymaxs_nr,axis=0)
         
         log_cb("After all GPU Batches:", level=3,log_mem_usage=True )
 
