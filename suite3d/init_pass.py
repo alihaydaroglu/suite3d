@@ -154,7 +154,7 @@ def run_init_pass(job):
         job.log("Estimating fusing shifts")
         __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True)
         fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
-        fuse_shift = int(n.round(fuse_shifts.mean()))
+        fuse_shift = int(n.round(n.median(fuse_shifts)))
         if job.params.get('fuse_shift_override', None) is not None:
             fuse_shift = int(job.params['fuse_shift_override'])
             job.log("Overriding", 2)

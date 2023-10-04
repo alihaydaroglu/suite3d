@@ -525,6 +525,10 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     nblocks = all_ops[0]['nblocks']
     max_shift_nr = 5
 
+    if params['fuse_shift_override'] is not None:
+        fuse_shift = params['fuse_shift_override']
+        log_cb("Overriding fuse shift value to %d" % fuse_shift)
+
     job_iter_dir       = dirs['iters']
     job_reg_data_dir   = dirs['registered_fused_data']
 
@@ -644,7 +648,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
             log_cb("Non rigid transformed (on CPU) in %.2f sec" % (time.time() - shift_tic))
 
             # mov_shifted.append(mov_shifted_cpu)
-            ymaxs_rr.append(ymaxs_rr_cpu); xmaxs_rr.append(xmaxs_rr_cpu)
+            ymaxs_rr.append(ymaxs_rr_cpu.T); xmaxs_rr.append(xmaxs_rr_cpu.T)
             ymaxs_nr.append(ymaxs_nr_cpu); xmaxs_nr.append(xmaxs_nr_cpu)
 
             mempool = cp.get_default_memory_pool()

@@ -451,7 +451,7 @@ def plot_fuse_shifts(best_shifts, cc_maxs):
 
     ls = axs[1].plot(best_shifts, color='k', alpha=0.2)
     lx = axs[1].plot(best_shifts.mean(axis=1), linewidth=3, color='k', label='mean')
-    lm = axs[1].axhline(int(n.round(best_shifts.mean())), linewidth=2, alpha=0.5, color='k', linestyle='--')
+    lm = axs[1].axhline(int(n.round(n.median(best_shifts))), linewidth=2, alpha=0.5, color='k', linestyle='--')
     axs[1].legend(ls[:1] + lx + [lm], ['individual strips', 'mean per plane', 'mean'])
     axs[1].set_xlabel("Plane #")
     axs[1].set_ylabel("# pix between strips")
