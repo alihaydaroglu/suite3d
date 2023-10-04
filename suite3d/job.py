@@ -978,3 +978,28 @@ class Job:
 
         # plt.show()
         return f,axs
+    
+    def load_registration_results(self, offset_dir='registered_fused_data'):
+        offset_files = self.get_registered_files(offset_dir, 'offsets')
+        n_offset_files = len(offset_files)
+        summary = self.load_summary()
+        nyb, nxb = summary['all_ops'][0]['nblocks']
+        nz = len(self.params['planes'])
+
+        rigid_xs = []
+        rigid_ys = []
+        nonrigid_xs = []
+        nonrigid_ys = []
+        for i in range(n_offset_files):
+            offset = n.load(offset_files[i], allow_pickle=True).item()
+            rigid_xs.append(offset['xmaxs_rr'])
+            rigid_ys.append(offset['ymaxs_rr'])
+            nonrigid_xs.append(offset['xmaxs_nr'].reshape(-1,nz, nyb, nxb))
+            nonrigid_ys.append(offset['ymaxs_nr'].reshape(-1,nz, nyb, nxb))
+
+        rigid_xs = n.concatenate(rigid_xs, axis=0)
+        rigid_ys = n.concatenate(rigid_ys, axis=0)
+        nonrigid_xs = n.concatenate(nonrigid_xs, axis=0)
+        nonrigid_ys = n.concatenate(nonrigid_ys, axis=0)
+
+        return rigid_xs, rigid_ys, nonrigid_xs, nonrigid_ys
