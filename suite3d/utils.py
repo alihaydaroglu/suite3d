@@ -17,7 +17,14 @@ from itertools import product
 from dask import array as darr
 from skimage.measure import moments
 from suite2p.registration.nonrigid import make_blocks
+from datetime import datetime
 import pickle
+
+try: 
+    from git import Repo
+except:
+    print("Install gitpython for dev benchmarking to work")
+
 
 def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
     nz, nt, nyo, nxo = mov.shape
@@ -488,3 +495,99 @@ def moving_average(x, width=3, causal=True, axis=0, mode='nearest'):
         kernel[:int(n.ceil(width/2))] = 0
     kernel /= kernel.sum()
     return convolve1d(x, kernel, axis=axis, mode=mode)
+
+
+
+def get_repo_status(repo_path):
+    repo = Repo(repo_path)
+    branch = repo.active_branch.name
+    is_dirty = repo.is_dirty()
+    commit_hash = repo.git.rev_parse("HEAD")
+    last_commit = repo.head.commit
+    author = last_commit.author.name
+    date = last_commit.committed_datetime.strftime("%Y-%d-%m-%H_%M_%S")
+    summary = last_commit.summary
+    dirty_files = [item.a_path for item in repo.index.diff(None)]
+
+    status = {
+        'branch' : branch,
+        'commit_hash' : commit_hash,
+        'commit_summary' : summary,
+        'commit_date' : date,
+        'commit_author' : author,
+        'repo_is_dirty' : is_dirty,
+        'dirty_files' : dirty_files
+    }
+    return status
+
+
+def save_benchmark_results(results_dir, outputs, timings, repo_status):
+    dir_name = datetime.now().strftime("%Y-%d-%m-%H_%M")
+    
+    dir_path = os.path.join(results_dir, dir_name)
+    if not os.path.isdir(dir_path): 
+        os.makedirs(dir_path)
+    n.save(os.path.join(dir_path, 'outputs.npy'), outputs)
+    n.save(os.path.join(dir_path, 'timings.npy'), timings)
+    n.save(os.path.join(dir_path, 'repo_status.npy'), repo_status)
+    return dir_path
+
+def load_baseline_results(results_dir):
+    outputs = n.load(os.path.join(results_dir, 'outputs.npy'), allow_pickle=True).item()
+    timings = n.load(os.path.join(results_dir, 'timings.npy'), allow_pickle=True).item()
+    repo_status = n.load(os.path.join(results_dir, 'repo_status.npy'), allow_pickle=True).item()
+    return outputs, timings, repo_status
+
+def compare_repo_status(baseline_repo_status, repo_status, print_output=True):
+    repo_string = "\
+                                    %-20.20s | %-20.20s | \n\
+Branch:                             %-20.20s | %-20.20s | \n\
+Last commit hash:                   %-20.20s | %-20.20s | \n\
+Last commit summ:                   %-20.20s | %-20.20s | \n\
+Dirty :                             %-20.20s | %-20.20s | \n\
+    " % ('     Baseline', '     Current',
+         baseline_repo_status['branch'],      repo_status['branch'],
+         baseline_repo_status['commit_hash'], repo_status['commit_hash'],
+         baseline_repo_status['commit_summary'], repo_status['commit_summary'],
+         baseline_repo_status['repo_is_dirty'], repo_status['repo_is_dirty'],
+         )
+    if print_output:
+        print(repo_string)
+    return repo_string
+
+def compare_timings(baseline_timings, timings, print_output=True):
+    timing_keys = baseline_timings.keys()
+    timing_string = 'Timings (s) \n'
+    for key in timing_keys:
+        timing_string += '%-36.36s%20.3f | %20.3f | \n' % (key, baseline_timings[key], timings[key])
+
+    if print_output:
+        print(timing_string)
+    
+    return timing_string
+
+
+def compare_outputs(baseline_outputs, outputs, rtol=1e-04, atol=1e-06, print_output=True):
+    is_closes = {}
+    output_keys = baseline_outputs.keys()
+    string = 'Outputs: \n'
+    for key in output_keys:
+        base_out = baseline_outputs[key]
+        new_out = outputs[key]
+        is_close = n.isclose(base_out, new_out, rtol=rtol, atol=atol).flatten()
+        if type(base_out) is n.ndarray:
+            string += '%-36.36s%-20.20s | %-20.20s |  mismatch: %d / %d (%2.5f %% match) \n' %  \
+                        (key, ' ', ' ', (~is_close).sum(), is_close.size,100* (is_close).sum()/is_close.size)
+            string += '%-36.36s%-20.20s | %-20.20s | \n' % \
+                    ('           shape: ', str(base_out.shape), str(new_out.shape))
+            string += '%-36.36s%20.3f | %20.3f |\n' % \
+                    ('           mean:', base_out.mean(), new_out.mean())
+            string += '%-36.36s%20.3f | %20.3f | \n' % \
+                    ('           std:', base_out.std(), new_out.std())
+        else:
+            string += '%-36.36s%20.3f | %20.3f | \n' % (key, base_out, new_out)
+        is_closes[key] = is_close
+    if print_output:
+        print(string)
+
+    return string, is_closes
