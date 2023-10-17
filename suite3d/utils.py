@@ -9,6 +9,8 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import imreg_dft as imreg
 from multiprocessing import Pool, shared_memory
 from suite2p import default_ops
+from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import convolve1d
 # import tensorflow as tf
 # from tensorflow.keras.models import load_model
 from itertools import product
@@ -458,3 +460,31 @@ def plot_fuse_shifts(best_shifts, cc_maxs):
     axs[1].set_xlabel("Plane #")
     axs[1].set_ylabel("# pix between strips")
     return f
+
+def zscore(x, ax=0, shift=True, scale = True, epsilon=0, keepdims=True):
+    m = x.mean(axis=int(ax), keepdims=keepdims)
+    std = x.std(axis=int(ax), keepdims=keepdims) + epsilon
+
+    if not scale: std = 1
+    if not shift: m = 0
+    return (x-m)/std
+
+def filt(signal, width = 3, axis=0, mode='gaussian'):
+    if width == 0:
+        return signal
+
+    if mode == 'gaussian':
+        out = gaussian_filter1d(signal, sigma=width, axis=axis)
+    else:
+        assert False, "mode not implemented"
+    return out
+
+
+def moving_average(x, width=3, causal=True, axis=0, mode='nearest'):
+    if width==1: 
+        return x
+    kernel = n.ones(width*2-1)
+    if causal:
+        kernel[:int(n.ceil(width/2))] = 0
+    kernel /= kernel.sum()
+    return convolve1d(x, kernel, axis=axis, mode=mode)
