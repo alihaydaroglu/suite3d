@@ -147,14 +147,18 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         log_cb("Fusing and padding movie",3)
         mov_gpu = fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs)
         nz,nt,ny,nx = mov_gpu.shape
-        log_cb("Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),3)
+        log_cb("GPU Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),3)
         mempool.free_all_blocks()
         log_cb(log_gpu_memory(mempool), 4)
 
     if shift:
         log_cb("Allocating memory for shifted movie", 3)
         mov_shifted = cp.zeros((nt,nz,ny,nx), dtype=cp.float32)
-        mov_shifted[:] = mov_gpu.real.swapaxes(0,1)
+        mov_shifted[:] = mov_gpu.real.swapaxes(0,1).copy()
+
+    # print("mov_shifted before reg, min: %.2f, max: %.2f" % (mov_shifted[:,10].min(), mov_shifted[:,10].max()))
+
+
     log_cb(log_gpu_memory(mempool), 4)
     reg_t = 0; shift_t = 0
     for zidx in range(nz):
@@ -171,10 +175,17 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
             shift_tic = time.time()
             log_cb("Shifting plane %d" % (zidx,), 4)
             xmax_z, ymax_z = xmaxs[zidx].get(), ymaxs[zidx].get()
+                
+            # if zidx == 10:
+            #     print("mov_shifted before shift, min: %.2f, max: %.2f" % (mov_shifted[:,10].min(), mov_shifted[:,10].max()))
             for frame_idx in range(nt):
                 mov_shifted[frame_idx, zidx] = shift_frame(mov_shifted[frame_idx, zidx],
                                 dy=ymax_z[frame_idx], dx=xmax_z[frame_idx])
             shift_t += (time.time() - shift_tic)
+
+    
+    # print("mov_shifted after shift, min: %.2f, max: %.2f" % (mov_shifted[:,10].min(), mov_shifted[:,10].max()))
+
     log_cb("Registered batch in %.2f sec"  % reg_t, 3)
     if shift: 
         log_cb("Shifted batch in %.2f sec" % shift_t, 3)
@@ -225,7 +236,7 @@ def get_max_cc_coord(phase_corr, max_reg_xy, cp=cp):
     return ymax, xmax
 
 def clip_and_mask_mov(mov, rmin, rmax, mult_mask=None, add_mask=None, cp=cp):
-    mov.real = cp.clip(mov.real, rmin, rmax, out=mov.real)
+    if rmin is not None and rmax is not None: mov.real = cp.clip(mov.real, rmin, rmax, out=mov.real)
     if mult_mask is not None: mov *= mult_mask
     if add_mask is not None:  mov += add_mask
     return mov 

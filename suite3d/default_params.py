@@ -80,6 +80,7 @@ params = {
     'smooth_sigma' : 1.15,
     'maxregshift' : 0.15,
     'reg_filter_pcorr' : 1,
+    'reg_norm_frames' : True, # clip frames during registration
 
     # At the end of initalization, register and save an example bin
     # Could be useful to check registration parameters

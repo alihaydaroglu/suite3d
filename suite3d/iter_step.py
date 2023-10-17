@@ -504,7 +504,7 @@ def subtract_crosstalk_worker(shmem_params, coeff, deep_plane_idx, shallow_plane
     
     
 
-def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
+def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_gpu_batches=None):
     refs_and_masks     = summary['refs_and_masks']
     ref_img_3d         = summary['ref_img_3d']
     min_pix_vals       = summary['min_pix_vals']
@@ -549,6 +549,11 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     nr_subpixel        = params.get('nr_subpixel', 10)
     nr_smooth_iters    = params.get('nr_smooth_iters', 2)
     fuse_strips        = params.get('fuse_strips', True)
+    reg_norm_frames           = params.get('reg_norm_frames', True)
+    if not reg_norm_frames:
+        log_cb("Not clipping frames for registration")
+        rmins = n.array([None for i in range(len(rmins))])
+        rmaxs = n.array([None for i in range(len(rmaxs))])
 
     if max_rigid_shift < n.ceil(n.max(n.abs(summary['plane_shifts']))) + 5:
         max_rigid_shift = n.ceil(n.max(n.abs(summary['plane_shifts']))) + 5
@@ -608,16 +613,26 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
         # print(mov_cpu.shape)
         log_cb("Loaded batch of size %s" % ((str(mov_cpu.shape))),2)
         for gpu_batch_idx in range(int(n.ceil(nt / gpu_reg_batchsize))):
+            if max_gpu_batches is not None:
+                if gpu_batch_idx >= max_gpu_batches: 
+                    break
             idx0 = gpu_reg_batchsize * gpu_batch_idx
             idx1 = min(idx0 + gpu_reg_batchsize, nt)
             log_cb("Sending frames %d-%d to GPU for rigid registration" % (idx0, idx1), 2)
             tic_rigid = time.time()
+
+            # print("######\n\nBEFORE RIGID: 0.5p: %.3f 99.5p: %.3f, Mean: %.3f, Min: %.3f, Max:%.3f" % 
+            #        (n.percentile(mov_cpu[10,idx0:idx1],0.5), n.percentile(mov_cpu[10,idx0:idx1],99.5),
+            #         mov_cpu[10,idx0:idx1].mean(), mov_cpu[10,idx0:idx1].min(), mov_cpu[10,idx0:idx1].max()))
+
             mov_shifted_gpu, ymaxs_rr_gpu, xmaxs_rr_gpu = reg_gpu.rigid_2d_reg_gpu(mov_cpu[:,idx0:idx1], 
                                     mask_mul, mask_offset, 
                                     ref_2ds, max_reg_xy=max_rigid_shift,  min_pix_vals=min_pix_vals,
                                     rmins=rmins, rmaxs=rmaxs, crosstalk_coeff=crosstalk_coeff, shift=True,
                                     xpad=xpad, ypad=ypad, fuse_shift=fuse_shift, new_xs=new_xs, old_xs=old_xs,
                                     fuse_and_pad = fuse_strips, log_cb = log_cb)
+            
+            mov_shifted_cpu = mov_shifted_gpu.get()
             log_cb("Completed rigid registration in %.2f sec" % (time.time() - tic_rigid), 2)
             tic_nonrigid = time.time()
             ymaxs_nr_gpu, xmaxs_nr_gpu, snrs = reg_gpu.nonrigid_2d_reg_gpu(mov_shifted_gpu, mask_mul_nr[:,:,0], mask_offset_nr[:,:,0],
@@ -631,7 +646,12 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
             xmaxs_nr_cpu = xmaxs_nr_gpu.get()
             ymaxs_rr_cpu = ymaxs_rr_gpu.get()
             xmaxs_rr_cpu = xmaxs_rr_gpu.get()
-            mov_shifted_cpu = mov_shifted_gpu.get()
+
+            
+            # print("######\n\nAFter RIGID: 0.5p: %.3f 99.5p: %.3f, Mean: %.3f, Min: %.3f, Max:%.3f" % 
+                #    (n.percentile(mov_shifted_cpu[:,10],0.5), n.percentile(mov_shifted_cpu[:,10],99.5),
+                    # mov_shifted_cpu[:,10].mean(), mov_shifted_cpu[:,10].min(), 
+                    # mov_shifted_cpu[:,10].max()))
             # print("SHAPE")
             # print(mov_shifted_cpu.shape)
             del mov_shifted_gpu
@@ -650,6 +670,12 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
                 mov_shifted[zidx, idx0:idx1] = nonrigid.transform_data(mov_shifted_cpu[:,zidx], nblocks, 
                                                                   xblock=xblocks, yblock=yblocks, ymax1=ymaxs_nr_cpu[:,zidx],
                                                                   xmax1=xmaxs_nr_cpu[:,zidx])
+                
+                     
+            # print("######\n\nAFter NONRIGID: 0.5p: %.3f 99.5p: %.3f, Mean: %.3f, Min: %.3f, Max:%.3f" % 
+            #        (n.percentile(mov_shifted[10,idx0:idx1],0.5), n.percentile(mov_shifted[10,idx0:idx1],99.5),
+            #         mov_shifted[10,idx0:idx1].mean(), mov_shifted[10,idx0:idx1].min(), 
+            #         mov_shifted[10,idx0:idx1].max()))
             log_cb("Non rigid transformed (on CPU) in %.2f sec" % (time.time() - shift_tic))
 
             # mov_shifted.append(mov_shifted_cpu)
@@ -683,6 +709,9 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
             reg_data_paths.append(reg_data_path)
             end_idx = min(mov_shifted.shape[1], i + split_tif_size)
             mov_save = mov_shifted[:, i:end_idx]
+            if max_gpu_batches is not None:
+                if i > max_gpu_batches * gpu_reg_batchsize:
+                    break
             # mov_save = n.swapaxes(mov_save, 0, 1)
             save_t = time.time()
             log_cb("Saving fused, registered file of shape %s to %s" % (str(mov_save.shape), reg_data_path), 2)

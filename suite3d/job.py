@@ -280,13 +280,14 @@ class Job:
         register_dataset(tifs, params, self.dirs, summary, self.log, start_batch_idx = start_batch_idx)
 
 
-    def register_gpu(self, tifs=None):
+    def register_gpu(self, tifs=None, max_gpu_batches=None):
         params = self.params
         summary = self.load_summary()
         save_dir = self.make_new_dir('registered_fused_data')
         if tifs is None:
             tifs = self.tifs
-        register_dataset_gpu(tifs, params, self.dirs, summary, self.log)
+        register_dataset_gpu(tifs, params, self.dirs, summary, self.log,
+                             max_gpu_batches=max_gpu_batches)
         
         
 
