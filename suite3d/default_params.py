@@ -193,6 +193,11 @@ params = {
     # maximum number of pixels in a cell
     'max_pix' : 500,
 
+    # remove duplicate cells that are closer than dist_thresh and share more weighted pixels than lam_thresh
+    'detect_overlap_dist_thresh' : 5,
+    'detect_overlap_lam_thresh' : 0.5,
+
+
 
     # Deconvolution
     # coefficient to multiply neuropil activity by before subtracting from cell activity

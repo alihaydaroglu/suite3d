@@ -625,10 +625,11 @@ class Job:
             if patch_idx == patch_idxs[info_use_idx]: info = info_patch
         iscell = n.concatenate(iscells)
 
+        self.log("Deduplicating cells", 2)
         stats, duplicate_cells = ext.prune_overlapping_cells(stats, self.params.get('detect_overlap_dist_thresh',5), 
                                     self.params.get('detect_overlap_lam_thresh', 0.5))
         iscell = iscell[~duplicate_cells]
-
+        self.log("Removed %d duplicate cells" % duplicate_cells.sum(), 2)
 
         # stats = n.concatenate(stats)
         self.log("Combined %d patches, %d cells" % (len(patch_idxs), len(stats)))

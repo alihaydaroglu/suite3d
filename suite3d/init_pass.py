@@ -101,10 +101,12 @@ def run_init_pass(job):
     init_tifs = choose_init_tifs(tifs, params['n_init_files'], params['init_file_pool'], 
                                        params['init_file_sample_method'])
     n_ch_tif = job.params.get('n_ch_tif', 30)
+    job.log("Loading init tifs")
     init_mov = load_init_tifs(
         init_tifs, params['planes'], params['notch_filt'], 
         n_ch_tif = n_ch_tif,
         convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True))
+    job.log("Loaded init tifs")
     nz, nt, ny, nx = init_mov.shape
     if params['init_n_frames'] is not None:
         assert nt > params['init_n_frames'], 'not enough frames in loaded tifs'

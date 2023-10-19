@@ -3,6 +3,7 @@
 ### Added
 - changelog
 - benchmarking interface to test new updates and compare to previous outputs
+- Auto-prune duplicate ROIs
 
 ## Changed
 - output formats for cpu registration (job.register()) not match GPU registration

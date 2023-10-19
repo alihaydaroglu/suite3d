@@ -59,6 +59,8 @@ def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, fi
     return mov
 
 
+# def load_and_stitch_full_tif()
+
 def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 30,
                                 translations=None, filt = None, debug=False, get_roi_start_pix=False):
     tic = time.time()
