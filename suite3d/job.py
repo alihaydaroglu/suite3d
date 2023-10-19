@@ -624,6 +624,12 @@ class Job:
             iscells.append(iscell)
             if patch_idx == patch_idxs[info_use_idx]: info = info_patch
         iscell = n.concatenate(iscells)
+
+        stats, duplicate_cells = ext.prune_overlapping_cells(stats, self.params.get('detect_overlap_dist_thresh',5), 
+                                    self.params.get('detect_overlap_lam_thresh', 0.5))
+        iscell = iscell[~duplicate_cells]
+
+
         # stats = n.concatenate(stats)
         self.log("Combined %d patches, %d cells" % (len(patch_idxs), len(stats)))
         if not save: 
