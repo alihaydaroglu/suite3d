@@ -28,7 +28,8 @@ from . import svd_utils as svu
 from . import ui
 
 class Job:
-    def __init__(self, root_dir, job_id, params=None, tifs=None, overwrite=False, verbosity=10, create=True, params_path=None):
+    def __init__(self, root_dir, job_id, params=None, tifs=None, overwrite=False, verbosity=10, 
+                 create=True, params_path=None, parent_job=None, copy_parent_dirs = (), copy_parent_symlink=False):
         """Create a Job object that is a wrapper to manage files, current state, log etc.
 
         Args:
@@ -45,6 +46,9 @@ class Job:
 
 
         if create:   
+            if parent_job is not None:
+                self.init_job_dir(root_dir, job_id, exist_ok=overwrite)
+                return self.copy_parent_job(parent_job, copy_parent_dirs, copy_parent_symlink)
             self.init_job_dir(root_dir, job_id, exist_ok=overwrite)
             def_params = get_default_params()
             self.log("Loading default params")
@@ -62,6 +66,26 @@ class Job:
             self.load_dirs()
             self.load_params(params_path=params_path)
             self.tifs = self.params.get('tifs', [])
+
+    def copy_parent_job(self,parent_job, copy_dirs = (), symlink = False):
+        self.params = parent_job.load_params()
+        self.copy_init_pass_from_job(parent_job)
+        self.log("Copied init pass and parameters from parent job")
+        self.tifs = self.params['tifs']
+
+        for key in copy_dirs:
+            self.log("Copying dir %s from parent job" % key)
+            # path_suffix = parent_job.dirs[key][len(parent_job.dirs['job_dir']) + len(os.path.sep):]
+            # new_path = os.path.join(self.dirs['job_dir'], path_suffix)
+            old_dir_path = parent_job.dirs[key]
+            new_dir_path = self.make_new_dir(key)
+            if not symlink: 
+                shutil.copytree(old_dir_path, new_dir_path, dirs_exist_ok=True)
+            else:
+                os.symlink(old_dir_path, new_dir_path, target_is_directory=True)
+
+
+        self.save_params()
 
 
     def log(self, string='', level=1, logfile=True, log_mem_usage=False):
@@ -264,6 +288,11 @@ class Job:
         self.save_params(copy_dir='summary')
         self.log("Launching initial pass", 0)
         init_pass.run_init_pass(self)
+
+    def copy_init_pass_from_job(self, old_job):
+        n.save(os.path.join(self.dirs['summary'],
+               'summary.npy'), old_job.load_summary())
+        
     def copy_init_pass(self,summary_old_job):
         n.save(os.path.join(self.dirs['summary'],
                'summary.npy'), summary_old_job)
