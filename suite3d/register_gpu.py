@@ -331,6 +331,21 @@ def fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs):
 
     return mov_pad
 
+def fuse_and_pad(mov, fuse_shift, ypad, xpad, new_xs, old_xs):
+    nz, nt, ny, nx = mov.shape
+    n_stitches = len(new_xs) - 1
+    n_xpix_lost_fusing = n_stitches * fuse_shift
+    nyn = ny + ypad.sum()
+    nxn = nx + xpad.sum() - n_xpix_lost_fusing
+
+    mov_pad = n.zeros((nz, nt, nyn, nxn), dtype=mov.dtype)
+    for strip_idx in range(len(new_xs)):
+        nx0,nx1 = new_xs[strip_idx]
+        ox0,ox1 = old_xs[strip_idx]
+        mov_pad[:,:,:ny, nx0:nx1] = mov[:,:,:,ox0:ox1]
+
+    return mov_pad
+
 def shift_frame(frame, dy, dx, cp = cp):
 
     # return shift(frame, (-dy, -dx), order=0)

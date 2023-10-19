@@ -268,7 +268,7 @@ class Job:
         if job_dir not in self.dirs.keys():
             self.dirs['job_dir'] = job_dir
 
-        for dir_name in ['registered_data', 'summary', 'iters']:
+        for dir_name in ['registered_fused_data', 'summary', 'iters']:
             dir_key = dir_name
             if dir_key not in self.dirs.keys():
                 new_dir = os.path.join(job_dir, dir_name) 
@@ -298,16 +298,16 @@ class Job:
                'summary.npy'), summary_old_job)
     
     def register(self, tifs=None, start_batch_idx = 0, params=None, summary=None):
+        self.make_new_dir('registered_fused_data')
         if params is None:
             params = self.params
-        self.save_params(params=params, copy_dir='registered_data')
+        self.save_params(params=params, copy_dir='registered_fused_data')
         if summary is None:
             summary = self.load_summary()
-        n.save(os.path.join(self.dirs['registered_data'], 'summary.npy'), summary)
+        n.save(os.path.join(self.dirs['registered_fused_data'], 'summary.npy'), summary)
         if tifs is None:
             tifs = self.tifs
         register_dataset(tifs, params, self.dirs, summary, self.log, start_batch_idx = start_batch_idx)
-
 
     def register_gpu(self, tifs=None, max_gpu_batches=None):
         params = self.params
@@ -654,7 +654,7 @@ class Job:
         return traces
         
 
-    def get_registered_files(self, key='registered_data', filename_filter='reg_data', sort=True):
+    def get_registered_files(self, key='registered_fused_data', filename_filter='fused', sort=True):
         all_files = os.listdir(self.dirs[key])
         reg_files = [os.path.join(self.dirs[key],x) for x in all_files if x.startswith(filename_filter)]
         if sort: reg_files = sorted(reg_files)
@@ -783,7 +783,7 @@ class Job:
         mov_sub = utils.npy_to_dask(mov_sub_paths, axis=0)
         return mov_sub
 
-    def get_registered_movie(self, key='registered_data', filename_filter='reg_data', axis=1):
+    def get_registered_movie(self, key='registered_fused_data', filename_filter='fused', axis=1):
             paths = self.get_registered_files(key, filename_filter)
             mov_reg = utils.npy_to_dask(paths, axis=axis)
             return mov_reg

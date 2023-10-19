@@ -327,11 +327,11 @@ def calculate_corrmap_for_batch(mov, sdmov2, vmap2, mean_img, max_img, temporal_
 
 def register_mov(mov3d, refs_and_masks, all_ops, log_cb = default_log, convolve_method='fast_cpu', do_rigid=True):
     nz, nt, ny, nx = mov3d.shape
-    all_offsets = {'xms' : [],
-                   'yms' : [],
+    all_offsets = {'xmaxs_rr' : [],
+                   'ymaxs_rr' : [],
                    'cms' : [],
-                   'xm1s': [],
-                   'ym1s': [],
+                   'xmaxs_nr': [],
+                   'ymaxs_nr': [],
                    'cm1s': []}
     for plane_idx in range(nz):
         log_cb("Registering plane %d" % plane_idx, 2)
@@ -339,8 +339,12 @@ def register_mov(mov3d, refs_and_masks, all_ops, log_cb = default_log, convolve_
             refAndMasks = refs_and_masks[plane_idx],
             frames = mov3d[plane_idx],
             ops = all_ops[plane_idx], convolve_method=convolve_method, do_rigid=do_rigid)
-        all_offsets['xms'].append(xm); all_offsets['yms'].append(ym); all_offsets['cms'].append(cm)
-        all_offsets['xm1s'].append(xm1); all_offsets['ym1s'].append(ym1); all_offsets['cm1s'].append(cm1)
+        all_offsets['xmaxs_rr'].append(xm); all_offsets['ymaxs_rr'].append(ym); all_offsets['cms'].append(cm)
+        all_offsets['xmaxs_nr'].append(xm1); all_offsets['ymaxs_nr'].append(ym1); all_offsets['cm1s'].append(cm1)
+
+    for k,v in all_offsets.items():
+        all_offsets[k] = n.swapaxes(n.array(v), 0, 1)
+
     return all_offsets
 
 def fuse_movie(mov, n_skip, centers, shift_xs):
@@ -735,8 +739,15 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
     refs_and_masks = summary.get('refs_and_masks', None)
     all_ops = summary.get('all_ops',None)
     min_pix_vals = summary['min_pix_vals']
+    fuse_shift         = summary['fuse_shift']
+    new_xs             = summary['new_xs']
+    old_xs             = summary['og_xs']    
+    xpad               = summary['xpad']
+    ypad               = summary['ypad']
+
+
     job_iter_dir = dirs['iters']
-    job_reg_data_dir = dirs['registered_data']
+    job_reg_data_dir = dirs['registered_fused_data']
     n_tifs_to_analyze = params.get('total_tifs_to_analyze', len(tifs))
     tif_batch_size = params['tif_batch_size']
     planes = params['planes']
@@ -793,7 +804,8 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
                 log_cb("Subtracting min vals to enfore positivity", 1)
                 loaded_movs[0] -= min_pix_vals.reshape(len(min_pix_vals), 1, 1, 1)
                 # print(loaded_movs[0].shape)
-            shmem_mov,shmem_mov_params, mov = utils.create_shmem_from_arr(loaded_movs[0], copy=True)
+            mov_pad = reg_gpu.fuse_and_pad(loaded_movs[0], fuse_shift, ypad, xpad, new_xs, old_xs)
+            shmem_mov,shmem_mov_params, mov = utils.create_shmem_from_arr(mov_pad, copy=True)
             log_cb("After Sharr creation:", level=3,log_mem_usage=True )
             if batch_idx + 1 < n_batches:
                 log_cb("Launching IO thread for next batch")
@@ -810,7 +822,7 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
             if split_tif_size is None:
                 split_tif_size = mov.shape[1]
             for i in range(0, mov.shape[1], split_tif_size):
-                reg_data_path = os.path.join(job_reg_data_dir, 'reg_data%04d.npy' % file_idx)
+                reg_data_path = os.path.join(job_reg_data_dir, 'fused_reg_data%04d.npy' % file_idx)
                 reg_data_paths.append(reg_data_path)
                 end_idx = min(mov.shape[1], i + split_tif_size)
                 log_cb("Saving registered file of shape %s to %s" % (str( mov[:,i:end_idx].shape), reg_data_path), 2)
