@@ -9,13 +9,22 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import imreg_dft as imreg
 from multiprocessing import Pool, shared_memory
 from suite2p import default_ops
+from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import convolve1d
 # import tensorflow as tf
 # from tensorflow.keras.models import load_model
 from itertools import product
 from dask import array as darr
 from skimage.measure import moments
 from suite2p.registration.nonrigid import make_blocks
+from datetime import datetime
 import pickle
+
+try: 
+    from git import Repo
+except:
+    print("Install gitpython for dev benchmarking to work")
+
 
 def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
     nz, nt, nyo, nxo = mov.shape
@@ -24,11 +33,13 @@ def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
 
     plane_shifts = n.round(plane_shifts).astype(int)
 
-    xrange = plane_shifts[:,0].min(), plane_shifts[:,0].max()
-    yrange = plane_shifts[:,1].min(), plane_shifts[:,1].max()
+    xrange = plane_shifts[:,1].min(), plane_shifts[:,1].max()
+    yrange = plane_shifts[:,0].min(), plane_shifts[:,0].max()
 
-    ypad = n.ceil(n.abs(yrange)).astype(int)[::-1]
-    xpad = n.ceil(n.abs(xrange)).astype(int)[::-1]
+    ypad = n.ceil(n.abs(n.diff(yrange))).astype(int)[::-1]
+    yshift = n.ceil(n.abs((yrange[0]))).astype(int)
+    xpad = n.ceil(n.abs(n.diff(xrange))).astype(int)[::-1]
+    xshift = n.ceil(n.abs((xrange[0]))).astype(int)
     nyn = nyo + ypad.sum()
     nxn = nxo + xpad.sum() - n_xpix_lost_for_fusing
 
@@ -48,7 +59,7 @@ def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
             x1 = xs[i+1] - rshift
         dx = x1 - x0
         # print(x0,x1, xn0, xn0+dx, mov_pad.shape, mov.shape)
-        mov_pad[:,:,:nyo, xn0:xn0+dx] = mov[:,:,:,x0:x1]
+        mov_pad[:,:,yshift:yshift+nyo, xshift+xn0:xshift+xn0+dx] = mov[:,:,:,x0:x1]
         new_xs.append((xn0, xn0+dx))
         og_xs.append((x0,x1))
         xn0 += dx
@@ -451,8 +462,156 @@ def plot_fuse_shifts(best_shifts, cc_maxs):
 
     ls = axs[1].plot(best_shifts, color='k', alpha=0.2)
     lx = axs[1].plot(best_shifts.mean(axis=1), linewidth=3, color='k', label='mean')
-    lm = axs[1].axhline(int(n.round(best_shifts.mean())), linewidth=2, alpha=0.5, color='k', linestyle='--')
+    lm = axs[1].axhline(int(n.round(n.median(best_shifts))), linewidth=2, alpha=0.5, color='k', linestyle='--')
     axs[1].legend(ls[:1] + lx + [lm], ['individual strips', 'mean per plane', 'mean'])
     axs[1].set_xlabel("Plane #")
     axs[1].set_ylabel("# pix between strips")
     return f
+
+def zscore(x, ax=0, shift=True, scale = True, epsilon=0, keepdims=True):
+    m = x.mean(axis=int(ax), keepdims=keepdims)
+    std = x.std(axis=int(ax), keepdims=keepdims) + epsilon
+
+    if not scale: std = 1
+    if not shift: m = 0
+    return (x-m)/std
+
+def filt(signal, width = 3, axis=0, mode='gaussian'):
+    if width == 0:
+        return signal
+
+    if mode == 'gaussian':
+        out = gaussian_filter1d(signal, sigma=width, axis=axis)
+    else:
+        assert False, "mode not implemented"
+    return out
+
+
+def moving_average(x, width=3, causal=True, axis=0, mode='nearest'):
+    if width==1: 
+        return x
+    kernel = n.ones(width*2-1)
+    if causal:
+        kernel[:int(n.ceil(width/2))] = 0
+    kernel /= kernel.sum()
+    return convolve1d(x, kernel, axis=axis, mode=mode)
+
+
+
+def get_repo_status(repo_path):
+    repo = Repo(repo_path)
+    branch = repo.active_branch.name
+    is_dirty = repo.is_dirty()
+    commit_hash = repo.git.rev_parse("HEAD")
+    last_commit = repo.head.commit
+    author = last_commit.author.name
+    date = last_commit.committed_datetime.strftime("%Y-%d-%m-%H_%M_%S")
+    summary = last_commit.summary
+    dirty_files = [item.a_path for item in repo.index.diff(None)]
+
+    status = {
+        'branch' : branch,
+        'commit_hash' : commit_hash,
+        'commit_summary' : summary,
+        'commit_date' : date,
+        'commit_author' : author,
+        'repo_is_dirty' : is_dirty,
+        'dirty_files' : dirty_files
+    }
+    return status
+
+
+def save_benchmark_results(results_dir, outputs, timings, repo_status, 
+                           comp_strings = None, output_isclose = None, is_baseline=False):
+    if is_baseline:
+        dir_name = 'baseline'
+    else: 
+        dir_name = datetime.now().strftime("%Y-%d-%m-%H_%M")
+    dir_path = os.path.join(results_dir, dir_name)
+    if not os.path.isdir(dir_path): 
+        os.makedirs(dir_path)
+    n.save(os.path.join(dir_path, 'outputs.npy'), outputs)
+    n.save(os.path.join(dir_path, 'timings.npy'), timings)
+    n.save(os.path.join(dir_path, 'repo_status.npy'), repo_status)
+
+    if output_isclose is not None:
+        n.save(os.path.join(dir_path, 'output_isclose.npy'), output_isclose)
+    if comp_strings is not None:
+        comp_string = ''
+        for s in comp_strings: comp_string += s
+        with open(os.path.join(dir_path, 'comp.txt'), 'w') as comp_file:
+            comp_file.write(comp_string)
+    print("Saved benchmark results to %s" % dir_path)
+    return dir_path
+
+def load_baseline_results(results_dir):
+    outputs = n.load(os.path.join(results_dir,'baseline', 'outputs.npy'), allow_pickle=True).item()
+    timings = n.load(os.path.join(results_dir,'baseline', 'timings.npy'), allow_pickle=True).item()
+    repo_status = n.load(os.path.join(results_dir,'baseline', 'repo_status.npy'), allow_pickle=True).item()
+    return outputs, timings, repo_status
+
+def compare_repo_status(baseline_repo_status, repo_status, print_output=True):
+    repo_string = "\
+                                    %-20.20s | %-20.20s | \n\
+Branch:                             %-20.20s | %-20.20s | \n\
+Last commit hash:                   %-20.20s | %-20.20s | \n\
+Last commit summ:                   %-20.20s | %-20.20s | \n\
+Dirty :                             %-20.20s | %-20.20s | \n\
+    " % ('     Baseline', '     Current',
+         baseline_repo_status['branch'],      repo_status['branch'],
+         baseline_repo_status['commit_hash'], repo_status['commit_hash'],
+         baseline_repo_status['commit_summary'], repo_status['commit_summary'],
+         baseline_repo_status['repo_is_dirty'], repo_status['repo_is_dirty'],
+         )
+    if print_output:
+        print(repo_string)
+    return repo_string
+
+def compare_timings(baseline_timings, timings, print_output=True):
+    timing_keys = baseline_timings.keys()
+    timing_string = 'Timings (s) \n'
+    for key in timing_keys:
+        timing_string += '%-36.36s%20.3f | %20.3f | \n' % (key, baseline_timings[key], timings[key])
+
+    if print_output:
+        print(timing_string)
+    
+    return timing_string
+
+
+def compare_outputs(baseline_outputs, outputs, rtol=1e-04, atol=1e-06, print_output=True):
+    is_closes = {}
+    output_keys = baseline_outputs.keys()
+    string = 'Outputs: \n'
+    for key in output_keys:
+        base_out = baseline_outputs[key]
+        new_out = outputs[key]
+        is_close = n.isclose(base_out, new_out, rtol=rtol, atol=atol).flatten()
+        if type(base_out) is n.ndarray:
+            string += '%-36.36s%-20.20s | %-20.20s |  mismatch: %d / %d (%2.5f %% match) \n' %  \
+                        (key, ' ', ' ', (~is_close).sum(), is_close.size,100* (is_close).sum()/is_close.size)
+            string += '%-36.36s%-20.20s | %-20.20s | \n' % \
+                    ('           shape: ', str(base_out.shape), str(new_out.shape))
+            string += '%-36.36s%20.3f | %20.3f |\n' % \
+                    ('           mean:', base_out.mean(), new_out.mean())
+            string += '%-36.36s%20.3f | %20.3f | \n' % \
+                    ('           std:', base_out.std(), new_out.std())
+        else:
+            string += '%-36.36s%20.3f | %20.3f | \n' % (key, base_out, new_out)
+        is_closes[key] = is_close
+    if print_output:
+        print(string)
+
+    return string, is_closes
+
+def benchmark(results_dir, outputs, timings, repo_status):
+    baseline_outputs, baseline_timings, baseline_repo_status = load_baseline_results(results_dir)
+
+    repo_comp = compare_repo_status(baseline_repo_status, repo_status)
+    timing_comp = compare_timings(baseline_timings, timings)
+    output_comp, output_isclose = compare_outputs(baseline_outputs, outputs)
+
+    save_benchmark_results(results_dir, outputs, timings, repo_status,
+                           (repo_comp, timing_comp, output_comp), output_isclose)
+    
+

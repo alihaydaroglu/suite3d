@@ -16,7 +16,7 @@ from matplotlib import pyplot as plt
 
 def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize=(8,6), dpi=150, alpha=None, return_fig=True,
              ticks=False, ax = None, px_py=None, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
-             norm=None, cbar=False, cbar_loc='left', cbar_ori='vertical', cbar_title='', interpolation='nearest', ax_off=False, cax_kwargs={'frameon':False}):
+             norm=None, cbar=False, cbar_loc='left', cbar_fontcolor = 'k', cbar_ori='vertical', cbar_title='', interpolation='nearest', ax_off=False, cax_kwargs={'frameon':False}):
 
     f = None
     im = im.copy()
@@ -69,11 +69,11 @@ def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize
         cax = ax.inset_axes(cbar_loc, **cax_kwargs)
         plt.colorbar(axim, cax=cax, orientation=cbar_ori)
         if cbar_ori == 'vertical':
-            cax.set_yticks([new_args['vmin'], new_args['vmax']],['%.2f'% new_args['vmin'], '%.2f' % new_args['vmax']], color='k', fontsize=9)
-            cax.set_ylabel(cbar_title, color='k', fontsize=9,labelpad=-13)
+            cax.set_yticks([new_args['vmin'], new_args['vmax']],['%.2f'% new_args['vmin'], '%.2f' % new_args['vmax']], color=cbar_fontcolor, fontsize=9)
+            cax.set_ylabel(cbar_title, color=cbar_fontcolor, fontsize=9,labelpad=-13)
         if cbar_ori == 'horizontal':
-            cax.set_xticks([new_args['vmin'], new_args['vmax']],['%.2f' % new_args['vmin'], '%.2f' % new_args['vmax']], color='k', fontsize=9)
-            cax.set_xlabel(cbar_title, color='k', fontsize=9,labelpad=-13)
+            cax.set_xticks([new_args['vmin'], new_args['vmax']],['%.2f' % new_args['vmin'], '%.2f' % new_args['vmax']], color=cbar_fontcolor, fontsize=9)
+            cax.set_xlabel(cbar_title, color=cbar_fontcolor, fontsize=9,labelpad=-13)
     if xticks is not None:
         ax.set_xticks(range(len(xticks)), xticks)
     if yticks is not None:

@@ -150,14 +150,19 @@ def run_init_pass(job):
         job.log("No crosstalk estimation or subtraction")
         cross_coeff = None
 
-    job.log("Estimating fusing shifts")
-    __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True)
-    fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
-    fuse_shift = int(n.round(fuse_shifts.mean()))
-    if job.params.get('fuse_shift_override', None) is not None:
-        fuse_shift = int(job.params['fuse_shift_override'])
-        job.log("Overriding", 2)
-    job.log("Using best fuse shift of %d" % fuse_shift)
+    if job.params.get('fuse_strips',True):
+        job.log("Estimating fusing shifts")
+        __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True)
+        fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
+        fuse_shift = int(n.round(n.median(fuse_shifts)))
+        if job.params.get('fuse_shift_override', None) is not None:
+            fuse_shift = int(job.params['fuse_shift_override'])
+            job.log("Overriding", 2)
+        job.log("Using best fuse shift of %d" % fuse_shift)
+    else:
+        fuse_shift = 0
+        fuse_shifts = None
+        fuse_ccs = None
     job.log("Building ops file")
     # return
 
@@ -168,15 +173,26 @@ def run_init_pass(job):
 
     job.log("Aligning planes")
     print(im3d.dtype)
-    tvecs = n.concatenate([[[0,0]], utils.get_shifts_3d(im3d.astype(int), filter_pcorr = params['reg_filter_pcorr'],
+    if params.get('overwrite_plane_shifts') is not None:
+        tvecs = params['overwrite_plane_shifts']
+    else:
+        tvecs = n.concatenate([[[0,0]], utils.get_shifts_3d(im3d.astype(int), filter_pcorr = params['reg_filter_pcorr'],
                                                         n_procs = params['n_proc_corr'])])
     
     if params.get('fix_shallow_plane_shift_estimates', True):
-        peaks = n.abs(tvecs[10:15]).max(axis=0)
-        tvecs[20:][tvecs[20:] > peaks] = 0
-        job.log("Fixing plane alignment outliers", 2)
+        shallow_plane_thresh = params.get('fix_shallow_plane_shift_esimate_threshold', 20)
+        peaks = n.abs(tvecs[:shallow_plane_thresh]).max(axis=0)
+        # print(peaks)
+        # print(tvecs)peaks = n.abs(tvecs[:shallow_plane_thresh]).max(axis=0)
+        bad_planes = n.logical_or(n.abs(tvecs[shallow_plane_thresh:,0]) > peaks[0], n.abs(tvecs[shallow_plane_thresh:,1]) > peaks[1])
+        tvecs[shallow_plane_thresh:][bad_planes,:] =0
+        job.log("Fixing %d plane alignment outliers" % bad_planes.sum(), 2)
+        # print(tvecs)
     job.log("Fusing and padding init mov")
-    init_mov, xpad, ypad, new_xs, og_xs = utils.pad_and_fuse(init_mov, plane_shifts=tvecs, fuse_shift=fuse_shift, xs=xs)
+    if job.params.get('fuse_strips',True):
+        init_mov, xpad, ypad, new_xs, og_xs = utils.pad_and_fuse(init_mov, plane_shifts=tvecs, fuse_shift=fuse_shift, xs=xs)
+    else:
+        xpad = None; ypad = None; new_xs = None; og_xs = None
     img_pad = init_mov.mean(axis=1)
     __, __, ny, nx = init_mov.shape
 
