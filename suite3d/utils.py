@@ -521,21 +521,33 @@ def get_repo_status(repo_path):
     return status
 
 
-def save_benchmark_results(results_dir, outputs, timings, repo_status):
-    dir_name = datetime.now().strftime("%Y-%d-%m-%H_%M")
-    
+def save_benchmark_results(results_dir, outputs, timings, repo_status, 
+                           comp_strings = None, output_isclose = None, is_baseline=False):
+    if is_baseline:
+        dir_name = 'baseline'
+    else: 
+        dir_name = datetime.now().strftime("%Y-%d-%m-%H_%M")
     dir_path = os.path.join(results_dir, dir_name)
     if not os.path.isdir(dir_path): 
         os.makedirs(dir_path)
     n.save(os.path.join(dir_path, 'outputs.npy'), outputs)
     n.save(os.path.join(dir_path, 'timings.npy'), timings)
     n.save(os.path.join(dir_path, 'repo_status.npy'), repo_status)
+
+    if output_isclose is not None:
+        n.save(os.path.join(dir_path, 'output_isclose.npy'), output_isclose)
+    if comp_strings is not None:
+        comp_string = ''
+        for s in comp_strings: comp_string += s
+        with open(os.path.join(dir_path, 'comp.txt'), 'w') as comp_file:
+            comp_file.write(comp_string)
+    print("Saved benchmark results to %s" % dir_path)
     return dir_path
 
 def load_baseline_results(results_dir):
-    outputs = n.load(os.path.join(results_dir, 'outputs.npy'), allow_pickle=True).item()
-    timings = n.load(os.path.join(results_dir, 'timings.npy'), allow_pickle=True).item()
-    repo_status = n.load(os.path.join(results_dir, 'repo_status.npy'), allow_pickle=True).item()
+    outputs = n.load(os.path.join(results_dir,'baseline', 'outputs.npy'), allow_pickle=True).item()
+    timings = n.load(os.path.join(results_dir,'baseline', 'timings.npy'), allow_pickle=True).item()
+    repo_status = n.load(os.path.join(results_dir,'baseline', 'repo_status.npy'), allow_pickle=True).item()
     return outputs, timings, repo_status
 
 def compare_repo_status(baseline_repo_status, repo_status, print_output=True):
@@ -591,3 +603,14 @@ def compare_outputs(baseline_outputs, outputs, rtol=1e-04, atol=1e-06, print_out
         print(string)
 
     return string, is_closes
+
+def benchmark(results_dir, outputs, timings, repo_status):
+    baseline_outputs, baseline_timings, baseline_repo_status = load_baseline_results(results_dir)
+
+    repo_comp = compare_repo_status(baseline_repo_status, repo_status)
+    timing_comp = compare_timings(baseline_timings, timings)
+    output_comp, output_isclose = compare_outputs(baseline_outputs, outputs)
+
+    save_benchmark_results(results_dir, outputs, timings, repo_status,
+                           (repo_comp, timing_comp, output_comp), output_isclose)
+    
