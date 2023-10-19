@@ -4,7 +4,7 @@ from scipy.ndimage import maximum_filter, gaussian_filter, uniform_filter, perce
 import numpy as n
 from multiprocessing import Pool
 from . import utils
-
+from scipy.spatial import distance_matrix
 def default_log(string, *args, **kwargs): 
     print(string)
 
@@ -400,6 +400,8 @@ def compute_npil_masks_mp_helper(coords, cell_pix_shmem_par, npil_pars, offset):
     npcoords_patch = (npcoords[0] - offset[0], npcoords[1] - offset[1],npcoords[2] - offset[2])
     shmem.close()
     return (npcoords, npcoords_patch)
+
+
 import time
 def compute_npil_masks_mp(stats, shape, offset = (0,0,0), n_proc = 8, npil_pars = {}):
     # TODO: parallelize this (EASY)
@@ -540,3 +542,61 @@ def extract_activity(mov, stats, batchsize_frames=500, log=default_log, offset=N
             n.save(os.path.join(intermediate_save_dir, 'F.npy'), F_roi)
             n.save(os.path.join(intermediate_save_dir, 'Fneu.npy'), F_neu)
     return F_roi, F_neu
+
+
+
+def prune_overlapping_cells(stats, dist_thresh = 5, lam_overlap_thresh=0.5):
+    meds = n.array([s['med'] for s in stats])
+    lams = ([n.array(s['lam']) for s in stats])
+    # med_patchs = n.array([s['med_patch'] for s in stats])
+    coords = ([n.array(s['coords']).T for s in stats])
+
+    dm = distance_matrix(meds, meds)
+    dm[ n.tril_indices(dm.shape[0],1)] = dist_thresh+1
+
+    pairs = n.array(n.where((dm < dist_thresh)))
+
+    pair_fracs = []
+    max_lam = []
+    for pair in pairs.T:
+        p0,p1 = pair
+        c0 = coords[p0]
+        c1 = coords[p1]
+
+        t0 = [(tuple(c)) for c in c0]
+        t1 = [(tuple(c)) for c in c1]
+
+        intersect = []
+        lam_intersect_0 = 0
+        lam_intersect_1 = 0
+        for idx0, t in enumerate(t0):
+            if t in t1:
+                idx1 = t1.index(t)
+                lam_intersect_0 += lams[p0][idx0]
+                lam_intersect_1 += lams[p1][idx1]
+                intersect.append(t)
+        n_intersect = len(intersect)
+        n0 = len(c0)
+        n1 = len(c1)
+        nx = min(n0,n1)
+        frac_intersect = n_intersect / nx 
+        pair_fracs.append(frac_intersect)
+        max_lam.append(max(lam_intersect_0/lams[p0].sum(), lam_intersect_1/lams[p1].sum()))
+    max_lam = n.array(max_lam)
+
+    overlap_pairs_flag = (max_lam >= lam_overlap_thresh)
+    overlap_pairs = pairs[:,overlap_pairs_flag]
+    duplicate_cells = n.zeros(meds.shape[0], dtype=bool)
+    for overlap_pair in overlap_pairs.T:
+        op0, op1 = overlap_pair
+        lamsum0 = lams[op0].sum()
+        lamsum1 = lams[op1].sum()
+        if lamsum0 > lamsum1:
+            duplicate_cells[op1] = True
+        else:
+            duplicate_cells[op0] = True
+    new_stats = []
+    for idx, stat in enumerate(stats):
+        if not duplicate_cells[idx]:
+            new_stats.append(stat)
+    return new_stats, duplicate_cells
