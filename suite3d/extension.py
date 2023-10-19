@@ -582,21 +582,21 @@ def prune_overlapping_cells(stats, dist_thresh = 5, lam_overlap_thresh=0.5):
         frac_intersect = n_intersect / nx 
         pair_fracs.append(frac_intersect)
         max_lam.append(max(lam_intersect_0/lams[p0].sum(), lam_intersect_1/lams[p1].sum()))
-        max_lam = n.array(max_lam)
+    max_lam = n.array(max_lam)
 
-        overlap_pairs_flag = (max_lam >= lam_overlap_thresh)
-        overlap_pairs = pairs[:,overlap_pairs_flag]
-        duplicate_cells = n.zeros(nc, dtype=bool)
-        for overlap_pair in overlap_pairs:
-            op0, op1 = overlap_pair
-            lamsum0 = lams[op0].sum()
-            lamsum1 = lams[op1].sum()
-            if lamsum0 > lamsum1:
-                duplicate_cells[op1] = True
-            else:
-                duplicate_cells[op0] = True
+    overlap_pairs_flag = (max_lam >= lam_overlap_thresh)
+    overlap_pairs = pairs[:,overlap_pairs_flag]
+    duplicate_cells = n.zeros(meds.shape[0], dtype=bool)
+    for overlap_pair in overlap_pairs.T:
+        op0, op1 = overlap_pair
+        lamsum0 = lams[op0].sum()
+        lamsum1 = lams[op1].sum()
+        if lamsum0 > lamsum1:
+            duplicate_cells[op1] = True
+        else:
+            duplicate_cells[op0] = True
     new_stats = []
-    for idx, stat in stats:
+    for idx, stat in enumerate(stats):
         if not duplicate_cells[idx]:
             new_stats.append(stat)
     return new_stats, duplicate_cells
