@@ -28,7 +28,8 @@ from . import svd_utils as svu
 from . import ui
 
 class Job:
-    def __init__(self, root_dir, job_id, params=None, tifs=None, overwrite=False, verbosity=10, create=True, params_path=None):
+    def __init__(self, root_dir, job_id, params=None, tifs=None, overwrite=False, verbosity=10, 
+                 create=True, params_path=None, parent_job=None, copy_parent_dirs = (), copy_parent_symlink=False):
         """Create a Job object that is a wrapper to manage files, current state, log etc.
 
         Args:
@@ -45,6 +46,9 @@ class Job:
 
 
         if create:   
+            if parent_job is not None:
+                self.init_job_dir(root_dir, job_id, exist_ok=overwrite)
+                return self.copy_parent_job(parent_job, copy_parent_dirs, copy_parent_symlink)
             self.init_job_dir(root_dir, job_id, exist_ok=overwrite)
             def_params = get_default_params()
             self.log("Loading default params")
@@ -62,6 +66,26 @@ class Job:
             self.load_dirs()
             self.load_params(params_path=params_path)
             self.tifs = self.params.get('tifs', [])
+
+    def copy_parent_job(self,parent_job, copy_dirs = (), symlink = False):
+        self.params = parent_job.load_params()
+        self.copy_init_pass_from_job(parent_job)
+        self.log("Copied init pass and parameters from parent job")
+        self.tifs = self.params['tifs']
+
+        for key in copy_dirs:
+            self.log("Copying dir %s from parent job" % key)
+            # path_suffix = parent_job.dirs[key][len(parent_job.dirs['job_dir']) + len(os.path.sep):]
+            # new_path = os.path.join(self.dirs['job_dir'], path_suffix)
+            old_dir_path = parent_job.dirs[key]
+            new_dir_path = self.make_new_dir(key)
+            if not symlink: 
+                shutil.copytree(old_dir_path, new_dir_path, dirs_exist_ok=True)
+            else:
+                os.symlink(old_dir_path, new_dir_path, target_is_directory=True)
+
+
+        self.save_params()
 
 
     def log(self, string='', level=1, logfile=True, log_mem_usage=False):
@@ -144,7 +168,8 @@ class Job:
 
         
         if 'fuse_shifts' in summary.keys() and 'fuse_ccs' in summary.keys():
-            utils.plot_fuse_shifts(summary['fuse_shifts'], summary['fuse_ccs'])
+            if summary['fuse_shifts'] is not None:
+                utils.plot_fuse_shifts(summary['fuse_shifts'], summary['fuse_ccs'])
 
                 
 
@@ -243,7 +268,7 @@ class Job:
         if job_dir not in self.dirs.keys():
             self.dirs['job_dir'] = job_dir
 
-        for dir_name in ['registered_data', 'summary', 'iters']:
+        for dir_name in ['registered_fused_data', 'summary', 'iters']:
             dir_key = dir_name
             if dir_key not in self.dirs.keys():
                 new_dir = os.path.join(job_dir, dir_name) 
@@ -263,29 +288,35 @@ class Job:
         self.save_params(copy_dir='summary')
         self.log("Launching initial pass", 0)
         init_pass.run_init_pass(self)
+
+    def copy_init_pass_from_job(self, old_job):
+        n.save(os.path.join(self.dirs['summary'],
+               'summary.npy'), old_job.load_summary())
+        
     def copy_init_pass(self,summary_old_job):
         n.save(os.path.join(self.dirs['summary'],
                'summary.npy'), summary_old_job)
     
     def register(self, tifs=None, start_batch_idx = 0, params=None, summary=None):
+        self.make_new_dir('registered_fused_data')
         if params is None:
             params = self.params
-        self.save_params(params=params, copy_dir='registered_data')
+        self.save_params(params=params, copy_dir='registered_fused_data')
         if summary is None:
             summary = self.load_summary()
-        n.save(os.path.join(self.dirs['registered_data'], 'summary.npy'), summary)
+        n.save(os.path.join(self.dirs['registered_fused_data'], 'summary.npy'), summary)
         if tifs is None:
             tifs = self.tifs
         register_dataset(tifs, params, self.dirs, summary, self.log, start_batch_idx = start_batch_idx)
 
-
-    def register_gpu(self, tifs=None):
+    def register_gpu(self, tifs=None, max_gpu_batches=None):
         params = self.params
         summary = self.load_summary()
         save_dir = self.make_new_dir('registered_fused_data')
         if tifs is None:
             tifs = self.tifs
-        register_dataset_gpu(tifs, params, self.dirs, summary, self.log)
+        register_dataset_gpu(tifs, params, self.dirs, summary, self.log,
+                             max_gpu_batches=max_gpu_batches)
         
         
 
@@ -593,6 +624,13 @@ class Job:
             iscells.append(iscell)
             if patch_idx == patch_idxs[info_use_idx]: info = info_patch
         iscell = n.concatenate(iscells)
+
+        self.log("Deduplicating cells", 2)
+        stats, duplicate_cells = ext.prune_overlapping_cells(stats, self.params.get('detect_overlap_dist_thresh',5), 
+                                    self.params.get('detect_overlap_lam_thresh', 0.5))
+        iscell = iscell[~duplicate_cells]
+        self.log("Removed %d duplicate cells" % duplicate_cells.sum(), 2)
+
         # stats = n.concatenate(stats)
         self.log("Combined %d patches, %d cells" % (len(patch_idxs), len(stats)))
         if not save: 
@@ -623,7 +661,7 @@ class Job:
         return traces
         
 
-    def get_registered_files(self, key='registered_data', filename_filter='reg_data', sort=True):
+    def get_registered_files(self, key='registered_fused_data', filename_filter='fused', sort=True):
         all_files = os.listdir(self.dirs[key])
         reg_files = [os.path.join(self.dirs[key],x) for x in all_files if x.startswith(filename_filter)]
         if sort: reg_files = sorted(reg_files)
@@ -752,7 +790,7 @@ class Job:
         mov_sub = utils.npy_to_dask(mov_sub_paths, axis=0)
         return mov_sub
 
-    def get_registered_movie(self, key='registered_data', filename_filter='reg_data', axis=1):
+    def get_registered_movie(self, key='registered_fused_data', filename_filter='fused', axis=1):
             paths = self.get_registered_files(key, filename_filter)
             mov_reg = utils.npy_to_dask(paths, axis=axis)
             return mov_reg
@@ -977,3 +1015,34 @@ class Job:
 
         # plt.show()
         return f,axs
+    
+    def load_registration_results(self, offset_dir='registered_fused_data'):
+        offset_files = self.get_registered_files(offset_dir, 'offsets')
+        n_offset_files = len(offset_files)
+        summary = self.load_summary()
+        nyb, nxb = summary['all_ops'][0]['nblocks']
+        nz = len(self.params['planes'])
+
+        rigid_xs = []
+        rigid_ys = []
+        nonrigid_xs = []
+        nonrigid_ys = []
+        for i in range(n_offset_files):
+            offset = n.load(offset_files[i], allow_pickle=True).item()
+            rigid_xs.append(offset['xmaxs_rr'])
+            rigid_ys.append(offset['ymaxs_rr'])
+            nonrigid_xs.append(offset['xmaxs_nr'].reshape(-1,nz, nyb, nxb))
+            nonrigid_ys.append(offset['ymaxs_nr'].reshape(-1,nz, nyb, nxb))
+
+        rigid_xs = n.concatenate(rigid_xs, axis=0)
+        rigid_ys = n.concatenate(rigid_ys, axis=0)
+        nonrigid_xs = n.concatenate(nonrigid_xs, axis=0)
+        nonrigid_ys = n.concatenate(nonrigid_ys, axis=0)
+
+        return rigid_xs, rigid_ys, nonrigid_xs, nonrigid_ys
+    
+
+    def get_plane_shifts(self):
+        summary = self.load_summary()
+        return summary['plane_shifts']
+

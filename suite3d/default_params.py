@@ -41,6 +41,9 @@ params = {
     'enforce_positivity' : True,
     # fix the plane shifts for top few planes that might be outside the brain
     'fix_shallow_plane_shift_estimates' : True,
+    'fix_shallow_plane_shift_esimate_threshold' : 20,
+    # 'overwrite_plane_shifts: set as a float array of size n_planes x 2 with (y,x) shifts for each plane
+    'overwrite_plane_shifts':None,
 
     # Crosstalk subtraction from pairs of planes 15 apart
 
@@ -61,6 +64,8 @@ params = {
 
     ### Registration ###
 
+    # whether or not to fuse the mesoscope strips
+    'fuse_strips' : True, 
     # number of pixels to skip between strips - None will auto estimate
     'fuse_shift_override' : None, 
     # maximum rigid shift in pixels (includes plane-to-plane LBM shift, so make sure it's larger than that!)
@@ -77,6 +82,7 @@ params = {
     'smooth_sigma' : 1.15,
     'maxregshift' : 0.15,
     'reg_filter_pcorr' : 1,
+    'reg_norm_frames' : True, # clip frames during registration
 
     # At the end of initalization, register and save an example bin
     # Could be useful to check registration parameters
@@ -188,6 +194,11 @@ params = {
     'normalize_vmap' : False,
     # maximum number of pixels in a cell
     'max_pix' : 500,
+
+    # remove duplicate cells that are closer than dist_thresh and share more weighted pixels than lam_thresh
+    'detect_overlap_dist_thresh' : 5,
+    'detect_overlap_lam_thresh' : 0.5,
+
 
 
     # Deconvolution
