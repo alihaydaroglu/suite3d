@@ -1,4 +1,5 @@
 import time
+import dask_image.ndfilters
 from dask_image.ndfilters import uniform_filter as dask_uniform_filter
 import cProfile
 import multiprocessing
@@ -349,6 +350,75 @@ def hp_rolling_mean_filter_shmem_w(shmem_par, z_idx, width) -> np.ndarray:
     if z_idx == 0:
         print(time.time() - tic)
     mov_sh.close()
+
+
+def hp_rolling_mean_filter_p(mov, width: int):
+    for i in range(0, mov.shape[0], width):
+        mov[i:i + width,] -= mov[i:i + width].mean(axis=0)
+    return mov
+
+
+def standard_deviation_over_time_p(mov, batch_size: int,sqrt=True):
+    nbins = mov.shape[0]
+    batch_size = min(batch_size, nbins)
+    sdmov = darr.zeros(mov.shape[1:], 'float32')
+
+    for ix in range(0, nbins, batch_size):
+        sdmov += ((darr.diff(mov[ix:ix+batch_size], axis=0) ** 2).sum(axis=0))
+    if sqrt: 
+        sdmov = darr.sqrt(darr.maximum(1e-10, (sdmov / nbins)))
+    return sdmov
+
+def np_sub_and_conv3d_p(mov, np_filt_size, conv_filt_size, batch_size =50,  np_filt_type='unif', conv_filt_type='unif'):
+
+    nt, Lz, Ly, Lx = mov.shape
+    # if np_filt_type == 'unif': np_filt = uniform_filter
+    # elif np_filt_type == 'gaussian' : np_filt = gaussian_filter
+
+    # if conv_filt_type == 'unif' : conv_filt = uniform_filter
+    # elif conv_filt_type == 'gaussian' : conv_filt = gaussian_filter
+
+    c1 = dask_image.ndfilters.uniform_filter(darr.ones((Lz, Ly, Lx)), n.asarray(np_filt_size).astype(int), mode='constant')
+    #c2 = dask_image.ndfilters.gaussian_filter(darr.ones((Lz, Ly, Lx)), conv_filt_size, mode='constant')
+
+    np_mov = darr.zeros_like(mov)
+    for i in range(len(mov[0])):
+        np_mov[i] = dask_image.ndfilters.uniform_filter(mov[i], n.asarray(np_filt_size).astype(int), mode='constant') / c1
+
+
+    np_sub_mov = mov - np_mov # removes the neuropil from the normalised image
+
+    del np_mov
+
+
+    #applies a cell detection filter
+    cv_mov = darr.zeros_like(mov)
+    for i in range(len(mov[0])):
+        cv_mov[i] = dask_image.ndfilters.gaussian_filter(np_sub_mov[i], conv_filt_size, mode='constant') * conv_filt_size[-1]
+
+    del np_sub_mov  
+    return cv_mov
+
+
+
+def get_vmap3d_p2(mov,intensity_threshold=None, sqrt=True,mean_subtract=True):
+    nt, nz, ny, nx = mov.shape
+    vmap = darr.zeros((nz,ny,nx))
+    
+    if mean_subtract:
+        mov = mov.copy() - mov.mean(axis=0)
+
+    if intensity_threshold is None:
+        intensity_threshold = mov.min()
+
+
+    vmap = ((darr.square(mov)) * darr.asarray((mov > intensity_threshold).astype(int))).sum(axis=0)
+
+    if sqrt: vmap = darr.sqrt(vmap)
+
+    return vmap
+
+
 
 # def np_sub_shmem_w(in_par, out_par, idxs, size, c1):
 #     shin, mov_in = utils3d.load_shmem(in_par)

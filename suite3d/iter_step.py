@@ -1,10 +1,13 @@
 
 import os
 import numpy as n
+np = n
 import copy
 from multiprocessing import shared_memory, Pool
 from scipy.ndimage import uniform_filter
 from dask import array as darr
+import dask_image.ndfilters
+import dask.array as darr
 import time
 from suite2p.registration import register
 from suite2p.registration import nonrigid
@@ -324,6 +327,152 @@ def calculate_corrmap_for_batch(mov, sdmov2, vmap2, mean_img, max_img, temporal_
     else:
         return None
 
+def calculate_corrmap_for_batch_par(mov, sdmov2, vmap2, mean_img, max_img, temporal_hpf, npil_filt_size, unif_filt_size, intensity_thresh, n_frames_proc=0,n_proc=12, mproc_batchsize = 50, mov_sub_save_path=None, log_cb=default_log, return_mov_filt=False, do_sdnorm=True, np_filt_type='unif', conv_filt_type = 'unif' , sdnorm_exp = 1.0, fix_vmap_edges=True, dtype=None):
+    """ This version, is more like the original, version, where I created dask version of each of the functions, trying to do minimal
+    changes.
+
+    """
+    if dtype is None: dtype = n.float32
+    nt, nz, ny, nx = mov.shape
+    log_cb("Rolling mean filter", 3)
+    mean_img[:] = mean_img * (n_frames_proc - nt) / n_frames_proc + mov.mean(axis=0) * nt / n_frames_proc
+    max_img[:] = n.maximum(max_img, mov.max(axis=0))
+
+    #change input mov to dask array, via changing calculate_corr_mapp, when this function is working
+    spatial_chunks = (-1,nz,int(ny//20),int(nx//20))
+    time_chunks = (int(nt//30),nz,ny,nx)
+
+    mov = darr.asarray(mov)
+    mov.rechunk(spatial_chunks)
+
+
+    #mov = det3d.hp_rolling_mean_filter_p(mov, int(temporal_hpf))
+    for i in range(0, mov.shape[0], int(temporal_hpf)):
+        mov[i:i + int(temporal_hpf),] -= mov[i:i + int(temporal_hpf)].mean(axis=0)    
+
+    log_cb("Stdev over time",3)
+
+
+    sdmov = darr.zeros_like(mov)
+    if do_sdnorm:
+        sdmov += det3d.standard_deviation_over_time_p(mov, batch_size=nt, sqrt=True)
+    
+    else:
+        log_cb("Skipping sdnorm", 3)
+        sdmov = 1
+    if sdnorm_exp != 1.0:
+        sdmov = sdmov ** sdnorm_exp
+
+    mov[:] = mov[:] / sdmov
+
+    #optimsie by deleting unneeded functions
+    del sdmov
+    mov.rechunk(time_chunks)
+
+    if return_mov_filt:
+        sdnorm_mov = mov.copy()
+
+    log_cb("Sub and conv", 3)
+
+    # Runs to here quikcly, but is slow here on
+    mov = det3d.np_sub_and_conv3d_p(
+        mov, npil_filt_size, unif_filt_size, batch_size=mproc_batchsize,
+        np_filt_type=np_filt_type, conv_filt_type = conv_filt_type)
+
+
+
+    log_cb("Vmap", 3)
+    mov.rechunk(spatial_chunks)
+
+    vmap2 = darr.asarray(vmap2)
+    vmap2 += det3d.get_vmap3d_p2(mov, intensity_thresh,
+                              sqrt=False, mean_subtract=False)
+
+
+    if return_mov_filt:
+        retfilt = mov.copy()
+
+    if return_mov_filt:
+        return (sdnorm_mov, retfilt)
+    else:
+        return None
+
+
+def calculate_corrmap_for_batch_par_inline(mov, sdmov2, vmap2, mean_img, max_img, temporal_hpf, npil_filt_size, unif_filt_size, intensity_thresh, n_frames_proc=0,n_proc=12, mproc_batchsize = 50, mov_sub_save_path=None, log_cb=default_log, return_mov_filt=False, do_sdnorm=True, np_filt_type='unif', conv_filt_type = 'unif' , sdnorm_exp = 1.0, fix_vmap_edges=True, dtype=None):
+    """Parallel/dask implementation, ran for cropped movies, but for the larger crop it runs slower.. function made to run without
+     calling other modules """
+    if dtype is None: dtype = n.float32
+
+    nt, nz, ny, nx = mov.shape
+    log_cb("Rolling mean filter", 3)
+    mean_img[:] = mean_img * (n_frames_proc - nt) / n_frames_proc + mov.mean(axis=0) * nt / n_frames_proc
+    max_img[:] = n.maximum(max_img, mov.max(axis=0))
+
+
+
+    spatial_chunks = (-1,nz,int(ny//20),int(nx//20))
+    time_chunks = (int(nt//30),nz,ny,nx)
+
+    #basic highpass filter
+    mov = darr.asarray(mov)
+    mov.rechunk(spatial_chunks)
+
+    for i in range(0, nt, temporal_hpf):
+        mov[i:i+temporal_hpf] = mov[i:i+temporal_hpf] - mov[i:i+temporal_hpf].mean(axis=0) # subtracts mean of a width
+
+
+    log_cb("Stdev over time",3)
+
+    sdmov2 = darr.asarray(sdmov2)
+    sdmov2.rechunk(spatial_chunks)
+    if do_sdnorm:
+        sdmov2 += (((darr.diff(mov, axis=0) ** 2).sum(axis=0)) / nt)  #standard deviation of each array point through time
+        sdmov = darr.sqrt(darr.maximum(10 ** -9,sdmov2))
+
+    else:
+        log_cb("Skipping sdnorm", 3)
+        sdmov = 1
+    if sdnorm_exp != 1.0:
+        sdmov = sdmov ** sdnorm_exp
+
+
+    mov[:] = mov[:] / sdmov
+
+ 
+    del sdmov
+    del sdmov2
+
+    mov.rechunk(time_chunks)
+
+    if return_mov_filt:
+        sdnorm_mov = mov.copy()
+
+    c1 = dask_image.ndfilters.uniform_filter(darr.ones((nz,ny,nx)), np.asarray(npil_filt_size).astype(int), mode='constant')
+    #c2 = dask_image.ndfilters.gaussian_filter(darr.ones((nz,ny,nx)), unif_filt_size, mode='constant')
+
+    #each time step apply the neuropil filter
+    np_mov = darr.zeros_like(mov)
+    for i in range(len(mov[0])):
+        np_mov[i] = dask_image.ndfilters.uniform_filter(mov[i], np.asarray(npil_filt_size).astype(int), mode='constant') / c1
+
+
+    np_sub_mov = mov - np_mov # removes the neuropil from the normalised image
+
+    del np_mov
+
+
+    #applies a cell detection filter
+    cv_mov = darr.zeros_like(mov)
+    for i in range(len(mov[0])):
+        cv_mov[i] = dask_image.ndfilters.gaussian_filter(np_sub_mov[i], unif_filt_size, mode='constant') * unif_filt_size[-1]
+
+    del np_sub_mov
+
+    #removes values below a threshold, and sum over time
+    cv_mov.rechunk(spatial_chunks)
+    vmap = (((cv_mov ** 2) * (cv_mov > intensity_thresh).astype(int)).sum(axis=0) ** 0.5)
+
+    return vmap 
 
 def register_mov(mov3d, refs_and_masks, all_ops, log_cb = default_log, convolve_method='fast_cpu', do_rigid=True):
     nz, nt, ny, nx = mov3d.shape
@@ -504,7 +653,7 @@ def subtract_crosstalk_worker(shmem_params, coeff, deep_plane_idx, shallow_plane
     
     
 
-def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
+def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_gpu_batches=None):
     refs_and_masks     = summary['refs_and_masks']
     ref_img_3d         = summary['ref_img_3d']
     min_pix_vals       = summary['min_pix_vals']
@@ -512,6 +661,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     all_ops            = summary['all_ops']
     xpad               = summary['xpad']
     ypad               = summary['ypad']
+    plane_shifts       = summary['plane_shifts']
     fuse_shift         = summary['fuse_shift']
     new_xs             = summary['new_xs']
     old_xs             = summary['og_xs']
@@ -524,6 +674,11 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     yblocks, xblocks = all_ops[0]['yblock'], all_ops[0]['xblock']
     nblocks = all_ops[0]['nblocks']
     max_shift_nr = 5
+    
+
+    if params['fuse_shift_override'] is not None:
+        fuse_shift = params['fuse_shift_override']
+        log_cb("Overriding fuse shift value to %d" % fuse_shift)
 
     job_iter_dir       = dirs['iters']
     job_reg_data_dir   = dirs['registered_fused_data']
@@ -542,6 +697,15 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
     nr_npad            = params.get('nr_npad', 3)
     nr_subpixel        = params.get('nr_subpixel', 10)
     nr_smooth_iters    = params.get('nr_smooth_iters', 2)
+    fuse_strips        = params.get('fuse_strips', True)
+    reg_norm_frames           = params.get('reg_norm_frames', True)
+    if not reg_norm_frames:
+        log_cb("Not clipping frames for registration")
+        rmins = n.array([None for i in range(len(rmins))])
+        rmaxs = n.array([None for i in range(len(rmaxs))])
+
+    if max_rigid_shift < n.ceil(n.max(n.abs(summary['plane_shifts']))) + 5:
+        max_rigid_shift = n.ceil(n.max(n.abs(summary['plane_shifts']))) + 5
 
     convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True)
 
@@ -598,16 +762,26 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
         # print(mov_cpu.shape)
         log_cb("Loaded batch of size %s" % ((str(mov_cpu.shape))),2)
         for gpu_batch_idx in range(int(n.ceil(nt / gpu_reg_batchsize))):
+            if max_gpu_batches is not None:
+                if gpu_batch_idx >= max_gpu_batches: 
+                    break
             idx0 = gpu_reg_batchsize * gpu_batch_idx
             idx1 = min(idx0 + gpu_reg_batchsize, nt)
             log_cb("Sending frames %d-%d to GPU for rigid registration" % (idx0, idx1), 2)
             tic_rigid = time.time()
+
+            # print("######\n\nBEFORE RIGID: 0.5p: %.3f 99.5p: %.3f, Mean: %.3f, Min: %.3f, Max:%.3f" % 
+            #        (n.percentile(mov_cpu[10,idx0:idx1],0.5), n.percentile(mov_cpu[10,idx0:idx1],99.5),
+            #         mov_cpu[10,idx0:idx1].mean(), mov_cpu[10,idx0:idx1].min(), mov_cpu[10,idx0:idx1].max()))
+
             mov_shifted_gpu, ymaxs_rr_gpu, xmaxs_rr_gpu = reg_gpu.rigid_2d_reg_gpu(mov_cpu[:,idx0:idx1], 
                                     mask_mul, mask_offset, 
                                     ref_2ds, max_reg_xy=max_rigid_shift,  min_pix_vals=min_pix_vals,
                                     rmins=rmins, rmaxs=rmaxs, crosstalk_coeff=crosstalk_coeff, shift=True,
                                     xpad=xpad, ypad=ypad, fuse_shift=fuse_shift, new_xs=new_xs, old_xs=old_xs,
-                                    fuse_and_pad = True, log_cb = log_cb)
+                                    fuse_and_pad = fuse_strips, log_cb = log_cb)
+            
+            mov_shifted_cpu = mov_shifted_gpu.get()
             log_cb("Completed rigid registration in %.2f sec" % (time.time() - tic_rigid), 2)
             tic_nonrigid = time.time()
             ymaxs_nr_gpu, xmaxs_nr_gpu, snrs = reg_gpu.nonrigid_2d_reg_gpu(mov_shifted_gpu, mask_mul_nr[:,:,0], mask_offset_nr[:,:,0],
@@ -621,7 +795,12 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
             xmaxs_nr_cpu = xmaxs_nr_gpu.get()
             ymaxs_rr_cpu = ymaxs_rr_gpu.get()
             xmaxs_rr_cpu = xmaxs_rr_gpu.get()
-            mov_shifted_cpu = mov_shifted_gpu.get()
+
+            
+            # print("######\n\nAFter RIGID: 0.5p: %.3f 99.5p: %.3f, Mean: %.3f, Min: %.3f, Max:%.3f" % 
+                #    (n.percentile(mov_shifted_cpu[:,10],0.5), n.percentile(mov_shifted_cpu[:,10],99.5),
+                    # mov_shifted_cpu[:,10].mean(), mov_shifted_cpu[:,10].min(), 
+                    # mov_shifted_cpu[:,10].max()))
             # print("SHAPE")
             # print(mov_shifted_cpu.shape)
             del mov_shifted_gpu
@@ -640,10 +819,16 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
                 mov_shifted[zidx, idx0:idx1] = nonrigid.transform_data(mov_shifted_cpu[:,zidx], nblocks, 
                                                                   xblock=xblocks, yblock=yblocks, ymax1=ymaxs_nr_cpu[:,zidx],
                                                                   xmax1=xmaxs_nr_cpu[:,zidx])
+                
+                     
+            # print("######\n\nAFter NONRIGID: 0.5p: %.3f 99.5p: %.3f, Mean: %.3f, Min: %.3f, Max:%.3f" % 
+            #        (n.percentile(mov_shifted[10,idx0:idx1],0.5), n.percentile(mov_shifted[10,idx0:idx1],99.5),
+            #         mov_shifted[10,idx0:idx1].mean(), mov_shifted[10,idx0:idx1].min(), 
+            #         mov_shifted[10,idx0:idx1].max()))
             log_cb("Non rigid transformed (on CPU) in %.2f sec" % (time.time() - shift_tic))
 
             # mov_shifted.append(mov_shifted_cpu)
-            ymaxs_rr.append(ymaxs_rr_cpu); xmaxs_rr.append(xmaxs_rr_cpu)
+            ymaxs_rr.append(ymaxs_rr_cpu.T); xmaxs_rr.append(xmaxs_rr_cpu.T)
             ymaxs_nr.append(ymaxs_nr_cpu); xmaxs_nr.append(xmaxs_nr_cpu)
 
             mempool = cp.get_default_memory_pool()
@@ -659,10 +844,10 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
         # print(mov_shifted.shape)
         log_cb("Concat in %.2f sec" % (time.time() - concat_t), 3)
         all_offsets = {}
-        all_offsets['xmaxs_rr'] = n.concatenate(xmaxs_rr_cpu,axis=0)
-        all_offsets['ymaxs_rr'] = n.concatenate(ymaxs_rr_cpu,axis=0)
-        all_offsets['xmaxs_nr'] = n.concatenate(xmaxs_nr_cpu,axis=0)
-        all_offsets['ymaxs_nr'] = n.concatenate(ymaxs_nr_cpu,axis=0)
+        all_offsets['xmaxs_rr'] = n.concatenate(xmaxs_rr,axis=0)
+        all_offsets['ymaxs_rr'] = n.concatenate(ymaxs_rr,axis=0)
+        all_offsets['xmaxs_nr'] = n.concatenate(xmaxs_nr,axis=0)
+        all_offsets['ymaxs_nr'] = n.concatenate(ymaxs_nr,axis=0)
         
         log_cb("After all GPU Batches:", level=3,log_mem_usage=True )
 
@@ -673,6 +858,9 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log):
             reg_data_paths.append(reg_data_path)
             end_idx = min(mov_shifted.shape[1], i + split_tif_size)
             mov_save = mov_shifted[:, i:end_idx]
+            if max_gpu_batches is not None:
+                if i > max_gpu_batches * gpu_reg_batchsize:
+                    break
             # mov_save = n.swapaxes(mov_save, 0, 1)
             save_t = time.time()
             log_cb("Saving fused, registered file of shape %s to %s" % (str(mov_save.shape), reg_data_path), 2)
