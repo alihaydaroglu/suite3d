@@ -101,7 +101,7 @@ def run_init_pass(job):
     init_tifs = choose_init_tifs(tifs, params['n_init_files'], params['init_file_pool'], 
                                        params['init_file_sample_method'])
     n_ch_tif = job.params.get('n_ch_tif', 30)
-    job.log("Loading init tifs")
+    job.log("Loading init tifs with %d channels" % n_ch_tif)
     init_mov = load_init_tifs(
         init_tifs, params['planes'], params['notch_filt'], 
         n_ch_tif = n_ch_tif,
@@ -154,7 +154,7 @@ def run_init_pass(job):
 
     if job.params.get('fuse_strips',True):
         job.log("Estimating fusing shifts")
-        __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True)
+        __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True, n_ch=n_ch_tif)
         fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
         fuse_shift = int(n.round(n.median(fuse_shifts)))
         if job.params.get('fuse_shift_override', None) is not None:
