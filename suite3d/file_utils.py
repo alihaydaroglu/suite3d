@@ -26,6 +26,12 @@ def find_exp(subjects_dir, subject, date, expnum):
     si_params['line_freq'] = 2 * tfu.get_tif_tag(tif_paths[0],'SI.hScan2D.scannerFrequency', number=True)
     
     return tif_paths, si_params, exp_str
+def get_si_params(tif_path):
+    si_params = {}
+    si_params['rois'] = tfu.get_meso_rois(tif_path)
+    si_params['vol_rate'] = tfu.get_vol_rate(tif_path)
+    si_params['line_freq'] = 2 * tfu.get_tif_tag(tif_path,'SI.hScan2D.scannerFrequency', number=True)
+    return si_params
 
 
 def find_expt_file(expt_info,file, dirs = None, verbose = False):

@@ -227,6 +227,8 @@ def add_curation_sliders(v, iscell_path, outputs, layers, iscell_save_path = Non
 
 def slider_callback(v, sliders, ranges, iscell_path, iscell_save_path, values, outputs, layers):
     iscell = n.load(iscell_path)
+    if iscell.shape[1] < 2:
+        iscell = n.concatenate([iscell, iscell], axis=1)
     iscell_out = iscell.copy()
     for i,slider in enumerate(sliders):
         rng = list(slider.slider.value())
