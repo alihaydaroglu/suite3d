@@ -147,19 +147,23 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         log_cb("Fusing and padding movie",3)
         mov_gpu = fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs)
         nz,nt,ny,nx = mov_gpu.shape
-        log_cb("Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),3)
+        log_cb("GPU Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),3)
         mempool.free_all_blocks()
         log_cb(log_gpu_memory(mempool), 4)
 
     if shift:
         log_cb("Allocating memory for shifted movie", 3)
         mov_shifted = cp.zeros((nt,nz,ny,nx), dtype=cp.float32)
-        mov_shifted[:] = mov_gpu.real.swapaxes(0,1)
+        mov_shifted[:] = mov_gpu.real.swapaxes(0,1).copy()
+
+    # print("mov_shifted before reg, min: %.2f, max: %.2f" % (mov_shifted[:,10].min(), mov_shifted[:,10].max()))
+
+
     log_cb(log_gpu_memory(mempool), 4)
-    reg_t = 0; shift_t = 0;
+    reg_t = 0; shift_t = 0
     for zidx in range(nz):
         reg_tic = time.time()
-        # log_cb("Registering plane %d" % (zidx,), 4)
+        log_cb("Registering plane %d" % (zidx,), 4)
         mov_gpu[zidx] = clip_and_mask_mov(mov_gpu[zidx], rmins[zidx], rmaxs[zidx],
                           mult_mask_gpu[zidx], add_mask_gpu[zidx])
         mov_gpu[zidx] = convolve_2d_gpu(mov_gpu[zidx], refs_f_gpu[zidx])
@@ -169,12 +173,19 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         
         if shift:
             shift_tic = time.time()
-            # log_cb("Shifting plane %d" % (zidx,), 4)
+            log_cb("Shifting plane %d" % (zidx,), 4)
             xmax_z, ymax_z = xmaxs[zidx].get(), ymaxs[zidx].get()
+                
+            # if zidx == 10:
+            #     print("mov_shifted before shift, min: %.2f, max: %.2f" % (mov_shifted[:,10].min(), mov_shifted[:,10].max()))
             for frame_idx in range(nt):
                 mov_shifted[frame_idx, zidx] = shift_frame(mov_shifted[frame_idx, zidx],
                                 dy=ymax_z[frame_idx], dx=xmax_z[frame_idx])
             shift_t += (time.time() - shift_tic)
+
+    
+    # print("mov_shifted after shift, min: %.2f, max: %.2f" % (mov_shifted[:,10].min(), mov_shifted[:,10].max()))
+
     log_cb("Registered batch in %.2f sec"  % reg_t, 3)
     if shift: 
         log_cb("Shifted batch in %.2f sec" % shift_t, 3)
@@ -225,7 +236,7 @@ def get_max_cc_coord(phase_corr, max_reg_xy, cp=cp):
     return ymax, xmax
 
 def clip_and_mask_mov(mov, rmin, rmax, mult_mask=None, add_mask=None, cp=cp):
-    mov.real = cp.clip(mov.real, rmin, rmax, out=mov.real)
+    if rmin is not None and rmax is not None: mov.real = cp.clip(mov.real, rmin, rmax, out=mov.real)
     if mult_mask is not None: mov *= mult_mask
     if add_mask is not None:  mov += add_mask
     return mov 
@@ -242,17 +253,21 @@ def unwrap_fft_2d(mov_float, nr, out=None, cp=cp):
     idxs_mov = [slice(None) for i in range(ndim)]
 
     idxs_out[-2] = slice(0, nr);   idxs_out[-1] = slice(0,nr)
-    idxs_mov[-2] = slice(-nr, ny); idxs_mov[-1] = slice(-nr, ny)
-    # print(idxs_mov)
+    idxs_mov[-2] = slice(-nr, ny); idxs_mov[-1] = slice(-nr, nx)
+    # print(nr, ny)
     # print(idxs_out)
+    # print(idxs_mov)
+    # print(mov_float.shape)
+    # print(out[tuple(idxs_out)].shape)
+    # print(mov_float[tuple(idxs_mov)].shape)
     out[tuple(idxs_out)] = mov_float[tuple(idxs_mov)]
-    idxs_out[-2] = slice(nr,ny);   idxs_out[-1] = slice(0,nr)
-    idxs_mov[-2] = slice(0,nr+1); idxs_mov[-1] = slice(-nr, ny)
+    idxs_out[-2] = slice(nr,ncc);   idxs_out[-1] = slice(0,nr)
+    idxs_mov[-2] = slice(0,nr+1); idxs_mov[-1] = slice(-nr, nx)
     out[tuple(idxs_out)] = mov_float[tuple(idxs_mov)]
-    idxs_out[-2] = slice(0, nr);   idxs_out[-1] = slice(nr,ny)
+    idxs_out[-2] = slice(0, nr);   idxs_out[-1] = slice(nr,ncc)
     idxs_mov[-2] = slice(-nr, ny); idxs_mov[-1] = slice(0, nr+1)
     out[tuple(idxs_out)] = mov_float[tuple(idxs_mov)]
-    idxs_out[-2] = slice(nr, ny);   idxs_out[-1] = slice(nr,ny)
+    idxs_out[-2] = slice(nr, ncc);   idxs_out[-1] = slice(nr,ncc)
     idxs_mov[-2] = slice(0, nr+1);  idxs_mov[-1] = slice(0, nr+1)
     out[tuple(idxs_out)] = mov_float[tuple(idxs_mov)]
 

@@ -412,7 +412,9 @@ def get_vmap3d_p2(mov,intensity_threshold=None, sqrt=True,mean_subtract=True):
         intensity_threshold = mov.min()
 
 
-    vmap = ((darr.square(mov)) * darr.asarray((mov > intensity_threshold).astype(int))).sum(axis=0)
+    #vmap = ((darr.square(mov)) * darr.asarray((mov > intensity_threshold).astype(int))).sum(axis=0)
+    for i in range(nt):
+        vmap += (darr.square(mov[i])) * darr.asarray((mov[i] > intensity_threshold).astype(int))
 
     if sqrt: vmap = darr.sqrt(vmap)
 
