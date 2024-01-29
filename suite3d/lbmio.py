@@ -9,13 +9,15 @@ import tifffile
 import imreg_dft as imreg
 import json
 import psutil
+from . import tiff_utils as tfu
 import tracemalloc
 
 def default_log(string, val=None): print(string)
 lbm_plane_to_ch = n.array([1,5,6,7,8,9,2,10,11,12,13,14,15,16,17,3,18,19,20,21,22,23,4,24,25,26,27,28,29,30])-1
 lbm_ch_to_plane = n.array(n.argsort(lbm_plane_to_ch))
 
-def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, filt=None, concat=True, n_ch=30, convert_plane_ids_to_channel_ids = True, log_cb=default_log, debug=False):
+def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, filt=None, concat=True, n_ch=30, fix_fastZ=False,
+                         convert_plane_ids_to_channel_ids = True, log_cb=default_log, debug=False, use_roi_idxs=None):
     '''
     Load tifs into memory
 
@@ -47,7 +49,8 @@ def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, fi
     mov_list = []
     for tif_path in paths:
         if verbose: log_cb("Loading %s" % tif_path, 2)
-        im, px, py = load_and_stitch_full_tif_mp(tif_path, channels=channels, verbose=False, filt=filt, n_ch = n_ch, n_proc=n_proc,debug=debug, **mp_args)
+        im, px, py = load_and_stitch_full_tif_mp(tif_path, channels=channels, verbose=False, filt=filt, n_ch = n_ch, n_proc=n_proc,
+                                                 debug=debug,use_roi_idxs=use_roi_idxs,fix_fastZ=fix_fastZ, **mp_args)
         mov_list.append(im)
     if concat:
         mov = n.concatenate(mov_list,axis=1)
@@ -62,7 +65,8 @@ def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, fi
 # def load_and_stitch_full_tif()
 
 def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 30,
-                                translations=None, filt = None, debug=False, get_roi_start_pix=False):
+                                translations=None, filt = None, debug=False, get_roi_start_pix=False,
+                                use_roi_idxs=None, fix_fastZ=False):
     tic = time.time()
     # TODO imread from tifffile has an overhead of ~20-30 seconds before it actually reads the file?
     tiffile = tifffile.imread(path)
@@ -72,7 +76,7 @@ def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 3
         if debug: print(n_t_ch, n_ch, int(n_t_ch/n_ch), n1, n2)
         tiffile = tiffile.reshape(int(n_t_ch/n_ch), n_ch, n1,n2)
     if debug: print(tiffile.shape)
-    rois = get_meso_rois(path)
+    rois = get_meso_rois(path, fix_fastZ=fix_fastZ)
     # print("XXXXXX %.2f" % (tiffile.nbytes / 1024**3))
     sh_mem = shared_memory.SharedMemory(create=True, size=tiffile.nbytes)
     sh_tif = n.ndarray(tiffile.shape, dtype=tiffile.dtype, buffer=sh_mem.buf)
@@ -89,8 +93,8 @@ def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 3
     if debug: print("5, %.4f" % (time.time()-tic))
     # sample_out = stitch_rois(ims_sample, rois, return_coords=False,mean_img=False)
     if get_roi_start_pix:
-        return stitch_rois_fast(ims_sample, rois, mean_img=False, get_roi_start_pix=True)
-    sample_out, px, py = stitch_rois_fast(ims_sample, rois,mean_img=False)
+        return stitch_rois_fast(ims_sample, rois, mean_img=False, get_roi_start_pix=True, use_roi_idxs=use_roi_idxs)
+    sample_out, px, py = stitch_rois_fast(ims_sample, rois,mean_img=False, use_roi_idxs=use_roi_idxs)
     if debug: print("6, %.4f" % (time.time()-tic))
     __, n_y, n_x = sample_out.shape
     del tiffile
@@ -112,7 +116,7 @@ def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 3
 
     p = Pool(processes = n_proc)
     output = p.starmap(load_and_stitch_full_tif_worker, 
-                      [(idx,ch_id, rois, sh_mem_name, sh_mem_params, sh_out_name, sh_out_params, translations[idx], filt)\
+                      [(idx,ch_id, rois, sh_mem_name, sh_mem_params, sh_out_name, sh_out_params, translations[idx], filt, use_roi_idxs)\
                         for idx,ch_id in enumerate(channels)])
     proc_tic = time.time()
     if verbose: print("    Workers completed in %.2f sec" % (proc_tic - prep_tic))
@@ -133,7 +137,8 @@ def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 3
 
     return im_full, px, py
 
-def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params, sh_out_name, sh_out_params, translation=None, filt=None):
+def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params, sh_out_name, sh_out_params, translation=None, 
+                                    filt=None,use_roi_idxs=None):
     debug=False
     if debug: print("Loading channel %d" % ch_id)
     tic = time.time()
@@ -159,7 +164,7 @@ def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params
     ims = split_rois_from_tif(tiffile, rois, ch_id = ch_id, return_coords=False)
     split_time = time.time()
     if debug: print(" %d Split in %.2f" % (ch_id, split_time-prep_time))
-    outputs[idx], __, __ = stitch_rois_fast(ims, rois, mean_img=False, translation=translation)
+    outputs[idx], __, __ = stitch_rois_fast(ims, rois, mean_img=False, translation=translation, use_roi_idxs=use_roi_idxs)
     stitch_time = time.time()
     if debug: print(" %d Stitch in %.2f" % (ch_id, stitch_time-split_time))
     if debug: print("Channel %d done in %.2f" % (ch_id, time.time()-tic))
@@ -171,11 +176,16 @@ def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params
     return time.time()-tic
 
 
-def get_meso_rois(tif_path, max_roi_width_pix=145):
+def get_meso_rois(tif_path, max_roi_width_pix=145, fix_fastZ=False):
     tf = tifffile.TiffFile(tif_path)
     artists_json = tf.pages[0].tags["Artist"].value
 
     si_rois = json.loads(artists_json)['RoiGroups']['imagingRoiGroup']['rois']
+
+    if fix_fastZ:
+        z_imaging = tfu.get_fastZ(tif_path)
+    else:
+        z_imaging = 0
 
     rois = []
     warned = False
@@ -183,7 +193,7 @@ def get_meso_rois(tif_path, max_roi_width_pix=145):
         if type(roi['scanfields']) != list:
             scanfield = roi['scanfields']
         else: 
-            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==0)[0][0]]
+            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==z_imaging)[0][0]]
 
     #     print(scanfield)
         roi_dict = {}
@@ -226,9 +236,13 @@ def split_rois_from_tif(im, rois, ch_id = 0, return_coords=False):
     return split_ims
 
 
-def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_start_pix=False):
+def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_start_pix=False, use_roi_idxs=None):
     tic = time.time()
 
+
+    if use_roi_idxs is not None:
+        ims = [ims[i] for i in use_roi_idxs]
+        rois = [rois[i] for i in use_roi_idxs]
     sizes_pix = n.array([im.shape[1:][::-1] for im in ims])
 
     centers = n.array([r['center'] for r in rois])
@@ -239,7 +253,7 @@ def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_star
     # X is the fast axis along the resonant scanner line direction, Y is orthogonal slow axis
     # For a typical strip, x extent is small and y extent is large
 
-    # maximim and minimum x/y coordinates in SI units (not pixels, also strangely not um)
+    # maximim and minimum x/y coordinates in SI units (not pixels, also strangely not always um)
     xmin, xmax = corners[:,0].min(),(corners[:,0] + sizes[:,0]).max()
     ymin, ymax = corners[:,1].min(),(corners[:,1] + sizes[:,1]).max()
 

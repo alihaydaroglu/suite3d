@@ -128,7 +128,7 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     refs_f_gpu = cp.asarray(refs_f)
     ymaxs = cp.zeros((nz, nt), dtype=cp.float32)
     xmaxs = cp.zeros((nz, nt), dtype=cp.float32)
-    ncc = max_reg_xy * 2 + 1
+    ncc = int(max_reg_xy * 2 + 1)
     phase_corr = cp.zeros((nt, ncc, ncc))
 
     load_t = time.time()

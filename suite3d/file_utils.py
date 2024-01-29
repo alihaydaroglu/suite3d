@@ -7,19 +7,21 @@ import os
 import numpy as n
 from . import tiff_utils as tfu
 
-def find_exp(subjects_dir, subject, date, expnum):
+def find_exp(subjects_dir, subject, date, expnum, verbose=False):
     
     si_params = {}
     
     if not hasattr(expnum, '__iter__'):
         expnum = [expnum]
     tif_paths = []
+    if type(expnum) is not list:
+        expnum = [expnum]
     for expn in expnum: 
-        exp_dir = find_expt_file((subject,date,expn), 'root', dirs=[subjects_dir])
+        exp_dir = find_expt_file((subject,date,expn), 'root', dirs=[subjects_dir], verbose=verbose)
         tif_paths += tfu.get_tif_paths(exp_dir)
 
     exp_str = "%s_%s_" % (subject,date)
-    for expn in expnum: exp_str += '%d-' % expn
+    for expn in expnum: exp_str += '%s-' % str(expn)
     exp_str = exp_str[:-1]
     si_params['rois'] = tfu.get_meso_rois(tif_paths[0])
     si_params['vol_rate'] = tfu.get_vol_rate(tif_paths[0])
@@ -87,5 +89,6 @@ def find_expt_file(expt_info,file, dirs = None, verbose = False):
     if 'file_path' in locals():
         return file_path
     else: 
+        print("Could not find %s in %s" % (file_name, str(dirs)))
         print('File could not be found! Be sure that ' + 
               'cortex_lab_utils.expt_dirs() includes all valid directories.')

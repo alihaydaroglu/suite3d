@@ -23,6 +23,7 @@ params = {
     # Should be a dictionary like:  {'f0' : 200, 'Q' : 1}
     # Where f0 is the frequency of the line noise, and Q is the quality factor
     'notch_filt' : None,
+    'fix_fastZ' : False, # if you messed up your ROI z-definitions in scanimage, this is useful
 
     ### Initialization Step ### 
 

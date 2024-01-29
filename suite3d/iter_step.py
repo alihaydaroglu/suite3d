@@ -553,6 +553,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
     nr_subpixel        = params.get('nr_subpixel', 10)
     nr_smooth_iters    = params.get('nr_smooth_iters', 2)
     fuse_strips        = params.get('fuse_strips', True)
+    fix_fastZ          = params.get('fix_fastZ', False)
     reg_norm_frames           = params.get('reg_norm_frames', True)
     if not reg_norm_frames:
         log_cb("Not clipping frames for registration")
@@ -577,7 +578,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
         tic_thread = time.time()
         log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,
+        loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif, fix_fastZ=fix_fastZ,
                                                 convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
         loaded_movs[0] = loaded_mov
         log_cb("[Thread] Thread for batch %d ready to join after %2.2f sec \n" % (batch_idx, time.time()-tic_thread), 5)
@@ -754,6 +755,7 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
     notch_filt = params['notch_filt']
     do_subtract_crosstalk = params['subtract_crosstalk']
     enforce_positivity = params.get('enforce_positivity', False)
+    fix_fastZ = params.get('fix_fastZ', False)
     mov_dtype = params['dtype']
     split_tif_size = params.get('split_tif_size', None)
     n_ch_tif = params.get('n_ch_tif', 30)
@@ -778,7 +780,7 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
     def io_thread_loader(tifs, batch_idx):
         log_cb("   [Thread] Loading batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,
+        loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,fix_fastZ=fix_fastZ,
                                                 convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
         log_cb("   [Thread] Loaded batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)

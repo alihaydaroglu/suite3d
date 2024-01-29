@@ -165,6 +165,14 @@ def get_scan_rate(tif_path):
     for line in tif_info:
         if line.startswith('SI.hRoiManager.scanFrameRate'):
             return float(line.split(' ')[-1])
+        
+def get_fastZ(tif_path):
+    tf = tifffile.TiffFile(tif_path)
+    tif_info = (tf.pages[0].tags['Software'].value).split('\n')
+    for line in tif_info:
+        if line.startswith('SI.hFastZ.position'):
+            return float(line.split(' ')[-1])
+    return None
 
 
 def npy_to_dask(files, name='', axis=1):

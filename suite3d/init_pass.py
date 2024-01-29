@@ -29,9 +29,9 @@ def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method='even'
 
     return sample_tifs
 
-def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plane_ids_to_channel_ids=True):
+def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plane_ids_to_channel_ids=True,fix_fastZ=False,):
     full_mov = lbmio.load_and_stitch_tifs(init_tifs, planes = planes, convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids,
-                                          n_ch = n_ch_tif, filt=filter_params, concat=False)
+                                          n_ch = n_ch_tif, filt=filter_params, concat=False, fix_fastZ=fix_fastZ)
 
     mov_lens = [mov.shape[1] for mov in full_mov]
     full_mov = n.concatenate(full_mov, axis=1)
@@ -104,7 +104,7 @@ def run_init_pass(job):
     job.log("Loading init tifs with %d channels" % n_ch_tif)
     init_mov = load_init_tifs(
         init_tifs, params['planes'], params['notch_filt'], 
-        n_ch_tif = n_ch_tif,
+        n_ch_tif = n_ch_tif, fix_fastZ=params.get('fix_fastZ', False),
         convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True))
     job.log("Loaded init tifs")
     nz, nt, ny, nx = init_mov.shape
@@ -154,7 +154,7 @@ def run_init_pass(job):
 
     if job.params.get('fuse_strips',True):
         job.log("Estimating fusing shifts")
-        __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True, n_ch=n_ch_tif)
+        __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True, n_ch=n_ch_tif, fix_fastZ=job.params.get('fix_fastZ',False))
         fuse_shifts, fuse_ccs = utils.get_fusing_shifts(im3d_raw, xs)
         fuse_shift = int(n.round(n.median(fuse_shifts)))
         if job.params.get('fuse_shift_override', None) is not None:
@@ -228,6 +228,7 @@ def run_init_pass(job):
     summary_path = os.path.join(job.dirs['summary'], 'summary.npy')
     job.log("Saving summary to %s" % summary_path)
     n.save(summary_path, summary)
+    job.show_summary_plots()
 
 
     if job.params['generate_sample_registered_bins']:
