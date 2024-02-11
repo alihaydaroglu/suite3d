@@ -137,6 +137,11 @@ params = {
     # blood vessels etc. in the correlation map
     'sdnorm_exp' : 1.0,
 
+
+    # crop the edges of each plane by this many pixels before computing the corr map
+    # this removes some registration-related artifacts
+    'edge_crop_npix' : 5,
+
     # Type (gaussian, unif) and xy/z extents of neuropil filter
     'npil_filt_type' : 'unif',
     'npil_filt_xy' : 5.0,

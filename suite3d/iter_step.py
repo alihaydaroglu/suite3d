@@ -151,7 +151,7 @@ def calculate_corrmap_from_svd(svd_info, params,dirs, log_cb, iter_limit=None, i
     return vmap, mean_img, max_img
 
 def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return_mov_filt=False,iter_limit=None,
-                      iter_dir_tag = 'iters', mov_sub_dir_tag = 'mov_sub'):
+                      iter_dir_tag = 'iters', mov_sub_dir_tag = 'mov_sub', summary=None):
     # TODO This can be accelerated 
     # np sub and convolution takes about ~1/2 of the time, that is parallelized
     # reminaing 1/2 of runtime is single-core, so overall improvement capped around 2x speed 
@@ -168,6 +168,7 @@ def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return
     npil_filt_z = params['npil_filt_z']
     conv_filt_xy = params['conv_filt_xy']
     conv_filt_z = params['conv_filt_z']
+    edge_crop_npix = params.get('edge_crop_npix', 0)
     intensity_thresh = params.get('intensity_thresh', 0)
     dtype = params['dtype']
     n_proc_corr = params['n_proc_corr']
@@ -247,6 +248,17 @@ def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return
                     log_cb("Not a dask array", 3)
                 movx = movx.astype(dtype)
         log_cb("Loaded and swapped, idx %d to %d" % (st_idx, end_idx), 2)
+        if edge_crop_npix > 0:
+            __, nz, ny, nx = movx.shape
+            log_cb("Cropping edges by %d pix" % edge_crop_npix)
+            yt, yb, xl, xr = utils.get_shifted_plane_bounds(summary['plane_shifts'], ny, nx, summary['ypad'][0], summary['xpad'][0])
+            for i in range(nz):
+                movx[i,:,:yt[i]+edge_crop_npix] = 0
+                movx[i,:,yb[i]-edge_crop_npix:] = 0
+                movx[i,:,:, :xl[i]+edge_crop_npix] = 0
+                movx[i,:,:, xr[i]-edge_crop_npix:] = 0
+
+
         log_cb("Calculating corr map",2); tic = time.time()
         mov_filt = calculate_corrmap_for_batch(movx, sdmov2, vmap2, mean_img, max_img, temporal_hpf, npil_filt_size, unif_filt_size, intensity_thresh,
                                     n_frames_proc, n_proc_corr, mproc_batchsize, mov_sub_save_path=mov_sub_paths[batch_idx],do_sdnorm=do_sdnorm,

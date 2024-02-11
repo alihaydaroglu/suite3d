@@ -176,24 +176,37 @@ def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params
     return time.time()-tic
 
 
-def get_meso_rois(tif_path, max_roi_width_pix=145, fix_fastZ=False):
+def get_meso_rois(tif_path, max_roi_width_pix=145, fix_fastZ=False, debug=False):
     tf = tifffile.TiffFile(tif_path)
     artists_json = tf.pages[0].tags["Artist"].value
 
     si_rois = json.loads(artists_json)['RoiGroups']['imagingRoiGroup']['rois']
 
-    if fix_fastZ:
-        z_imaging = tfu.get_fastZ(tif_path)
+    all_zs = [roi['zs'] for roi in si_rois]
+
+    if type(fix_fastZ) == int:
+        z_imaging = fix_fastZ
+    elif fix_fastZ:
+        z_imaging = list(set(all_zs[0]).intersection(*map(set,all_zs[1:])))[0]
     else:
         z_imaging = 0
+    # if fix_fastZ:
+    #     z_imaging = tfu.get_fastZ(tif_path)
+    # else:
+    #     z_imaging = 0
+        
+    # print(z_imaging)
 
     rois = []
     warned = False
     for roi in si_rois:
+        if debug: print(roi['zs'])
         if type(roi['scanfields']) != list:
             scanfield = roi['scanfields']
         else: 
-            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==z_imaging)[0][0]]
+            z_match = n.where(n.array(roi['zs'])==z_imaging)[0]
+            if len(z_match) == 0: continue
+            scanfield = roi['scanfields'][z_match[0]]
 
     #     print(scanfield)
         roi_dict = {}

@@ -43,7 +43,7 @@ class Job:
 
         self.verbosity = verbosity
         self.job_id = job_id
-
+        self.summary = None
 
         if create:   
             if parent_job is not None:
@@ -176,6 +176,7 @@ class Job:
     def load_summary(self):
         summary_path = os.path.join(self.dirs['summary'], 'summary.npy')
         summary = n.load(summary_path,  allow_pickle=True).item()
+        self.summary = summary
         return summary
 
     def make_svd_dirs(self, n_blocks=None):
@@ -259,14 +260,14 @@ class Job:
 
         self.log("Loading job directory for %s in %s" %
                     (job_id, root_dir), 0)
-        if 'dirs.npy' in os.listdir(job_dir):
+        if 'dirs.npy' in os.listdir(job_dir):   
             self.log("Loading dirs ")
             self.dirs = n.load(os.path.join(job_dir, 'dirs.npy'),allow_pickle=True).item()
         else:
-            self.dirs = {'job_dir' : job_dir}
+            self.dirs = {'job_dir' : self.job_dir}
 
         if job_dir not in self.dirs.keys():
-            self.dirs['job_dir'] = job_dir
+            self.dirs['job_dir'] = self.job_dir
 
         for dir_name in ['registered_fused_data', 'summary', 'iters']:
             dir_key = dir_name
@@ -325,6 +326,8 @@ class Job:
     def calculate_corr_map(self, mov=None, save=True, return_mov_filt=False, crop=None, svd_info=None, iter_limit=None, 
                             parent_dir = None, update_main_params=True, svs = None, us=None):
         self.save_params(copy_dir=parent_dir, update_main_params=update_main_params)
+        if self.summary is None:
+            self.load_summary()
         mov_sub_dir_tag = 'mov_sub'
         iter_dir_tag = 'iters'
         if parent_dir is not None: 
@@ -338,10 +341,10 @@ class Job:
             mov = svd_info
             self.log("Using SVD shortcut, loading entire V matrix to memory")
             self.log("WARNING: if you encounter very large RAM usage during this run, use mov=svd_info instead of svd_info=svd_info. If it persists, reduce your batchsizes")
-            out = calculate_corrmap_from_svd(svd_info, params=self.params, log_cb=self.log, iter_limit=iter_limit, svs=svs, us=us, dirs = self.dirs, iter_dir_tag=iter_dir_tag, mov_sub_dir_tag=mov_sub_dir_tag)
+            out = calculate_corrmap_from_svd(svd_info, params=self.params, log_cb=self.log, iter_limit=iter_limit, svs=svs, us=us, dirs = self.dirs, iter_dir_tag=iter_dir_tag, mov_sub_dir_tag=mov_sub_dir_tag, summary=self.summary)
         else:
             if mov is None:
-                mov = self.get_registered_movie('registered_fused_data', 'fused')
+                mov = self.get_registered_movie('registered_fused_data', 'fused', edge_crop=False)
             if crop is not None and svd_info is None:
                 assert svd_info is None, 'cant crop with svd - easy fix'
                 self.params['detection_crop'] = crop
@@ -349,13 +352,13 @@ class Job:
                 mov = mov[crop[0][0]:crop[0][1], :, crop[1][0]:crop[1][1], crop[2][0]:crop[2][1]]
                 self.log("Cropped movie to shape: %s" % str(mov.shape))
             vmap, mean_img, max_img =  calculate_corrmap(mov, self.params, self.dirs, self.log, return_mov_filt=return_mov_filt, save=save,
-                                    iter_limit=iter_limit, iter_dir_tag=iter_dir_tag, mov_sub_dir_tag=mov_sub_dir_tag)
+                                    iter_limit=iter_limit, iter_dir_tag=iter_dir_tag, mov_sub_dir_tag=mov_sub_dir_tag, summary=self.summary)
         
         return (vmap, mean_img, max_img), mov_sub_dir, self.dirs[iter_dir_tag]
 
     def patch_and_detect(self, corrmap_dir_tag='', do_patch_idxs=None, compute_npil_masks=False, ts=(), combined_name='combined'):
         connector = '-' if len(corrmap_dir_tag) > 0 else ''
-        mov_sub = self.get_registered_movie(corrmap_dir_tag + connector + 'mov_sub', 'mov', axis=0)
+        mov_sub = self.get_registered_movie(corrmap_dir_tag + connector + 'mov_sub', 'mov', axis=0, edge_crop=False)
         vmap = self.load_iter_results(-1, dir_tag=corrmap_dir_tag + connector + 'iters')['vmap2'] ** 0.5
         patch_size_xy = self.params['patch_size_xy']
         patch_overlap_xy = self.params['patch_overlap_xy']
@@ -518,9 +521,9 @@ class Job:
         # return stats
         if mov is None:
             if not mov_shape_tfirst: 
-                mov = self.get_registered_movie('registered_fused_data','fused')
+                mov = self.get_registered_movie('registered_fused_data','fused', edge_crop=False)
             else:
-                mov = self.get_registered_movie('registered_fused_data','fused',axis=0)
+                mov = self.get_registered_movie('registered_fused_data','fused',axis=0, edge_crop=False)
         if crop:
             cz, cy, cx = self.params['svd_crop']
             self.log("Cropping with bounds: %s" % (str(self.params['svd_crop'])))
@@ -737,9 +740,9 @@ class Job:
 
         if mov is None:
             if not mov_shape_tfirst: 
-                mov = self.get_registered_movie('registered_fused_data','fused')
+                mov = self.get_registered_movie('registered_fused_data','fused', edge_crop=False)
             else:
-                mov = self.get_registered_movie('registered_fused_data', 'fused', axis=0)
+                mov = self.get_registered_movie('registered_fused_data', 'fused', axis=0, edge_crop=False)
             self.log("Loaded mov of size %s" % str(mov.shape))
         if self.params.get('svd_crop', None) is not None:
             crop = self.params['svd_crop']
@@ -790,10 +793,29 @@ class Job:
         mov_sub = utils.npy_to_dask(mov_sub_paths, axis=0)
         return mov_sub
 
-    def get_registered_movie(self, key='registered_fused_data', filename_filter='fused', axis=1):
+    def get_registered_movie(self, key='registered_fused_data', filename_filter='fused', axis=1, edge_crop = False):
             paths = self.get_registered_files(key, filename_filter)
             mov_reg = utils.npy_to_dask(paths, axis=axis)
+            if edge_crop:
+                mov_reg = self.edge_crop_movie(mov_reg)
+                
             return mov_reg
+
+    def edge_crop_movie(self, mov):
+        edge_crop_npix = self.params.get('edge_crop_npix', 0)
+        if edge_crop_npix == 0:
+            return mov
+        summary = self.summary
+        if summary is None: summary = self.load_summary()
+        nz, nt, ny, nx = mov.shape
+        yt, yb, xl, xr = utils.get_shifted_plane_bounds(summary['plane_shifts'], ny, nx, summary['ypad'][0], summary['xpad'][0])
+        for i in range(nz):
+            mov[i,:,:yt[i]+edge_crop_npix] = 0
+            mov[i,:,yb[i]-edge_crop_npix:] = 0
+            mov[i,:,:, :xl[i]+edge_crop_npix] = 0
+            mov[i,:,:, xr[i]-edge_crop_npix:] = 0
+
+        return mov
 
     def load_frame_counts(self):
         return n.load(os.path.join(self.dirs['job_dir'],'frames.npy'), allow_pickle=True).item()

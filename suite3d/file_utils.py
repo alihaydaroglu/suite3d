@@ -7,7 +7,7 @@ import os
 import numpy as n
 from . import tiff_utils as tfu
 
-def find_exp(subjects_dir, subject, date, expnum, verbose=False):
+def find_exp(subjects_dir, subject, date, expnum, verbose=False, get_si_params=True):
     
     si_params = {}
     
@@ -23,10 +23,12 @@ def find_exp(subjects_dir, subject, date, expnum, verbose=False):
     exp_str = "%s_%s_" % (subject,date)
     for expn in expnum: exp_str += '%s-' % str(expn)
     exp_str = exp_str[:-1]
-    si_params['rois'] = tfu.get_meso_rois(tif_paths[0])
-    si_params['vol_rate'] = tfu.get_vol_rate(tif_paths[0])
-    si_params['line_freq'] = 2 * tfu.get_tif_tag(tif_paths[0],'SI.hScan2D.scannerFrequency', number=True)
-    
+    if get_si_params:
+
+        si_params['rois'] = tfu.get_meso_rois(tif_paths[0])
+        si_params['vol_rate'] = tfu.get_vol_rate(tif_paths[0])
+        si_params['line_freq'] = 2 * tfu.get_tif_tag(tif_paths[0],'SI.hScan2D.scannerFrequency', number=True)
+        
     return tif_paths, si_params, exp_str
 def get_si_params(tif_path):
     si_params = {}
