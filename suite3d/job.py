@@ -388,6 +388,7 @@ class Job:
         mov_sub = self.get_registered_movie(corrmap_dir_tag + connector + 'mov_sub', 'mov', axis=0)
         nt,nz,ny,nx = mov_sub.shape
         stats = n.load(os.path.join(stats_dir, 'stats.npy'),allow_pickle=True)
+        n.save(os.path.join(stats_dir, 'stats_small.npy'), stats)
         stats = ext.compute_npil_masks_mp(stats, (nz,ny,nx), n_proc=self.params['n_proc_corr'])
         n.save(os.path.join(stats_dir, 'stats.npy'), stats)
         return stats_dir
