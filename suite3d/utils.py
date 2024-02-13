@@ -65,6 +65,34 @@ def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
         xn0 += dx
     return mov_pad, xpad, ypad, new_xs, og_xs
 
+def get_shifted_plane_bounds(plane_shifts, ny, nx, ypad, xpad):
+    ''' return the top/bottom and left/right borders of each plane
+    that has been shifted by pad_and_fuse'''
+    y_bottoms = []; y_tops = [];
+    x_lefts = []; x_rights = []
+    
+    ny_og = ny - ypad
+    nx_og = nx - xpad
+    ydir, xdir = n.sign(plane_shifts.mean(axis=0))
+    for plane_idx in range(plane_shifts.shape[0]):
+        y_shift, x_shift = n.round(plane_shifts[plane_idx]).astype(int)
+        if xdir < 0:
+            x_left = xpad + x_shift; x_right = nx  + (x_shift)
+        else:
+            x_left = x_shift; x_right = nx - (xpad - x_shift)
+            
+        if ydir < 0:
+            y_top = ypad + y_shift; y_bottom = ny + (y_shift)
+        else:
+            y_top = y_shift; y_bottom =  ny - (ypad - y_shift)
+        
+        assert y_bottom - y_top == ny_og, "something went wrong with the shapes!"
+        assert x_right - x_left == nx_og, "something went wrong with the shapes!"
+
+        y_bottoms.append(y_bottom); y_tops.append(y_top)
+        x_lefts.append(x_left); x_rights.append(x_right)
+    return n.array(y_tops), n.array(y_bottoms), n.array(x_lefts), n.array(x_rights)
+
 def make_blocks_3d(nz, ny, nx, block_shape, z_overlap=True):
     ybls, xbls,(n_y_bls, n_x_bls), __, __ = make_blocks(ny, nx, block_size=block_shape[1:])
     z_bl_starts = n.arange(0, nz - int(z_overlap), block_shape[0] - int(z_overlap))
@@ -428,13 +456,14 @@ def npy_to_dask(files, name='', axis=1):
     return arr
 
 
-def get_fusing_shifts(raw_img, borders, n_strip = 60, x0 = 0, plot=True):
+def get_fusing_shifts(raw_img, borders, n_strip = 60, x0 = 0, plot=True, return_ccs=False):
     borders = n.sort(borders)[1:]
     n_border = len(borders)
     nz, ny, nx = raw_img.shape
 
     best_shifts = n.zeros((nz, n_border))
     cc_maxs = n.zeros((nz, n_border))
+    all_ccs = n.zeros((nz,n_border,n_strip))
     for zidx in range(nz):
         for border_idx in range(n_border):
             xx = borders[border_idx]
@@ -445,10 +474,13 @@ def get_fusing_shifts(raw_img, borders, n_strip = 60, x0 = 0, plot=True):
             l0_norm = l0 / n.linalg.norm(l0)
             cc_full = (l0_norm[:,n.newaxis] *  rstrip_norm)
             cc = cc_full.sum(axis=0)
+            all_ccs[zidx,border_idx] = cc
             best_shifts[zidx, border_idx] = cc.argmax()
             cc_maxs[zidx, border_idx] = cc.max()
     if plot:
         plot_fuse_shifts(best_shifts, cc_maxs)
+    if return_ccs:
+        return best_shifts, cc_maxs, all_ccs
     return best_shifts, cc_maxs
 
 def plot_fuse_shifts(best_shifts, cc_maxs):

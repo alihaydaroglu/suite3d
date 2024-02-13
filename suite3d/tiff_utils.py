@@ -109,7 +109,7 @@ def get_tif_paths(dir_path, regex_filter=None, sort=True):
     if sort: tif_paths = sorted(tif_paths) #list(n.sort(tif_paths))
     return (tif_paths)
 
-def get_meso_rois(tif_path, max_roi_width_pix=145):
+def get_meso_rois(tif_path, max_roi_width_pix=145, find_common_z=True):
     tf = tifffile.TiffFile(tif_path)
     artists_json = tf.pages[0].tags["Artist"].value
 
@@ -117,11 +117,18 @@ def get_meso_rois(tif_path, max_roi_width_pix=145):
 
     rois = []
     warned = False
+
+    all_zs = [roi['zs'] for roi in si_rois]
+    if find_common_z:
+        common_z = list(set(all_zs[0]).intersection(*map(set,all_zs[1:])))[0]
+    else:
+        common_z = 0
+
     for roi in si_rois:
         if type(roi['scanfields']) != list:
             scanfield = roi['scanfields']
         else: 
-            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==0)[0][0]]
+            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==common_z)[0][0]]
 
     #     print(scanfield)
         roi_dict = {}
