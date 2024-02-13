@@ -13,6 +13,7 @@ from itertools import product
 from suite2p.io import lbm as lbmio
 import json
 from matplotlib import pyplot as plt
+import matplotlib.animation as animation
 
 def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize=(8,6), dpi=150, alpha=None, return_fig=True,
              ticks=False, ax = None, px_py=None, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
@@ -316,3 +317,88 @@ def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
     with mrcfile.new(fpath, overwrite=True) as mrc:
         mrc.set_data(data.astype(dtype))
         mrc.voxel_size = voxel_size
+
+
+def animate_frame(Frame, ax, FrameNo, flip=1, cmap='Greys_r', colorbar=False, alpha=None, other_args = {},
+             ticks=False, px_py=None, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
+             norm=None, interpolation='nearest', ax_off=False):
+    
+    """
+    Used to animate a single frame of animate_gif
+    """
+    im = []
+    new_args = {}
+    new_args.update(other_args)
+
+    if facecolor is not None:
+        ax.set_facecolor(facecolor)
+    ax.grid(False)
+    new_args['interpolation'] = interpolation
+    if vminmax_percentile is not None and vminmax is None:
+        non_nan = ~n.isnan(Frame)
+        new_args['vmin'] = n.percentile(Frame[non_nan], vminmax_percentile[0])
+        new_args['vmax'] = n.percentile(Frame[non_nan], vminmax_percentile[1])
+    if vminmax is not None:
+        new_args['vmin'] = vminmax[0]
+        new_args['vmax'] = vminmax[1]
+    if px_py is not None:
+        new_args['aspect'] = px_py[1]/px_py[0]
+    if alpha is not None:
+        new_args['alpha'] = alpha.copy()
+    if norm is not None:
+        new_args['norm'] = norm
+        new_args['vmin'] = None; new_args['vmax'] = None
+
+    #Add Title as text as artist animation is unique
+    title = ax.text(0.5, 1.01, f'FrameNo. {FrameNo}', horizontalalignment='center', verticalalignment='bottom', transform=ax.transAxes)
+
+    im.extend([ax.imshow(flip*Frame,cmap=cmap, **new_args), title])
+
+
+    if colorbar: plt.colorbar()
+    if not ticks:
+        ax.set_xticks([]); ax.set_yticks([]);
+    if xticks is not None:
+        ax.set_xticks(range(len(xticks)), xticks)
+    if yticks is not None:
+        ax.set_yticks(range(len(yticks)), yticks)
+    if ax_off:
+        ax.axis('off')
+
+    return im
+
+
+def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args = {}, figsize=(8,6), dpi=150, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None,
+                  **kwargs):
+    """ 
+    This function requires a 3D array and will return a .gif, the array will be animated over the first axis and will display ~ show_tiff for each frame.
+    """
+
+    Mov = Im3D.copy()
+    nFrames, ny, nx = Mov.shape
+    if exact_pixels:
+        figsize = (nx / dpi, ny / dpi)
+    
+    new_args = {}
+    new_args.update(other_args)
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+
+    vminmaxFrame = [0 , 0]
+    if vminmax_percentile is not None and vminmax is None:
+        non_nan = ~n.isnan(Mov)
+        vminmaxFrame[0] = n.percentile(Mov[non_nan], vminmax_percentile[0])
+        vminmaxFrame[1] = n.percentile(Mov[non_nan], vminmax_percentile[1])
+    if vminmax is not None:
+        vminmaxFrame[0] = vminmax[0]
+        vminmaxFrame[1] = vminmax[1]
+
+    ims = []
+    for i in range(nFrames):
+        im = animate_frame(Mov[i], ax, i, vminmax = vminmaxFrame,  **kwargs)
+        ims.append(im)
+
+    ani = animation.ArtistAnimation(fig, ims, interval = interval, repeat_delay = repeat_delay)   
+
+    ani.save(SaveDir)
