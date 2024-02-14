@@ -6,7 +6,9 @@ from pathlib import Path
 import copy
 import functools
 import pyqtgraph as pg
-from PyQt5.QtWidgets import QGraphicsProxyWidget, QPushButton, QCheckBox, QComboBox
+from PyQt5 import QtGui, QtCore, QtWidgets
+from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox
+from PyQt5.QtGui import QKeySequence
 from warnings import warn
 
 
@@ -859,7 +861,7 @@ if __name__ == '__main__':
     else:
         print("Running UI in current working dir")
 
-    ui = UI()
+    ui = UI(base_dir)
     ui.load_outputs()
     ui.create_ui()
 
