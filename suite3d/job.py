@@ -27,6 +27,7 @@ from .default_params import get_default_params
 from . import svd_utils as svu
 from . import ui
 
+
 class Job:
     def __init__(self, root_dir, job_id, params=None, tifs=None, overwrite=False, verbosity=10, 
                  create=True, params_path=None, parent_job=None, copy_parent_dirs = (), copy_parent_symlink=False):
@@ -446,7 +447,6 @@ class Job:
         except:
             self.log("Not a dask array")
 
-
         if vmap is None:
             iter_results = self.load_iter_results(-1, dir_tag = iter_dir_tag)
             if 'vmap' in iter_results:
@@ -454,13 +454,13 @@ class Job:
             else: 
                 vmap = iter_results['vmap2']**0.5
             if 'mean_img' in iter_results.keys():
-                patch_info['mean_img'] = iter_results['mean_img']
+                patch_info['mean_img'] = iter_results['mean_img'].astype(n.float32)
             if 'max_img' in iter_results.keys():
-                patch_info['max_img'] = iter_results['max_img']
+                patch_info['max_img'] = iter_results['max_img'].astype(n.float32)
         if self.params['normalize_vmap']:
             vmap = ui.normalize_planes(vmap)
         
-        patch_info['vmap'] = vmap.copy()
+        patch_info['vmap'] = vmap.copy().astype(n.float32)
         patch_info['vmap_unmasked'] = vmap[zs[0]:zs[1], ys[0]:ys[1], xs[0]:xs[1]]
         vmap_patch = n.zeros_like(mov[0])
         dz = vzs[0] - zs[0]; dy = vys[0] - ys[0]; dx = vxs[0] - xs[0]

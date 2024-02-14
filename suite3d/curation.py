@@ -6,11 +6,8 @@ from pathlib import Path
 import copy
 import functools
 import pyqtgraph as pg
-from PyQt5 import QtGui, QtCore, QtWidgets
-from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox
-from PyQt5.QtGui import QKeySequence
-
-
+from PyQt5.QtWidgets import QGraphicsProxyWidget, QPushButton, QCheckBox, QComboBox
+from warnings import warn
 
 
 default_display_params = {
@@ -19,7 +16,13 @@ default_display_params = {
     'scale' : (15,3,3), # size of a voxel in z,y,x in microns
     'contrast_percentiles' : (20,99.9), # the contrast limits (expressed as percentile) on startup
     'histogram_nbins' : 100,
+    'F_color' : 'red',
+    'Fneu_color' : 'blue',
+    'spks_color' : 'white',
+    'line_width' : 2,
+    'n_frames_plotted' : 3000,
 }
+
 
 dropdown_style="""
 QWidget {
@@ -63,7 +66,16 @@ QWidget {
 """
 
 
+warnings = {
+    'missing_iscell_extracted' : 'No iscell_extracted.npy found. Assuming all ROIs were extracted\n',
+    'activity_mismatch' : 'Mismatch between number of extracted ROIs and the number of 1s in iscell_extracted.npy[:,0]. This is bad - you have no way of corresponding cells and traces. Re-run extraction. Will not display traces. \n'
+}
+
+
 class UI:
+    '''
+    UI object
+    '''
     def __init__(self, base_path = None, verbose=True, display_params={}):
         '''
         Create a UI object in a given directory
@@ -88,11 +100,13 @@ class UI:
 
         self.stats    = []
         self.coords   = []
+        self.meds = []
         self.lams     = []
         self.n_roi    = 0 
         self.info     = {}
         self.shape    = (0,0,0)
         self.activity = {}
+        self.nframes_total = 0
         self.iscells  = {}
         self.display_roi_labels = n.empty(0)
         self.label_vols = {}
@@ -112,6 +126,10 @@ class UI:
         self.toggle_buttons = {}
         self.toggle_buttons_proxy = {}
         self.filter_toggles = {}
+
+        # 
+        self.display_activity = False
+        self.n_roi_activity = None
 
     def load_file(self, filename,allow_pickle=True, mmap_mode=None):
         '''
@@ -142,6 +160,10 @@ class UI:
             print("Overwriting existing %s" % filepath)
         n.save(filepath, data)
 
+    def log(self, text, level=0):
+        if self.verbose:
+            print(level * '    ', text)
+
     def load_outputs(self):
         """ 
         Loads the outputs of cell detection. If base_path is not specified,
@@ -149,19 +171,35 @@ class UI:
         stats.npy, info.npy and iscell.npy at a minimum.
         """
         # load the stats.npy file
-        self.stats = self.load_file('stats.npy')
+        # First, attempt to load in stats_small. This file doesn't have the neuropil
+        # coordinates, which inflate the size by 3-4x. 
+        self.stats = self.load_file('stats_small.npy')
+        if self.stats is None:
+            self.stats = self.load_file('stats.npy')
+            self.log("Loaded full stats.npy")
+        else:
+            self.log("Loaded stats_small.npy")
+
+
+        
         # unpack coords and lams from stats
         self.coords = [stat['coords'] for stat in self.stats]
         self.lams = [stat['lam'] for stat in self.stats]
+        self.meds = n.array([stat['med'] for stat in self.stats])
         # number of ROIs 
         self.n_roi = len(self.coords)
+
+        # by default, display all ROIs 
+        # this is done by setting base_labels to all ones
+        # users have the option to load the iscell file from the dropdown
         self.base_labels = n.ones(self.n_roi, bool)
+        self.display_roi_labels = self.base_labels.copy()
 
         # load the info.npy file
         self.info = self.load_file('info.npy')
+        self.log("Loaded info.npy")
         # save the shape of the volume 
         self.shape = self.info['vmap'].shape
-
 
         # other  files to look for in the path
         activity_files = ['F', 'Fneu', 'spks'] # these will be memmapped
@@ -169,15 +207,45 @@ class UI:
         self.activity = {}
         self.iscells = {}
 
-        if self.verbose: print("Loading iscell files")
-        for file in iscell_files:
-            self.iscells[file] = self.load_file(file + '.npy')
-        # the displayed cell/not-cell labels, a 1D array of size n_roi
-        self.display_roi_labels = self.base_labels.copy()
-
         if self.verbose: print("Looking for activity files")
         for file in activity_files:
             self.activity[file] = self.load_file(file + '.npy', mmap_mode='r')
+            if self.activity[file] is not None:
+                self.display_activity = True
+
+                # check the number of n_rois in the activity files
+                file_nroi = self.activity[file].shape[0]
+                self.nframes_total = self.activity[file].shape[1]
+                if self.n_roi_activity is not None:
+                    # make sure all activity.npy files have the same number of ROIs
+                    if file_nroi != self.n_roi_activity:
+                        warn("Mismatch between the number of extracted ROIs. Found %d ROIs in %s.npy, expected %d from other activity files. Re-run extraction" % (file_nroi, file, self.n_roi_activity))
+                        self.display_activity=False
+                        break
+                else:
+                    self.n_roi_activity = file_nroi
+
+        if self.verbose: print("Loading iscell files")
+        for file in iscell_files:
+            self.iscells[file] = self.load_file(file + '.npy')
+        
+        # if we don't find iscell_extracted, that probably means extraction hasn't happened
+        # maybe this should mean that no traces should be displayed?
+        # for now, if iscell_extracted isn't found, assume all ROIs are extracted. We'll
+        # double check that self.n_roi is equal to the number of rois in the activity files
+        # the displayed cell/not-cell labels, a 1D array of size n_roi     
+        if self.display_activity:
+            if self.iscells['iscell_extracted'] is None:
+                warn(warnings['missing_iscell_extracted'], RuntimeWarning)
+                self.iscells['iscell_extracted'] = n.ones((self.n_roi,2))
+            self.n_roi_extracted = self.iscells['iscell_extracted'][:,0].sum()
+            self.extracted_roi_idxs = n.where(self.iscells['iscell_extracted'][:,0])[0]
+            self.extracted_roi_flag = self.iscells['iscell_extracted'][:,0]
+            if self.n_roi_extracted != self.n_roi_activity:
+                warn(warnings['activity_mismatch'],RuntimeWarning)
+                self.display_activity=False
+
+
 
     def create_ui(self):
         self.make_all_label_vols()
@@ -199,20 +267,23 @@ class UI:
         self.create_toggles()
         self.create_base_labels_dropdown()
 
-        self.dock_windows()
+        self.dock_curation_window()
+
+        if self.display_activity:
+            self.build_activity_window()
+            self.create_activity_plot()
+            self.add_activity_callbacks()
+            self.dock_activity_window()
 
     def make_all_label_vols(self):
         '''
-        Makes four volumes of size self.shape. Two of them are RGB volumes with each cell colored differently,
-        one for ROIs labeled cells and one for non-cells. Two are integers, with -1 in all voxels that aren't part of 
-        an ROI, and cell_idx in all voxels that are part of an ROI, separated by cells and non-cells.
+        Makes four volumes of size self.shape. Two of them are RGB volumes with each cell colored differently, one for ROIs labeled cells and one for non-cells. Two are integers, with -1 in all voxels that aren't part of an ROI, and cell_idx in all voxels that are part of an ROI, separated by cells and non-cells.
         '''
         lam_max = self.display_params['lam_max']
         cmap = self.display_params['cmap']
         cell_idxs, cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, 
                         iscell_1d = self.display_roi_labels, cmap=cmap)
-        non_cell_idxs, non_cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, 
-                        iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
+        non_cell_idxs, non_cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
         
         self.label_vols = {
         'cell_idxs' : cell_idxs,
@@ -256,6 +327,13 @@ class UI:
             self.viewer = None
         self.viewer = napari.Viewer(title="Suite3D: %s" % self.base_dir.absolute())
 
+    def close(self):
+        '''
+        close the viewer
+        ## TODO add a warning if things aren't saved
+        '''
+        self.viewer.close()
+
     def add_images_to_viewer(self):
         '''
         Take the mean, maximum and correlation map images from info.npy and add them to the UI
@@ -291,6 +369,26 @@ class UI:
         self.layers['cell_rgb'].refresh()
         self.layers['non_cell_rgb'].refresh()
 
+    def add_activity_callbacks(self):
+        '''
+        Add callbacks to the cell_rgb and non_cell_rgb layers to allow right-click labelling
+        '''
+        cell_layer = self.layers['cell_rgb']
+        non_cell_layer = self.layers['non_cell_rgb']
+
+        @cell_layer.mouse_drag_callbacks.append
+        def click_handler_cell_layer(layer, event):
+            if event.button == 1: 
+                cz,cy,cx = n.array(layer.world_to_data(event.position)).astype(int)
+                roi_idx = self.get_roi_idx_from_position(cz,cy,cx, cell=True)
+                self.update_activity_plot(roi_idx)
+        @non_cell_layer.mouse_drag_callbacks.append
+        def click_handler_non_cell_layer(layer, event):
+            if event.button == 1:
+                cz,cy,cx = n.array(layer.world_to_data(event.position)).astype(int)
+                roi_idx = self.get_roi_idx_from_position(cz,cy,cx, cell=False)
+                self.update_activity_plot(roi_idx)
+
     def add_click_curation_callbacks(self):
         '''
         Add callbacks to the cell_rgb and non_cell_rgb layers to allow right-click labelling
@@ -302,32 +400,42 @@ class UI:
         def click_handler_cell_layer(layer, event):
             if event.button == 2: 
                 cz,cy,cx = n.array(layer.world_to_data(event.position)).astype(int)
-                self.mark_roi(cz,cy,cx, cell=False)
+                self.mark_roi(cz,cy,cx, mark_as_cell=False)
         @non_cell_layer.mouse_drag_callbacks.append
         def click_handler_non_cell_layer(layer, event):
             if event.button == 2:
                 cz,cy,cx = n.array(layer.world_to_data(event.position)).astype(int)
-                self.mark_roi(cz,cy,cx, cell=True)
+                self.mark_roi(cz,cy,cx, mark_as_cell=True)
 
-    def mark_roi(self, cz, cy, cx, cell=True):
+    def get_roi_idx_from_position(self, cz, cy, cx, cell=True):
         '''
-        Given the coordinate of a voxel, label the cell in this voxel as a cell/non-cell
-        and update the displays
+        Return the roi_idx that exists at a given voxel
+
+        Args:
+            cz (int): z coord
+            cy (int): y coord
+            cx (int): x coord
+            cell (True, optional): If true, looks for ROI in cells. If False, looks for it in non-cells. Defaults to True.
         '''
         if cell: 
-            # if we are marking it as a cell, then we must be looking at the non-cells
-            idxs = self.label_vols['non_cell_idxs']
-        else:
-            # vice versa
             idxs = self.label_vols['cell_idxs']
-        # above means that is you click cz,cy,cx in the non-cells view, and there is an ROI there
-        # that is already marked as a cell, it won't do anything
+        else:
+            idxs = self.label_vols['non_cell_idxs']
         roi_idx = idxs[cz, cy, cx]
+        return roi_idx
+
+    def mark_roi(self, cz, cy, cx, mark_as_cell=True):
+        '''
+        Given the coordinate of a voxel, label the cell in this voxel as a cell/non-cell
+        and update the displays. cell=True means mark as cell, cell=False means mark as non-cell
+        '''
+        # if we are marking it as a cell, look for it in non-cells, so pass ~mark_as_cell
+        roi_idx = self.get_roi_idx_from_position(cz,cy,cx,~mark_as_cell)
         if roi_idx < 1: # no ROI at this location
             return
         if self.verbose:
-            print("Marking ROI %d as %d" % (roi_idx, int(cell)))
-        self.click_curations['current'][roi_idx] = int(cell)
+            print("Marking ROI %d as %d" % (roi_idx, int(mark_as_cell)))
+        self.click_curations['current'][roi_idx] = int(mark_as_cell)
         self.save_file('click_curations.npy', self.click_curations, overwrite=True)
         self.update_click_plot()
         self.update_displayed_roi_labels()
@@ -387,32 +495,103 @@ class UI:
             self.filter_toggles[key] = False
 
 
+    def build_activity_window(self):
+        # this window contains the activity traces for the selected cell
+        self.activity_window = pg.GraphicsLayoutWidget()
+        self.activity_plot_area = pg.GraphicsLayout()
+
+        self.activity_window.addItem(self.activity_plot_area, row=0, col=0)
+
+    def create_activity_plot(self):
+        self.activity_curves = {}
+        self.activity_pens = {}
+        self.activity_plot_bounds = [0,min(self.display_params['n_frames_plotted'], self.nframes_total)]
+        self.activity_plot = self.activity_plot_area.addPlot(row=0, col=0)
+        self.activity_plot.addLegend()
+        self.activity_plot.setTitle("Click on an ROI to see its activity traces.")
+        for key in self.activity.keys():
+            # pen = pg.mkPen(color = self.display_params[key + "_color"],
+                        #    width =  self.display_params['line_width'])
+            # self.activity_pens[key] = pen
+            # self.activity_curves[key] = pg.PlotCurveItem([0],[0], pen=self.display_params[key + '_color'])
+            self.activity_curves[key] = pg.PlotCurveItem([0],[0], name = key,
+                                             pen=pg.mkPen(self.display_params[key + '_color'],
+                                                          width = self.display_params['line_width']))
+            self.activity_plot.addItem(self.activity_curves[key])
+
+                    
+        xax = self.activity_plot.getAxis('bottom')
+        xax.setLabel("Time (s)")
+
+    def update_activity_plot_title(self, roi_idx, extracted=True):
+        roi_is_cell = self.display_roi_labels[roi_idx]
+        if not extracted:
+            self.activity_plot.setTitle('ROI %05d was not extracted' % roi_idx)
+        else:
+            cell_str = 'cell' if roi_is_cell else 'non-cell'
+            cz,cy,cx = self.meds[roi_idx]
+
+            self.activity_plot.setTitle("ROI %05d. Position (pix): %02d, %03d, %03d (%s)" % (roi_idx,cz, cy,cx, cell_str)) 
+    def dock_activity_window(self):
+        # dock the activity window to napari
+        self.docked_activity_window = self.viewer.window.add_dock_widget(self.activity_window, name='Activity', area='bottom')
+
+    def update_activity_plot(self, roi_idx):
+
+        # first and last frames to plot
+        fmin, fmax = self.activity_plot_bounds
+        frame_times = n.arange(fmin, fmax) / self.info['all_params']['fs']
+
+        corrected_roi_idx = roi_idx
+        if roi_idx == -1 or not self.extracted_roi_flag[roi_idx]:
+            # if selected voxel is not in an ROI, or if the selected ROI was not extracted
+            for key in self.activity.keys():
+                self.activity_curves[key].setData(x=[0],y=[0])
+            self.update_activity_plot_title(roi_idx, extracted=False)
+            return
+        
+        if self.n_roi_extracted != self.n_roi:
+            # If not all ROIs were extracted, we need to do this correction:
+            # If ROI 5 was not extracted, then ROI 6 will correspond to row 5 of activity .npy files
+            # correct for this, so roi_idx is the original idx in stats.npy, and corrected_ is the 
+            # corresponding one in spks.npy, etc
+            corrected_roi_idx = n.where(self.extracted_roi_idxs == roi_idx)
+            if self.verbose:
+                print("ROI %d is the %d-th extracted ROI since not all detected ROIs were extracted. Double check this code!")
+            
+        for key in self.activity.keys():
+            if self.activity[key] is None:
+                continue
+            self.activity_curves[key].setData(x = frame_times,
+                                              y = self.activity[key][corrected_roi_idx, fmin:fmax])
+        
+        self.update_activity_plot_title(roi_idx, extracted=True)
+    
     def build_curation_window(self):
 
         # this is the window that will contain the histograms, buttons etc.
         self.curation_window = pg.GraphicsLayoutWidget()
 
         # create the plot and button areas and attach them to curation_window
-        self.plot_area = pg.GraphicsLayout()
+        self.curation_plot_area = pg.GraphicsLayout()
         self.button_area = pg.GraphicsLayout()
         self.dropdown_area = pg.GraphicsLayout()
         self.curation_window.addItem(self.dropdown_area, row=0,col=0)
-        self.curation_window.addItem(self.plot_area, row=1,col=0)
+        self.curation_window.addItem(self.curation_plot_area, row=1,col=0)
         self.curation_window.addItem(self.button_area, row=2, col=0)
 
-    def dock_windows(self):
+    def dock_curation_window(self):
         # dock the curation window to napari
-        self.dock_window = self.viewer.window.add_dock_widget(self.curation_window, name='ROI Features', area='right')
+        self.docked_curation_window = self.viewer.window.add_dock_widget(self.curation_window, name='ROI Features', area='right')
 
 
     def create_click_plot(self):
         '''
-        make an empty plot showing the number of marked and unmarked ROIs and add it to self.plot_area
+        make an empty plot showing the number of marked and unmarked ROIs and add it to self.curation_plot_area
         '''
         self.hist_graphs['click'] = pg.BarGraphItem(x=[1,2,3], height=[1,1,1], width=1)
-        self.hist_plots['click'] = self.plot_area.addPlot(row=0, col=1, title='# click-curated ROIs')
+        self.hist_plots['click'] = self.curation_plot_area.addPlot(row=0, col=1, title='# click-curated ROIs')
         self.hist_plots['click'].addItem(self.hist_graphs['click'])
-
 
     def update_click_plot(self):
         '''
@@ -441,7 +620,7 @@ class UI:
             feature_name = self.roi_feature_names[key]
             self.hist_graphs[key] = pg.BarGraphItem(x=[0], height=[1], width=1)
             # add the histogram to the plot area
-            self.hist_plots[key] = self.plot_area.addPlot(row=idx+1, col=1, title=feature_name)
+            self.hist_plots[key] = self.curation_plot_area.addPlot(row=idx+1, col=1, title=feature_name)
             self.hist_plots[key].addItem(self.hist_graphs[key])
 
             
@@ -506,7 +685,7 @@ class UI:
             self.toggle_buttons_proxy[key].setWidget(self.toggle_buttons[key])
             # self.toggle_area.addItem(self.toggle_buttons_proxy[key], row=idx, col=0)
             
-            self.plot_area.addItem(self.toggle_buttons_proxy[key], row=idx, col=0)
+            self.curation_plot_area.addItem(self.toggle_buttons_proxy[key], row=idx, col=0)
     
     def toggle_filter(self, filter_key):
         self.filter_toggles[filter_key] = self.toggle_buttons[filter_key].isChecked()
@@ -561,6 +740,7 @@ class UI:
 
 
 def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Set3'):
+    
     '''
     Make an RGBA volume with voxels occupied by cells having random colours
 
@@ -654,3 +834,33 @@ def get_percentiles(image, pmin=1, pmax=99, eps = 0.0001):
     vmin = n.percentile(im_f, pmin)
     vmax = n.percentile(im_f, pmax) + eps
     return vmin, vmax
+
+
+import argparse
+import sys
+
+def create_arg_parser():
+    # Creates and returns the ArgumentParser object
+
+    parser = argparse.ArgumentParser(description='Standalone viewer of Suite3D outputs.')
+    parser.add_argument('--output_dir', type=Path,default=None,
+                    help='Path to directory containing the Suite3D output, including stats.npy.')
+    return parser
+
+
+
+if __name__ == '__main__':
+    
+    arg_parser = create_arg_parser()
+    parsed_args = arg_parser.parse_args(sys.argv[1:])
+    base_dir = parsed_args.output_dir
+    if base_dir is not None:
+        print("Running UI in %s" % base_dir.absolute())
+    else:
+        print("Running UI in current working dir")
+
+    ui = UI()
+    ui.load_outputs()
+    ui.create_ui()
+
+    napari.run()
