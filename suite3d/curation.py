@@ -3,6 +3,8 @@ import os
 import numpy as n
 from matplotlib import pyplot as plt
 from pathlib import Path
+import argparse
+import sys
 import copy
 import functools
 import pyqtgraph as pg
@@ -659,6 +661,10 @@ class UI:
             max_line.setPos(self.roi_feature_ranges[key][1])
             min_line.setBounds((bins[0]-width, bins[-1]+width))
             max_line.setBounds((bins[0]-width, bins[-1]+width))
+        self.update_histogram_titles()
+    def update_histogram_titles(self):
+        for key in self.roi_features.keys():
+            self.hist_plots[key].setTitle(self.roi_feature_names[key] + '. Range: %.1f - %.1f' % self.roi_feature_ranges[key])
 
     def update_feature_ranges(self, key):
         '''
@@ -670,6 +676,7 @@ class UI:
         min_val = self.hist_range_lines[key][0].pos()[0]
         max_val = self.hist_range_lines[key][1].pos()[0]
         self.roi_feature_ranges[key] = min_val, max_val
+        self.update_histogram_titles()
         self.save_file('histogram_curation.npy', self.roi_feature_ranges)
         if self.verbose: print("Saving curation ranges")
         self.update_displayed_roi_labels()
@@ -837,9 +844,6 @@ def get_percentiles(image, pmin=1, pmax=99, eps = 0.0001):
     vmax = n.percentile(im_f, pmax) + eps
     return vmin, vmax
 
-
-import argparse
-import sys
 
 def create_arg_parser():
     # Creates and returns the ArgumentParser object
