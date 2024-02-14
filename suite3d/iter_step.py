@@ -215,10 +215,10 @@ def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return
         log_cb("Created files and dirs for %d batches" % n_batches, 1)
     else: mov_sub_paths = [None] * n_batches
 
-    vmap2 = n.zeros((nz,ny,nx))
-    mean_img = n.zeros((nz,ny,nx))
-    max_img = n.zeros((nz,ny,nx))
-    sdmov2 = n.zeros((nz,ny,nx))
+    vmap2 = n.zeros((nz,ny,nx), dtype=dtype)
+    mean_img = n.zeros((nz,ny,nx), dtype=dtype)
+    max_img = n.zeros((nz,ny,nx), dtype=dtype)
+    sdmov2 = n.zeros((nz,ny,nx), dtype=dtype)
     n_frames_proc = 0 
     if iter_limit is not None:
         log_cb("Running only %d iters" % iter_limit)
