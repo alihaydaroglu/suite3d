@@ -76,7 +76,7 @@ warnings = {
 }
 
 
-class UI:
+class CurationUI:
     '''
     UI object
     '''
@@ -826,6 +826,140 @@ def update_label_vols(label_vols, old_roi_labels, new_roi_labels, coords, lams,
 
     return label_vols
 
+class SweepUI:
+    def __init__(self, base_path=None, verbose=True, display_params = {}):       
+        '''
+        Create a UI object in a given directory
+
+        Args:
+            base_path (str, optional): Path to directory containing stats.npy. Defaults to None.
+            verbose (bool, optional): Defaults to True.
+        '''
+        if base_path is None:
+            self.base_dir = Path('.')
+        else:
+            self.base_dir = Path(base_path)
+        self.verbose = verbose
+
+        self.sweep_type = None
+
+        self.display_params = copy.deepcopy(default_display_params)
+        for key in display_params.keys():
+            if key in self.display_params.keys():
+                print("Updating %s" % key)
+                self.display_params[key] = display_params[key]
+            else:
+                print("Invalid key %s!" % display_params)
+
+    def load_outputs(self):
+        self.sweep_summary = self.load_file('sweep_summary.npy')
+        self.sweep_type = self.sweep_summary.get('type', 'corrmap')
+        self.vol_shape = self.sweep_summary['mean_img'].shape
+        self.mean_img = self.sweep_summary['mean_img']
+        self.max_img = self.sweep_summary['max_img']
+
+        self.log("Loaded summary for sweep of type: %s, with volume shape %02d, %04d, %04d" % ((self.sweep_type, ) + self.vol_shape))
+        
+        self.get_sweep_params()
+        self.log("Sweep over %d total combinations, varying the following parameters:")
+        for param in self.param_names:
+            self.log("%2d values for %s: %s" % (len(self.param_dict[param]), param, str(self.param_dict[param])), 1)
+
+        if self.sweep_type == 'corrmap':
+            self.parse_corrmap_sweep()
+
+    def create_ui(self):
+        self.start_viewer()
+        self.add_background_images_to_viewer()
+        if self.sweep_type == 'corrmap':
+            self.add_swept_corrmap_to_viewer()
+
+
+    def get_sweep_params(self):
+        self.param_dict = self.sweep_summary['param_sweep_dict']
+        self.param_names = self.sweep_summary['param_names']
+        self.n_params = len(self.param_names)
+        self.combinations = self.sweep_summary['combinations']
+
+        self.n_combinations = len(self.combinations)
+        self.n_vals_per_param = tuple([len(self.param_dict[k]) for k in self.param_names])
+        self.disp_shape = self.n_vals_per_param + self.vol_shape
+        self.disp_scale = tuple([1] * self.n_params) + self.display_params['scale']
+        self.axis_labels = tuple(self.param_names + ['z','y','x'])
+
+    def parse_corrmap_sweep(self):
+        self.shape = self.sweep_summary['vmaps'][0].shape
+        self.corrmap_vol = n.zeros(self.disp_shape)
+        for cidx, combination in enumerate(self.combinations):
+            param_idxs = [n.where(self.param_dict[self.param_names[pidx]] == combination[pidx])[0][0] \
+                            for pidx in range(self.n_params)]
+            self.corrmap_vol[tuple(param_idxs)] = self.sweep_summary['vmaps'][cidx]
+    
+    def add_background_images_to_viewer(self):
+        scale = self.display_params['scale']
+        pmin, pmax = self.display_params['contrast_percentiles']
+
+        clims = get_percentiles(self.mean_img, pmin, pmax)
+        self.viewer.add_image(self.mean_img, name='Mean Image', scale = scale, contrast_limits=clims)
+
+        clims = get_percentiles(self.max_img, pmin, pmax)
+        self.viewer.add_image(self.max_img, name='Max Image', scale = scale, contrast_limits=clims)
+
+    def add_swept_corrmap_to_viewer(self):
+        self.viewer.add_image(self.corrmap_vol, self.disp_scale, name='Corrmap Sweep')
+        self.viewer.dims.axis_labels = self.axis_labels
+
+
+    def start_viewer(self):
+        '''
+        Start a napari viewer instance
+        '''
+        if self.viewer is not None:
+            try: self.viewer.close()
+            except: print("Couldn't close old viewer")
+            self.viewer = None
+        self.viewer = napari.Viewer(title="Suite3D: %s" % self.base_dir.absolute())
+
+    def close(self):
+        '''
+        close the viewer
+        ## TODO add a warning if things aren't saved
+        '''
+        self.viewer.close()
+
+    def log(self, text, level=0):
+        if self.verbose:
+            print(level * '    ', text)
+
+    def load_file(self, filename,allow_pickle=True, mmap_mode=None):
+        '''
+        Light wrapper around n.load() to load an arbitrary .npy file from self.base_dir
+        '''
+        filepath = self.base_dir / filename
+        if not filepath.exists():
+            print("Did not find %s" % filepath)
+            return None
+        file = n.load(filepath, allow_pickle=allow_pickle, mmap_mode=mmap_mode)
+        if file.dtype == 'O' and file.ndim < 1: file = file.item()
+        return file
+        
+    def save_file(self, filename,data, overwrite=True):
+        '''
+        Light wrapper around n.save() to save an arbitrary data to a .npy file 
+        to self.basedir, with overwrite protection
+
+        Args:
+            filename (str): name + extension of file
+        '''
+
+        filepath = self.base_dir / filename
+        if filepath.exists():
+            if not overwrite:
+                print("File %s already exists. Not overwriting." % filepath)
+                return
+            print("Overwriting existing %s" % filepath)
+        n.save(filepath, data)
+
 def get_percentiles(image, pmin=1, pmax=99, eps = 0.0001):
     '''
     return the lower and higher percentiles of an image
@@ -849,6 +983,7 @@ def create_arg_parser():
     # Creates and returns the ArgumentParser object
 
     parser = argparse.ArgumentParser(description='Standalone viewer of Suite3D outputs.')
+    parser.add_argument('type', type=str, default='curation')
     parser.add_argument('--output_dir', type=Path,default=None,
                     help='Path to directory containing the Suite3D output, including stats.npy.')
     return parser
@@ -865,8 +1000,12 @@ if __name__ == '__main__':
     else:
         print("Running UI in current working dir")
 
-    ui = UI(base_dir)
+    if parsed_args.type == 'curation':
+        ui = CurationUI(base_dir)
+    elif parsed_args.type == 'sweep':
+        ui = SweepUI(base_dir)
     ui.load_outputs()
     ui.create_ui()
+        
 
     napari.run()
