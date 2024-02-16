@@ -75,8 +75,91 @@ warnings = {
     'activity_mismatch' : 'Mismatch between number of extracted ROIs and the number of 1s in iscell_extracted.npy[:,0]. This is bad - you have no way of corresponding cells and traces. Re-run extraction. Will not display traces. \n'
 }
 
+class GenericNapariUI:
+    '''
+    Generic class to create a napari-based UI from output files in a directory
+    '''
+    def __init__(self, base_path=None, verbose=True, display_params = {}):
+        '''
+        Create and initialize a generic UI class without launching the UI yet
 
-class CurationUI:
+        Args:
+            base_path (_type_, optional): _description_. Defaults to None.
+            verbose (bool, optional): _description_. Defaults to True.
+            display_params (dict, optional): _description_. Defaults to {}.
+        '''
+
+        if base_path is None:
+            self.base_dir = Path('.')
+        else:
+            self.base_dir = Path(base_path)
+
+        self.verbose = verbose
+
+        self.display_params = copy.deepcopy(default_display_params)
+        for key in display_params.keys():
+            if key in self.display_params.keys():
+                self.log("Display params: Updating %s" % key, 1)
+                self.display_params[key] = display_params[key]
+            else:
+                self.log("Display params: Invalid key %s!" % display_params, 1)
+
+
+        self.viewer = None
+    
+
+    def start_viewer(self):
+        '''
+        Start a napari viewer instance
+        '''
+        if self.viewer is not None:
+            try: self.viewer.close()
+            except: print("Couldn't close old viewer")
+            self.viewer = None
+        self.viewer = napari.Viewer(title="Suite3D: %s" % self.base_dir.absolute())
+
+    def close(self):
+        '''
+        close the viewer
+        ## TODO add a warning if things aren't saved
+        '''
+        self.viewer.close()
+
+    def log(self, text, level=0):
+        if self.verbose:
+            print(level * '    ', text)
+
+    def load_file(self, filename,allow_pickle=True, mmap_mode=None):
+        '''
+        Light wrapper around n.load() to load an arbitrary .npy file from self.base_dir
+        '''
+        filepath = self.base_dir / filename
+        if not filepath.exists():
+            print("Did not find %s" % filepath)
+            return None
+        file = n.load(filepath, allow_pickle=allow_pickle, mmap_mode=mmap_mode)
+        if file.dtype == 'O' and file.ndim < 1: file = file.item()
+        return file
+        
+    def save_file(self, filename,data, overwrite=True):
+        '''
+        Light wrapper around n.save() to save an arbitrary data to a .npy file 
+        to self.basedir, with overwrite protection
+
+        Args:
+            filename (str): name + extension of file
+        '''
+
+        filepath = self.base_dir / filename
+        if filepath.exists():
+            if not overwrite:
+                print("File %s already exists. Not overwriting." % filepath)
+                return
+            print("Overwriting existing %s" % filepath)
+        n.save(filepath, data)
+
+
+class CurationUI(GenericNapariUI):
     '''
     UI object
     '''
@@ -88,20 +171,8 @@ class CurationUI:
             base_path (str, optional): Path to directory containing stats.npy. Defaults to None.
             verbose (bool, optional): Defaults to True.
         '''
-        if base_path is None:
-            self.base_dir = Path('.')
-        else:
-            self.base_dir = Path(base_path)
-        self.verbose = verbose
-
-        self.display_params = copy.deepcopy(default_display_params)
-        for key in display_params.keys():
-            if key in self.display_params.keys():
-                print("Updating %s" % key)
-                self.display_params[key] = display_params[key]
-            else:
-                print("Invalid key %s!" % display_params)
-
+        
+        super().__init__(base_path, verbose, display_params)
         self.stats    = []
         self.coords   = []
         self.meds = []
@@ -134,39 +205,6 @@ class CurationUI:
         # 
         self.display_activity = False
         self.n_roi_activity = None
-
-    def load_file(self, filename,allow_pickle=True, mmap_mode=None):
-        '''
-        Light wrapper around n.load() to load an arbitrary .npy file from self.base_dir
-        '''
-        filepath = self.base_dir / filename
-        if not filepath.exists():
-            print("Did not find %s" % filepath)
-            return None
-        file = n.load(filepath, allow_pickle=allow_pickle, mmap_mode=mmap_mode)
-        if file.dtype == 'O' and file.ndim < 1: file = file.item()
-        return file
-        
-    def save_file(self, filename,data, overwrite=True):
-        '''
-        Light wrapper around n.save() to save an arbitrary data to a .npy file 
-        to self.basedir, with overwrite protection
-
-        Args:
-            filename (str): name + extension of file
-        '''
-
-        filepath = self.base_dir / filename
-        if filepath.exists():
-            if not overwrite:
-                print("File %s already exists. Not overwriting." % filepath)
-                return
-            print("Overwriting existing %s" % filepath)
-        n.save(filepath, data)
-
-    def log(self, text, level=0):
-        if self.verbose:
-            print(level * '    ', text)
 
     def load_outputs(self):
         """ 
@@ -320,24 +358,6 @@ class CurationUI:
             
         self.filter_toggles['click'] = False
         
-
-    def start_viewer(self):
-        '''
-        Start a napari viewer instance
-        '''
-        if self.viewer is not None:
-            try: self.viewer.close()
-            except: print("Couldn't close old viewer")
-            self.viewer = None
-        self.viewer = napari.Viewer(title="Suite3D: %s" % self.base_dir.absolute())
-
-    def close(self):
-        '''
-        close the viewer
-        ## TODO add a warning if things aren't saved
-        '''
-        self.viewer.close()
-
     def add_images_to_viewer(self):
         '''
         Take the mean, maximum and correlation map images from info.npy and add them to the UI
@@ -826,7 +846,8 @@ def update_label_vols(label_vols, old_roi_labels, new_roi_labels, coords, lams,
 
     return label_vols
 
-class SweepUI:
+
+class SweepUI(GenericNapariUI):
     def __init__(self, base_path=None, verbose=True, display_params = {}):       
         '''
         Create a UI object in a given directory
@@ -835,21 +856,8 @@ class SweepUI:
             base_path (str, optional): Path to directory containing stats.npy. Defaults to None.
             verbose (bool, optional): Defaults to True.
         '''
-        if base_path is None:
-            self.base_dir = Path('.')
-        else:
-            self.base_dir = Path(base_path)
-        self.verbose = verbose
-
+        super().__init__(base_path, verbose, display_params)
         self.sweep_type = None
-
-        self.display_params = copy.deepcopy(default_display_params)
-        for key in display_params.keys():
-            if key in self.display_params.keys():
-                print("Updating %s" % key)
-                self.display_params[key] = display_params[key]
-            else:
-                print("Invalid key %s!" % display_params)
 
     def load_outputs(self):
         self.sweep_summary = self.load_file('sweep_summary.npy')
@@ -861,7 +869,7 @@ class SweepUI:
         self.log("Loaded summary for sweep of type: %s, with volume shape %02d, %04d, %04d" % ((self.sweep_type, ) + self.vol_shape))
         
         self.get_sweep_params()
-        self.log("Sweep over %d total combinations, varying the following parameters:")
+        self.log("Sweep over %d total combinations, varying the following parameters:" % self.n_combinations)
         for param in self.param_names:
             self.log("%2d values for %s: %s" % (len(self.param_dict[param]), param, str(self.param_dict[param])), 1)
 
@@ -906,59 +914,8 @@ class SweepUI:
         self.viewer.add_image(self.max_img, name='Max Image', scale = scale, contrast_limits=clims)
 
     def add_swept_corrmap_to_viewer(self):
-        self.viewer.add_image(self.corrmap_vol, self.disp_scale, name='Corrmap Sweep')
+        self.viewer.add_image(self.corrmap_vol, scale = self.disp_scale, name='Corrmap Sweep')
         self.viewer.dims.axis_labels = self.axis_labels
-
-
-    def start_viewer(self):
-        '''
-        Start a napari viewer instance
-        '''
-        if self.viewer is not None:
-            try: self.viewer.close()
-            except: print("Couldn't close old viewer")
-            self.viewer = None
-        self.viewer = napari.Viewer(title="Suite3D: %s" % self.base_dir.absolute())
-
-    def close(self):
-        '''
-        close the viewer
-        ## TODO add a warning if things aren't saved
-        '''
-        self.viewer.close()
-
-    def log(self, text, level=0):
-        if self.verbose:
-            print(level * '    ', text)
-
-    def load_file(self, filename,allow_pickle=True, mmap_mode=None):
-        '''
-        Light wrapper around n.load() to load an arbitrary .npy file from self.base_dir
-        '''
-        filepath = self.base_dir / filename
-        if not filepath.exists():
-            print("Did not find %s" % filepath)
-            return None
-        file = n.load(filepath, allow_pickle=allow_pickle, mmap_mode=mmap_mode)
-        if file.dtype == 'O' and file.ndim < 1: file = file.item()
-        return file
-        
-    def save_file(self, filename,data, overwrite=True):
-        '''
-        Light wrapper around n.save() to save an arbitrary data to a .npy file 
-        to self.basedir, with overwrite protection
-
-        Args:
-            filename (str): name + extension of file
-        '''
-
-        filepath = self.base_dir / filename
-        if filepath.exists():
-            if not overwrite:
-                print("File %s already exists. Not overwriting." % filepath)
-                return
-            print("Overwriting existing %s" % filepath)
-        n.save(filepath, data)
 
 def get_percentiles(image, pmin=1, pmax=99, eps = 0.0001):
     '''
@@ -1004,6 +961,8 @@ if __name__ == '__main__':
         ui = CurationUI(base_dir)
     elif parsed_args.type == 'sweep':
         ui = SweepUI(base_dir)
+    else:
+        warn("Invalid argument")
     ui.load_outputs()
     ui.create_ui()
         
