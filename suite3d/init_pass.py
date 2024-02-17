@@ -245,4 +245,5 @@ def run_init_pass(job):
 
 
     job.log("Initial pass complete. See %s for details" % job.dirs['summary'])
+    job.summary = summary
 

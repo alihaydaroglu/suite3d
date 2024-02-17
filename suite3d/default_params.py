@@ -4,12 +4,18 @@ import copy
 def get_default_params():
     return copy.deepcopy(params)
 
+def get_matching_default_params(param_names):
+    param_subset = {}
+    for key in param_names:
+        param_subset[key] = copy.copy(param_names[key])
+    return param_subset
 
 params = {
 
     ### Mandatory parameters
-    'fs' : 2.8,
-    'tau': 1.3,
+    'fs' : 2.8, # volume rate
+    'tau': 1.3, # GCamp6s
+    'voxel_size_um' : (15, 2.5, 2.5), # size of a voxel in microns in z,y,x
     # Planes to analyze. 0 is deepest, 30 is shallowest
     # (the ScanImage channel mappings are corrected)
     'planes': n.arange(0, 30),
@@ -136,25 +142,26 @@ params = {
     # strength of normalization, 1.0 is standard. reduce below 1.0 (to ~0.8) if you see bright
     # blood vessels etc. in the correlation map
     'sdnorm_exp' : 1.0,
-
-
     # crop the edges of each plane by this many pixels before computing the corr map
     # this removes some registration-related artifacts
-    'edge_crop_npix' : 5,
+    'edge_crop_pix' : 5,
 
-    # Type (gaussian, unif) and xy/z extents of neuropil filter
+    # Type (gaussian, unif) and xy/z extents of neuropil filter in pixels
     'npil_filt_type' : 'unif',
-    'npil_filt_xy' : 5.0,
-    'npil_filt_z' : 1.5,
-    # Type and xy/z extents of the cell detection filter
-    'conv_filt_type' : 'gaussian',
-    'conv_filt_xy' : 1.0,
-    'conv_filt_z' : 0.75,
+    'npil_filt_xy_um' : 5.0,
+    'npil_filt_z_um' : 1.5,
+    # Type and xy/z extents of the cell detection filter in pixels
+    'cell_filt_type' : 'gaussian',
+    'cell_filt_xy_um' : 1.0,
+    'cell_filt_z_um' : 0.75,
     # activity threshold before calculating correlation map
     'intensity_thresh' : 0.25,
     # Width of the temporal hpf
     # Should divide t_batch_size evenly
     'temporal_hpf' : 400,
+    # sometimes, the top and bottom planes have different scales
+    # than the center planes in the correlation map. Attempt to fix it
+    'fix_vmap_edge_planes' : False,
     
     # number of time points to process at each iteration
     # should be a multiple of temporal_hpf

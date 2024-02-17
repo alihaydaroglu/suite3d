@@ -22,6 +22,8 @@ from . import init_pass
 from . import utils 
 from . import lbmio
 from .iter_step import register_dataset, fuse_and_save_reg_file, calculate_corrmap, calculate_corrmap_from_svd, register_dataset_gpu
+
+from . import corrmap 
 from . import extension as ext
 from .default_params import get_default_params
 from . import svd_utils as svu
@@ -32,13 +34,16 @@ class Job:
     def __init__(self, root_dir, job_id, params=None, tifs=None, overwrite=False, verbosity=10, 
                  create=True, params_path=None, parent_job=None, copy_parent_dirs = (), copy_parent_symlink=False):
         """Create a Job object that is a wrapper to manage files, current state, log etc.
-
         Args:
             root_dir (str): Root directory in which job directory will be created
             job_id (str): Unique name for the job directory
             params (dict): Job parameters (see examples)
             tifs (list) : list of full paths to tif files to be used
-            overwrite (bool, optional): If False, will throw error if job_dir exists. Defaults to False.
+            overwrite (bool, optional): If True, and creat=True, this will overwrite the params and dir files if they already existed for this job. If False, and create=True, this will throw an error if job_dir exists. Defaults to False.
+            params_path : if you have moved the job from somewhere else, the params_path needs to be provided explicitly. You probably also need to call update_root_path in that case TODO: fix how root directory is handled on job.dirs
+            parent_job : you can create a copy of a parent job, inheriting all the parameters in a new directory
+            copy_parent_dirs (tuple) : list of directories to copy from the parent job
+            copy_parent_symlink (bool) : if copying dirs, you can optionally symlink them
             verbosity (int, optional): Verbosity level. 0: critical only, 1: info, 2: debug. Defaults to 1.
         """
 
@@ -69,6 +74,14 @@ class Job:
             self.tifs = self.params.get('tifs', [])
 
     def copy_parent_job(self,parent_job, copy_dirs = (), symlink = False):
+        '''
+        Copy the initial pass results, params and more from another job
+
+        Args:
+            parent_job (Job): A job object that you want to copy over
+            copy_dirs (tuple, optional): Directories from the parent job you want to copy. Defaults to ().
+            symlink (bool, optional): If True, create symlinks to the parent directories instead of copying them fully. Defaults to False.
+        '''
         self.params = parent_job.load_params()
         self.copy_init_pass_from_job(parent_job)
         self.log("Copied init pass and parameters from parent job")
@@ -120,9 +133,69 @@ class Job:
                 header = '\n[%s][%02d] ' % (datetime_string, level)
                 f.write(header + '   ' * level + string)
 
+
+    def make_new_dir(self, dir_name, parent_dir_name = None, exist_ok=True, 
+                     dir_tag = None, add_to_dirs = True):
+        '''
+        Create a new directory and save the full path to it in self.dirs[dir_name]
+
+        Args:
+            dir_name (str): name of the directory to create
+            parent_dir_name (str, optional): Name of parent directory. If None, create new dir in the root job_dir. Defaults to None.
+            exist_ok (bool, optional): If False, throw an error if the directory already exists. Defaults to True.
+            dir_tag (str, optional): Typically, the path created (e.g. /data/s3d-testjob/dirname) is saved in job.dirs['dirname']. If you want the key to be something else, e.g. you want it to be saved under job.dirs['mydir'], set dir_tag = 'mydir'. Only used if you're doing something weird. Defaults to None.
+            add_to_dirs (bool, optional): if False, make the dir but don't add to job.dirs
+
+        Returns:
+            _type_: _description_
+        '''
+        if parent_dir_name is None:
+            parent_dir = self.job_dir
+        else: 
+            parent_dir = self.dirs[parent_dir_name]
+        if dir_tag is None:
+            dir_tag = dir_name
+        if parent_dir_name is not None:
+            dir_tag = parent_dir_name + '-' + dir_tag
+        
+        dir_path = os.path.join(parent_dir, dir_name)
+        if os.path.exists(dir_path):
+            self.log("Found dir %s with tag %s" % (dir_path, dir_tag), 2)
+        else:
+            os.makedirs(dir_path, exist_ok = exist_ok)
+            self.log("Created dir %s with tag %s" % (dir_path, dir_tag))
+        if add_to_dirs: self.dirs[dir_tag] = dir_path
+        n.save(os.path.join(self.job_dir, 'dirs.npy'), self.dirs)
+        return dir_path
+
+    def save_dirs(self, name='dirs', dirs=None):
+        '''
+        save dirs.npy, which contains the paths to all of the things in the job
+
+        Args:
+            name (str, optional): Name of the file to save, don't change. Defaults to 'dirs'.
+            dirs (dict, optional): If you want to save a different dirs file than self.dirs. Don't change . Defaults to None.
+        '''
+        if dirs is None: dirs = self.dirs
+        n.save(os.path.join(self.job_dir, '%s.npy' % name), dirs)
+
+    def load_dirs(self):
+        '''
+        Load dirs.npy into self.dirs
+        '''
+        self.dirs = n.load(os.path.join(self.job_dir , 'dirs.npy'),allow_pickle=True).item()
+
+
     def save_params(self, new_params=None, copy_dir = None, params=None, update_main_params=True):
-        """Update saved params in job_dir/params.npy
-        """
+        '''
+        Update saved params in job_dir/params.npy
+
+        Args:
+            new_params (dict, optional): Dictionary containing parameters to update. Defaults to None.
+            copy_dir (str, optional): If set, save a copy of the params file in the directory specified by the directory tag copy_dir. Defaults to None.
+            params (dict, optional): Params dict to update, usually set to None so we update the main params dict in self.params . Defaults to None.
+            update_main_params (bool, optional): Update the params.npy file in the root job_dir. Defaults to True.
+        '''
         if params is None:
             params = self.params
         if new_params is not None:
@@ -136,6 +209,16 @@ class Job:
         self.log("Updated main params file")
 
     def load_params(self, dir = None, params_path = None):
+        '''
+        Load params.npy into job.params
+
+        Args:
+            dir (str, optional): dir_tag for the directory where the params.npy is located. If None, load the one in the root directory. Ignored if params_path is not None. Defaults to None.
+            params_path (str, optional): Full path the a params file to load. Only use if doing something weird (e.g. loading a params file not called params.npy, or one that isn't in ia job directory). Defaults to None.
+
+        Returns:
+            _type_: _description_
+        '''
         if params_path is None:
             if dir is None:
                 dir = 'job_dir'
@@ -143,58 +226,6 @@ class Job:
         self.params = n.load(params_path, allow_pickle=True).item()
         self.log("Found and loaded params from %s" % params_path)
         return self.params
-
-    
-    def show_summary_plots(self):
-        summary = self.load_summary()
-        f1 = plt.figure(figsize=(8,4), dpi=200)
-        plt.plot(summary['plane_shifts'])
-        plt.xlabel("Plane")
-        plt.ylabel("# pixels of shift")
-        plt.title("LBM shift between planes")
-        plt.ylim(-100,100)
-
-        crosstalk_dir = os.path.join(self.dirs['summary'], 'crosstalk_plots')
-        gamma_fit_img = os.path.join(crosstalk_dir, 'gamma_fit.png')
-        plane_fits_img = os.path.join(crosstalk_dir, 'plane_fits.png')
-
-        if os.path.isfile(plane_fits_img):
-            im = imread(plane_fits_img)
-            f2,ax = plt.subplots(figsize=(im.shape[0] // 200, im.shape[1] // 200), dpi=400);
-            ax.imshow(im); ax.set_axis_off()
-        if os.path.isfile(gamma_fit_img):
-            im = imread(gamma_fit_img)
-            f3,ax = plt.subplots(figsize=(im.shape[0] // 200, im.shape[1] // 200), dpi=150);
-            ax.imshow(im); ax.set_axis_off()
-
-        
-        if 'fuse_shifts' in summary.keys() and 'fuse_ccs' in summary.keys():
-            if summary['fuse_shifts'] is not None:
-                utils.plot_fuse_shifts(summary['fuse_shifts'], summary['fuse_ccs'])
-
-                
-
-    def load_summary(self):
-        summary_path = os.path.join(self.dirs['summary'], 'summary.npy')
-        summary = n.load(summary_path,  allow_pickle=True).item()
-        self.summary = summary
-        return summary
-
-    def make_svd_dirs(self, n_blocks=None):
-        self.make_new_dir('svd')
-        self.make_new_dir('blocks', 'svd', dir_tag='svd_blocks')
-        block_dirs = []
-        if n_blocks is not None:
-            for i in range(n_blocks):
-                block_dirs.append(self.make_new_dir('%03d' % i, 'svd_blocks', dir_tag = 'svd_blocks_%03d' % i))
-            return block_dirs
-
-    def make_stack_dirs(self, n_stacks):
-        stack_dirs = []
-        self.make_new_dir('stacks', 'svd', dir_tag='svd_stacks')
-        for i in range(n_stacks):
-            stack_dirs.append(self.make_new_dir('%03d' % i, 'svd_stacks', dir_tag = 'svd_stacks_%03d' % i))
-        return stack_dirs
 
     def make_extension_dir(self, extension_root, extension_name='ext'):
         extension_dir = os.path.join(extension_root, 's3d-extension-%s' % self.job_id)
@@ -207,12 +238,6 @@ class Job:
         self.save_dirs()
         return extension_dir
 
-    def save_dirs(self, name='dirs', dirs=None):
-        if dirs is None: dirs = self.dirs
-        n.save(os.path.join(self.job_dir, '%s.npy' % name), dirs)
-
-    def load_dirs(self):
-        self.dirs = n.load(os.path.join(self.job_dir , 'dirs.npy'),allow_pickle=True).item()
 
     def update_root_path(self, new_root):
         old_dirs = copy.deepcopy(self.dirs)
@@ -224,23 +249,6 @@ class Job:
         self.save_dirs('old_dirs_%d' % n.random.randint(1,1e9), old_dirs)
 
 
-    def make_new_dir(self, dir_name, parent_dir_name = None, exist_ok=True, dir_tag = None):
-        if parent_dir_name is None:
-            parent_dir = self.job_dir
-        else: 
-            parent_dir = self.dirs[parent_dir_name]
-        if dir_tag is None:
-            dir_tag = dir_name
-        
-        dir_path = os.path.join(parent_dir, dir_name)
-        if os.path.exists(dir_path):
-            self.log("Found dir %s with tag %s" % (dir_path, dir_tag), 2)
-        else:
-            os.makedirs(dir_path, exist_ok = exist_ok)
-            self.log("Created dir %s with tag %s" % (dir_path, dir_tag))
-        self.dirs[dir_tag] = dir_path
-        n.save(os.path.join(self.job_dir, 'dirs.npy'), self.dirs)
-        return dir_path
 
     def init_job_dir(self, root_dir, job_id, exist_ok=False):
         """Create a job directory and nested dirs
@@ -294,11 +302,55 @@ class Job:
     def copy_init_pass_from_job(self, old_job):
         n.save(os.path.join(self.dirs['summary'],
                'summary.npy'), old_job.load_summary())
+        self.summary = old_job.summary
         
     def copy_init_pass(self,summary_old_job):
         n.save(os.path.join(self.dirs['summary'],
-               'summary.npy'), summary_old_job)
+               'summary.npy'), summary_old_job) 
+        self.summary = summary_old_job
+
+    def load_summary(self):
+        '''
+        Load the results of the init_pass
+
+        Returns:
+            dict: dictionary containing reference images, plane shifts, etc.
+        '''
+        summary_path = os.path.join(self.dirs['summary'], 'summary.npy')
+        summary = n.load(summary_path,  allow_pickle=True).item()
+        self.summary = summary
+        return summary
+
     
+    def show_summary_plots(self):
+        summary = self.load_summary()
+        f1 = plt.figure(figsize=(8,4), dpi=200)
+        plt.plot(summary['plane_shifts'])
+        plt.xlabel("Plane")
+        plt.ylabel("# pixels of shift")
+        plt.title("LBM shift between planes")
+        plt.ylim(-100,100)
+
+        crosstalk_dir = os.path.join(self.dirs['summary'], 'crosstalk_plots')
+        gamma_fit_img = os.path.join(crosstalk_dir, 'gamma_fit.png')
+        plane_fits_img = os.path.join(crosstalk_dir, 'plane_fits.png')
+
+        if os.path.isfile(plane_fits_img):
+            im = imread(plane_fits_img)
+            f2,ax = plt.subplots(figsize=(im.shape[0] // 200, im.shape[1] // 200), dpi=400);
+            ax.imshow(im); ax.set_axis_off()
+        if os.path.isfile(gamma_fit_img):
+            im = imread(gamma_fit_img)
+            f3,ax = plt.subplots(figsize=(im.shape[0] // 200, im.shape[1] // 200), dpi=150);
+            ax.imshow(im); ax.set_axis_off()
+
+        
+        if 'fuse_shifts' in summary.keys() and 'fuse_ccs' in summary.keys():
+            if summary['fuse_shifts'] is not None:
+                utils.plot_fuse_shifts(summary['fuse_shifts'], summary['fuse_ccs'])
+
+
+
     def register(self, tifs=None, start_batch_idx = 0, params=None, summary=None):
         self.make_new_dir('registered_fused_data')
         if params is None:
@@ -306,7 +358,7 @@ class Job:
         self.save_params(params=params, copy_dir='registered_fused_data')
         if summary is None:
             summary = self.load_summary()
-        n.save(os.path.join(self.dirs['registered_fused_data'], 'summary.npy'), summary)
+        # n.save(os.path.join(self.dirs['registered_fused_data'], 'summary.npy'), summary)
         if tifs is None:
             tifs = self.tifs
         register_dataset(tifs, params, self.dirs, summary, self.log, start_batch_idx = start_batch_idx)
@@ -320,11 +372,115 @@ class Job:
         register_dataset_gpu(tifs, params, self.dirs, summary, self.log,
                              max_gpu_batches=max_gpu_batches)
         
+
+    def calculate_corr_map(self, mov=None, save=True, iter_limit=None, 
+                           parent_dir_name=None):
+        '''
+        Calculate the correlation map. Saves the correlation map results in 
+        parent_dir/corrmap, and saves the neuropil subtracted movie in 
+        parent_dir/mov_sub
+
+        Args:
+            mov (ndarray or dask array, optional): nz, nt, ny, nx. If none, the registered movie will be used. Defaults to None.
+            save (bool, optional): Whether to create dirs and save results. Defaults to True.
+            iter_limit (int, optional): Number of batches to run. Set to None for the whole recording. Defaults to None.
+            parent_dir_name (str, optional): Name of the parent directory to place results in. Defaults to None.
+        '''
+        if save:
+            corr_map_dir = self.make_new_dir('corrmap', parent_dir_name=parent_dir_name)
+            mov_sub_dir = self.make_new_dir('mov_sub', parent_dir_name=parent_dir_name)
+        else: 
+            corr_map_dir = None
+            mov_sub_dir = None
+
+        if mov is None:
+            mov = self.get_registered_movie('registered_fused_data', 'fused')
+
+        self.save_params(copy_dir=corr_map_dir)
+        corrmap.calculate_corrmap(mov = mov, params=self.params, batch_dir = corr_map_dir,
+                                  mov_sub_dir = mov_sub_dir, iter_limit=iter_limit,
+                                  log = self.log)
+
+    def setup_sweep(self, params_to_sweep, sweep_name, sweep_parent_dir = 'sweeps', all_combinations=True):
+        # make a copy of the param file before the sweep
+        init_params = copy.deepcopy(self.params)
+        # make a directory for this sweep within the parent directory of all sweeps
+        sweep_dir = self.make_new_dir(sweep_name, parent_dir_name=sweep_parent_dir)
+        sweep_summary_path = os.path.join(sweep_dir, 'sweep_summary.npy')
+
         
+        param_per_run = {}
+        n_per_param = []
+        param_names = []
+        param_vals_list = []
+        for k in params_to_sweep.keys():
+            assert k in self.params.keys()
+            param_names.append(k)
+            n_per_param.append(len(params_to_sweep[k]))
+            param_vals_list.append(params_to_sweep[k])
+            param_per_run[k] = []
+        if all_combinations:
+            n_combs = n.product(n_per_param)
+            combinations = n.array(list(itertools.product(*param_vals_list)))
+        else:
+            n_combs = n.sum(n_per_param)
+            base_vals = [init_params[param_name] for param_name in param_names]
+            combinations = n.stack([base_vals]*n_combs)
+            cidx = 0
+            for pidx in range(len(param_names)):
+                for vidx in range(n_per_param[pidx]):
+                    combinations[cidx][pidx] = param_vals_list[pidx][vidx]
+                    cidx += 1
+        assert len(combinations) == n_combs
+
+        comb_strs = []; comb_params = []; comb_dir_tags = []; comb_dirs = []
+        for comb_idx, comb in enumerate(combinations):
+            comb_param = copy.deepcopy(init_params)
+            comb_str = 'comb%05d-params' % comb_idx
+            for param_idx, param in enumerate(param_names):
+                param_value = comb[param_idx]
+                if type(param_value) != str:
+                    val_str = '%.03f' % param_value
+                else: val_str = param_value
+                comb_str += '-%s_%s' % (param, val_str)
+                comb_param[param] = param_value    
+            comb_dir_tag = sweep_name + '-comb_%05d' % comb_idx
+            comb_dir = self.make_new_dir(comb_dir_tag, parent_dir_name=sweep_name,
+                                         add_to_dirs=False)
+            
+            comb_params.append(comb_param); comb_dirs.append(comb_dir); 
+            comb_strs.append(comb_str); comb_dir_tags.append(comb_dir_tag)
+        sweep_summary = {
+            'init_params' : init_params,
+            'comb_strs' : comb_strs,
+            'comb_dir_tags' : comb_dir_tags,
+            'comb_params' : comb_params,
+            'comb_dirs' : comb_dirs ,
+            'param_names' : param_names,
+            'combinations' : combinations,
+            'param_sweep_dict' : params_to_sweep}
+
+
+    def make_svd_dirs(self, n_blocks=None):
+        self.make_new_dir('svd')
+        self.make_new_dir('blocks', 'svd', dir_tag='svd_blocks')
+        block_dirs = []
+        if n_blocks is not None:
+            for i in range(n_blocks):
+                block_dirs.append(self.make_new_dir('%03d' % i, 'svd_blocks', dir_tag = 'svd_blocks_%03d' % i))
+            return block_dirs
+
+    def make_stack_dirs(self, n_stacks):
+        stack_dirs = []
+        self.make_new_dir('stacks', 'svd', dir_tag='svd_stacks')
+        for i in range(n_stacks):
+            stack_dirs.append(self.make_new_dir('%03d' % i, 'svd_stacks', dir_tag = 'svd_stacks_%03d' % i))
+        return stack_dirs
+    
 
 
 
-    def calculate_corr_map(self, mov=None, save=True, return_mov_filt=False, crop=None, svd_info=None, iter_limit=None, 
+    def calculate_corr_map_old(self, mov=None, save=True, return_mov_filt=False, crop=None, svd_info=None, iter_limit=None, 
                             parent_dir = None, update_main_params=True, svs = None, us=None):
         self.save_params(copy_dir=parent_dir, update_main_params=update_main_params)
         if self.summary is None:
@@ -647,7 +803,6 @@ class Job:
             self.log("Saved iscell", 2)
             n.save(os.path.join(combined_dir, 'info.npy'), info)
             self.log("Saved info (copied from patch) %d" % patch_idxs[info_use_idx], 2)
-
             return combined_dir
 
     def get_detected_cells(self, patch = 0, parent_dir_tag='detection'):
@@ -859,6 +1014,7 @@ class Job:
     def sweep_params(self, params_to_sweep,svd_info=None, mov=None, testing_dir_tag='sweep', 
                              n_test_iters = 1, all_combinations=True, do_vmap=True, svs=None,us=None,
                              test_parent_dir = None, delete_mov_sub = True):
+                             
         init_params = copy.deepcopy(self.params)
         testing_dir = self.make_new_dir(testing_dir_tag, parent_dir_name=test_parent_dir)
         sweep_summary_path = os.path.join(testing_dir, 'sweep_summary.npy')
@@ -903,6 +1059,7 @@ class Job:
             comb_params.append(comb_param); comb_dirs.append(comb_dir); 
             comb_strs.append(comb_str); comb_dir_tags.append(comb_dir_tag)
         sweep_summary = {
+            'init_params' : init_params,
             'comb_strs' : comb_strs,
             'comb_dir_tags' : comb_dir_tags,
             'comb_params' : comb_params,

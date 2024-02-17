@@ -65,6 +65,29 @@ def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
         xn0 += dx
     return mov_pad, xpad, ypad, new_xs, og_xs
 
+
+def edge_crop_movie(mov, summary=None, edge_crop_npix=None):
+    '''
+    Set the edges of each plane to 0 to prevent artifacts due to registration
+
+    Args:
+        mov (ndarray): nt, nz, ny, nx - watch out for the shape! 
+        summary (dict, optional): output of job.load_summary(). Defaults to None.
+        edge_crop_npix (int, optional): number of pixels to set to 0 on each edge. Defaults to None.
+
+    Returns:
+        mov: ndarray edge-cropped movie (operation done inplace)
+    '''
+    if edge_crop_npix is None or edge_crop_npix < 1:
+        return mov
+    __, nz, ny, nx = mov.shape
+    yt, yb, xl, xr = get_shifted_plane_bounds(summary['plane_shifts'], ny, nx, summary['ypad'][0], summary['xpad'][0])
+    for i in range(nz):
+        mov[i,:,:yt[i]+edge_crop_npix] = 0
+        mov[i,:,yb[i]-edge_crop_npix:] = 0
+        mov[i,:,:, :xl[i]+edge_crop_npix] = 0
+        mov[i,:,:, xr[i]-edge_crop_npix:] = 0
+
 def get_shifted_plane_bounds(plane_shifts, ny, nx, ypad, xpad):
     ''' return the top/bottom and left/right borders of each plane
     that has been shifted by pad_and_fuse'''
@@ -647,3 +670,54 @@ def benchmark(results_dir, outputs, timings, repo_status):
                            (repo_comp, timing_comp, output_comp), output_isclose)
     
 
+def to_int(val):
+    '''
+    Properly round a floating point number and return an integer
+
+    Args:
+        val (float): number
+    '''
+    return n.round(val).astype(int)
+
+def get_matching_params(param_names, params):
+    '''
+    Return a new dict with only specified keys of params
+
+    Args:
+        param_names (list): list of parameter names to keep
+        params (dict): dictionary of all parameters
+
+    Returns:
+        dict: matching_params, subset of params
+    '''
+    matching_params = {}
+    for param_name in param_names:
+        matching_params[param_name] = params[param_name]
+    return matching_params
+
+def default_log(string, level=None, *args, **kwargs): 
+    print(("   " * level) + string)
+
+
+
+def make_batch_paths(parent_dir, n_batches=1, prefix='batch', suffix='', dirs=True):
+    '''
+    Make n_batches paths within parent_dir to save iteration results. 
+    By default, it will create parent_dir/batch0001, parent_dir/batch0002, ...
+
+    Args:
+        parent_dir (str): Path to parent dir
+        n_batches (int, optional): Number of batches. Defaults to 1.
+        prefix (str, optional): Prefix of the name of batches. Defaults to 'batch'.
+        dirs (bool, optional): If True, make directories. Else, just make pathnames
+
+    Returns:
+        _type_: _description_
+    '''
+    batch_dirs = []
+    for batch_idx in range(n_batches):
+        batch_dir = os.path.join(parent_dir, (prefix + '%04d' + suffix) % batch_idx)
+        if dirs: os.makedirs(batch_dir, exist_ok=True)
+        batch_dirs.append(batch_dir)
+
+    return batch_dirs

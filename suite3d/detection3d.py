@@ -7,12 +7,155 @@ np = n
 from dask import array as darr
 from scipy.ndimage import maximum_filter, gaussian_filter, uniform_filter
 
-from . import utils as utils3d
+from . import utils
+from utils import default_log
 
 # This file is adapted from the original suite2p, many functions are substantially the same
 
 
-def threshold_reduce(mov: np.ndarray, intensity_threshold: float, fix_edges=False, mean_subtract=False, sqrt=True) -> np.ndarray:
+def accumulate_mean(mean, batch, ns_previous, sample_axis=0):
+    '''
+    Add a new batch of samples to a running mean (inplace). 
+
+    Args:
+        mean (ndarray): mean of each voxel across all previous batches
+        batch (ndarray): ns_batch new samples of size mean.shape
+        ns_previous (int): number of samples before the current batch
+        sample_axis (int, optional): Axis along which samples are stacked 
+                                     in batch. Defaults to 0.
+
+    Returns:
+        ndarray: new mean (array has been modified inplace)
+    '''
+    ns_batch = batch.shape[sample_axis]
+    ns_total = ns_batch + ns_previous
+    batch_mean = batch.mean(axis=sample_axis)
+    mean *= (ns_previous) / ns_total
+    mean += batch_mean * (ns_batch / ns_total)
+    return mean
+    
+def accumulate_max(maxx, batch, sample_axis=0):
+    '''
+    Add a new batch of samples to running maximum (inplace)
+
+    Args:
+        maxx (ndarray): maximum value for each voxel across previous batches
+        batch (_type_): ns_batch new samples of size mean.shape
+        sample_axis (int, optional):Axis along which samples are stacked 
+                                     in batch. Defaults to 0.
+
+    Returns:
+        maxx: new max for each voxel (array has been mofidied inplace)
+    '''
+    batch_max = batch.max(axis=sample_axis)
+    update_indices = batch_max > maxx
+    maxx[update_indices] = batch[update_indices]
+    return maxx
+
+def accumulate_sdmov(sdmov_2, batch, ns_previous, minibatch_size=500):
+    '''
+    Add a new batch of samples to the computation of sdmov. sdmov is 
+    of shape nz,ny,nx, and its value at each voxel can be roughly interpreted
+    as the 'jaggedness' or 'peakiness' of the timecourse of the voxel. 
+
+    First, we compute the difference between successive frames for each voxel.
+    Then, we compute the standard deviation of these differences.
+    To accumulate across batches, we keep sdmov_2, which is the sum-of-squares of these
+    differences. After adding each batch, the square root of sdmov_2 is the standard
+    deviation for all frames we have seen.
+
+    Args:
+        sdmov_2 (ndarray): (nz, ny, nx) the current sum-of-squares of 
+                            differences for each voxel
+        batch (_type_): (nt,nz,ny,nx) new frames to include
+        ns_previous (int): number of frames in previous batches
+        minibatch_size (int, optional): Number of frames to compute at once.
+
+    Returns:
+        _type_: _description_
+    '''
+    ns_batch = batch.shape[0]
+    ns_total = ns_batch + ns_previous
+    minibatch_size = min(ns_batch, minibatch_size)
+    for i in range(0, ns_batch, minibatch_size):
+        # compute the difference between successive frames for each voxel
+        dt_batch = n.diff(batch[i:i+minibatch_size], axis=0)
+        # squared sum of these across time, and accumulate into sdmov_2
+        sdmov_2 += (dt_batch ** 2).sum(axis=0)
+    sdmov = n.sqrt(n.maximum(1e-10 , (sdmov_2 / ns_total)))
+    return sdmov
+
+def normalize_movie_by_sdmov(mov, sdmov, sdnorm_exp = 1.0):
+    '''
+    Divide each voxel of the movie by sdmov ** sdnorm_exp
+
+    Args:
+        mov (ndarray): (nt,nz,ny,nx)
+        sdmov (ndarray): (nz,ny,nx)
+        sdnorm_exp (float, optional): Defaults to 1.0.
+
+    Returns:
+        mov: normalized movie (edited inplace)
+    '''
+    sdmov = sdmov ** sdnorm_exp
+    mov /= sdmov
+    return mov
+
+def filter_and_reduce_movie(mov, npil_filt_type, npil_filt_size, 
+                            cell_filt_type, cell_filt_size, intensity_thresh, 
+                            n_proc = 8, minibatch_size = 20, log=default_log):
+    '''
+    Apply neuropil subtraction and cell deteciton filters to movie. Then, threshold
+    each pixel, and take the squared sum of times where it exceeds the threshold. 
+    Optimized in shared memory.
+
+    Args:
+        mov (ndarray): nt,nz,ny,nx
+        npil_filt_type (str): unif for uniform, gaussian for gaussian filter
+        npil_filt_size (tuple): 3-tuple of sizes in z,y,x for the filters
+        cell_filt_type (str): same as npil_filt_type
+        cell_filt_size (tuple): same as cell_filt_size
+        intensity_thresh (float): Threshold above which pixel is considered active on a frame
+        n_proc (int, optional): Number of processors. Defaults to 8.
+        minibatch_size (int, optional): Number of frames to give each processor. Defaults to 20.
+        log (func, optional): Defaults to default_log.
+
+    Returns:
+        vmap_2, mov_sub
+    '''
+    
+    log("Loading movie into shared memory", 3)
+    # Load a copy of the movie into shared memory, and delete the original 
+    shmem_mov_sub, shmem_par_mov_sub, mov_sub = utils.create_shmem_from_arr(mov, copy=True)
+    del mov
+    # Create another array in shared memory for the neuropil-subtracted movie
+    shmem_mov_filt, shmem_par_mov_filt, mov_filt = utils.create_shmem_from_arr(
+        mov_sub, copy=False)
+    
+    log("Subtracting neuropil and applying cell filters", 3)
+    np_sub_and_conv3d_split_shmem(shmem_par_mov_sub, shmem_par_mov_filt, npil_filt_size, 
+                                  cell_filt_size, n_proc=n_proc, batch_size=minibatch_size,
+                                  np_filt_type=npil_filt_type, conv_filt_type = cell_filt_type)
+    
+    log("Reducing filtered movie to compute correlation map", 3)
+    vmap_2 = get_vmap3d(mov_filt, intensity_thresh, sqrt=False, 
+                        mean_subtract=False,fix_edges=False)
+    
+    # close and free the shared memory arrays
+    shmem_mov_filt.close(); shmem_mov_filt.unlink()
+    # before closing the mov_sub shared memory, make a copy of it to return 
+    mov_sub_return = mov_sub.copy()
+    shmem_mov_sub.close(); shmem_mov_sub.unlink()
+
+    return vmap_2, mov_sub_return
+    
+
+def accumulate_vmap_2(vmap_2, new_vmap_2):
+    vmap_2 += new_vmap_2
+    vmap = n.sqrt(vmap_2)
+
+
+def threshold_reduce(mov: np.ndarray, intensity_threshold: float, fix_edges=False, mean_subtract=False, sqrt=True) -> np.ndarray
     """
     Returns standard deviation of pixels, thresholded by 'intensity_threshold'.
     Run in a loop to reduce memory footprint.
@@ -56,6 +199,8 @@ def binned_mean(mov: np.ndarray, bin_size) -> np.ndarray:
     return mov.reshape(-1, bin_size, Lz, Ly, Lx).astype(np.float32).mean(axis=1)
 
 
+
+
 def standard_deviation_over_time(mov: np.ndarray, batch_size: int,sqrt=True, dask=False) -> np.ndarray:
     """
     Returns standard deviation of difference between pixels across time, computed in batches of batch_size.
@@ -91,7 +236,7 @@ def npsub_worker(mov_params, idxs, filt_size, mode, c1):
     print("RUNNING idxs: %s" % str(idxs))
     cp = cProfile.Profile()
     cp.enable()
-    shmem, mov = utils3d.load_shmem(mov_params)
+    shmem, mov = utils.load_shmem(mov_params)
     for idx in idxs:
         # mov[idx] = mov[idx] - (uniform_filter(mov[idx], size=filt_size, mode = mode) / c1)
         mov[idx] = mov[idx] - mov[idx] / c1
@@ -179,7 +324,7 @@ def square_convolution_2d(mov: np.ndarray, filter_size: int, filter_size_z: int)
         framet[:] = filter_size * uniform_filter(frame, size=filt_size, mode='constant')
     return movt
 
-def get_vmap3d(movu0,intensity_threshold=None, fix_edges=True, sqrt=True,mean_subtract=True):
+def get_vmap3d(movu0,intensity_threshold=None, fix_edges=False, sqrt=True,mean_subtract=True):
     nt, nz, ny, nx = movu0.shape
     vmap = n.zeros((nz,ny,nx))
     for i in range(nz):
@@ -188,8 +333,8 @@ def get_vmap3d(movu0,intensity_threshold=None, fix_edges=True, sqrt=True,mean_su
     return vmap
 
 def get_vmap3d_shmem_w(shmem_in, shmem_vmap, z_idx, intensity_threshold, fix_edges, sqrt):
-    shin, mov_in = utils3d.load_shmem(shmem_in)
-    shvmap, vmap_z = utils3d.load_shmem(shmem_vmap)
+    shin, mov_in = utils.load_shmem(shmem_in)
+    shvmap, vmap_z = utils.load_shmem(shmem_vmap)
 
     vmap_z[z_idx] = threshold_reduce(
         mov_in[:, z_idx], intensity_threshold, fix_edges, sqrt)
@@ -201,7 +346,7 @@ def get_vmap3d_shmem(shmem_in, shmem_vmap, intensity_threshold=None, fix_edges=T
     pool.starmap(get_vmap3d_shmem_w, [(shmem_in, shmem_vmap, z_idx, intensity_threshold, fix_edges, sqrt) for z_idx in range(nz)])
 
 def np_sub_and_conv3d_shmem_w(in_par, idxs, np_filt_size,conv_filt_size, c1, np_filt, conv_filt):
-    shin, mov_in = utils3d.load_shmem(in_par)
+    shin, mov_in = utils.load_shmem(in_par)
     for idx in idxs:
         mov_in[idx] = mov_in[idx] - \
             (np_filt(mov_in[idx], size=np_filt_size, mode='constant') / c1)
@@ -241,8 +386,8 @@ def np_sub_and_conv3d_shmem(shmem_in, np_filt_size, conv_filt_size, n_proc=8, ba
 
 
 def np_sub_and_conv3d_split_shmem_w(sub_par, filt_par, idxs, np_filt_size, conv_filt_size, c1, c2, np_filt, conv_filt):
-    sub_sh, mov_sub = utils3d.load_shmem(sub_par)
-    filt_sh,   mov_filt = utils3d.load_shmem(filt_par)
+    sub_sh, mov_sub = utils.load_shmem(sub_par)
+    filt_sh,   mov_filt = utils.load_shmem(filt_par)
     for idx in idxs:
         mov_sub[idx] = mov_sub[idx] - \
             (np_filt(mov_sub[idx], np_filt_size, mode='constant') / c1)
@@ -277,7 +422,7 @@ def np_sub_and_conv3d_split_shmem(shmem_sub, shmem_filt, np_filt_size, conv_filt
 
 
 def np_sub_shmem_w(in_par, idxs, np_filt_size, c1):
-    shin, mov_in = utils3d.load_shmem(in_par)
+    shin, mov_in = utils.load_shmem(in_par)
     for idx in idxs:
         mov_in[idx] = mov_in[idx] - \
             (uniform_filter(mov_in[idx],
@@ -341,7 +486,7 @@ def hp_rolling_mean_filter_mp(shmem_par, width, nz, n_proc = 16):
 def hp_rolling_mean_filter_shmem_w(shmem_par, z_idx, width) -> np.ndarray:
     if z_idx == 0:
         tic = time.time()
-    mov_sh, mov = utils3d.load_shmem(shmem_par)
+    mov_sh, mov = utils.load_shmem(shmem_par)
     if z_idx == 0: print(time.time() - tic)
     for i in range(0, mov.shape[0], width):
         mov[i:i + width, z_idx] -= mov[i:i + width, z_idx].mean(axis=0)
@@ -351,8 +496,8 @@ def hp_rolling_mean_filter_shmem_w(shmem_par, z_idx, width) -> np.ndarray:
     mov_sh.close()
 
 # def np_sub_shmem_w(in_par, out_par, idxs, size, c1):
-#     shin, mov_in = utils3d.load_shmem(in_par)
-#     shout, mov_out = utils3d.load_shmem(out_par)
+#     shin, mov_in = utils.load_shmem(in_par)
+#     shout, mov_out = utils.load_shmem(out_par)
 #     for idx in idxs:
 #         mov_out[idx] = mov_in[idx] - \
 #             (uniform_filter(mov_in[idx], size=size, mode='constant') / c1)
