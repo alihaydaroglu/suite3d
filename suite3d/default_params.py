@@ -170,7 +170,7 @@ params = {
     # for efficiency, should be t_batch_size / n_proc_corr
     'mproc_batchsize' : 25,
     # number of processors to use during correlation map calculation
-    'n_proc_corr': 8,
+    'n_proc': 8,
     # don't touch this
     'dtype': n.float32,
 

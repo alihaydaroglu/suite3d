@@ -8,7 +8,7 @@ from dask import array as darr
 from scipy.ndimage import maximum_filter, gaussian_filter, uniform_filter
 
 from . import utils
-from utils import default_log
+from .utils import default_log
 
 # This file is adapted from the original suite2p, many functions are substantially the same
 
@@ -49,7 +49,7 @@ def accumulate_max(maxx, batch, sample_axis=0):
     '''
     batch_max = batch.max(axis=sample_axis)
     update_indices = batch_max > maxx
-    maxx[update_indices] = batch[update_indices]
+    maxx[update_indices] = batch_max[update_indices]
     return maxx
 
 def accumulate_sdmov(sdmov_2, batch, ns_previous, minibatch_size=500):
@@ -153,6 +153,7 @@ def filter_and_reduce_movie(mov, npil_filt_type, npil_filt_size,
 def accumulate_vmap_2(vmap_2, new_vmap_2):
     vmap_2 += new_vmap_2
     vmap = n.sqrt(vmap_2)
+    return vmap
 
 
 def threshold_reduce(mov: np.ndarray, intensity_threshold: float, fix_edges=False, mean_subtract=False, sqrt=True):

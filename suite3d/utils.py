@@ -83,10 +83,12 @@ def edge_crop_movie(mov, summary=None, edge_crop_npix=None):
     __, nz, ny, nx = mov.shape
     yt, yb, xl, xr = get_shifted_plane_bounds(summary['plane_shifts'], ny, nx, summary['ypad'][0], summary['xpad'][0])
     for i in range(nz):
-        mov[i,:,:yt[i]+edge_crop_npix] = 0
-        mov[i,:,yb[i]-edge_crop_npix:] = 0
-        mov[i,:,:, :xl[i]+edge_crop_npix] = 0
-        mov[i,:,:, xr[i]-edge_crop_npix:] = 0
+        mov[:,i, :yt[i]+edge_crop_npix] = 0
+        mov[:,i, yb[i]-edge_crop_npix:] = 0
+        mov[:,i, :, :xl[i]+edge_crop_npix] = 0
+        mov[:,i, :, xr[i]-edge_crop_npix:] = 0
+
+    return mov
 
 def get_shifted_plane_bounds(plane_shifts, ny, nx, ypad, xpad):
     ''' return the top/bottom and left/right borders of each plane

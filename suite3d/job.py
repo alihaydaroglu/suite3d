@@ -157,14 +157,15 @@ class Job:
             dir_tag = dir_name
         if parent_dir_name is not None:
             dir_tag = parent_dir_name + '-' + dir_tag
-        
         dir_path = os.path.join(parent_dir, dir_name)
         if os.path.exists(dir_path):
             self.log("Found dir %s with tag %s" % (dir_path, dir_tag), 2)
         else:
             os.makedirs(dir_path, exist_ok = exist_ok)
             self.log("Created dir %s with tag %s" % (dir_path, dir_tag))
-        if add_to_dirs: self.dirs[dir_tag] = dir_path
+        if add_to_dirs: 
+            self.log("Updating self.dirs tag %s" % dir_tag,2)
+            self.dirs[dir_tag] = dir_path
         n.save(os.path.join(self.job_dir, 'dirs.npy'), self.dirs)
         return dir_path
 
@@ -249,26 +250,26 @@ class Job:
         self.save_dirs('old_dirs_%d' % n.random.randint(1,1e9), old_dirs)
 
 
-    def make_new_dir(self, dir_name, parent_dir_name = None, exist_ok=True, dir_tag = None):
-        if parent_dir_name is None:
-            parent_dir = self.job_dir
-        else: 
-            if parent_dir_name  not in self.dirs.keys():
-                self.log("Creating parent directory % s" % parent_dir_name)
-                self.make_new_dir(parent_dir_name)
-            parent_dir = self.dirs[parent_dir_name]
-        if dir_tag is None:
-            dir_tag = dir_name
+    # def make_new_dir(self, dir_name, parent_dir_name = None, exist_ok=True, dir_tag = None):
+    #     if parent_dir_name is None:
+    #         parent_dir = self.job_dir
+    #     else: 
+    #         if parent_dir_name  not in self.dirs.keys():
+    #             self.log("Creating parent directory % s" % parent_dir_name)
+    #             self.make_new_dir(parent_dir_name)
+    #         parent_dir = self.dirs[parent_dir_name]
+    #     if dir_tag is None:
+    #         dir_tag = dir_name
         
-        dir_path = os.path.join(parent_dir, dir_name)
-        if os.path.exists(dir_path):
-            self.log("Found dir %s with tag %s" % (dir_path, dir_tag), 2)
-        else:
-            os.makedirs(dir_path, exist_ok = exist_ok)
-            self.log("Created dir %s with tag %s" % (dir_path, dir_tag))
-        self.dirs[dir_tag] = dir_path
-        n.save(os.path.join(self.job_dir, 'dirs.npy'), self.dirs)
-        return dir_path
+    #     dir_path = os.path.join(parent_dir, dir_name)
+    #     if os.path.exists(dir_path):
+    #         self.log("Found dir %s with tag %s" % (dir_path, dir_tag), 2)
+    #     else:
+    #         os.makedirs(dir_path, exist_ok = exist_ok)
+    #         self.log("Created dir %s with tag %s" % (dir_path, dir_tag))
+    #     self.dirs[dir_tag] = dir_path
+    #     n.save(os.path.join(self.job_dir, 'dirs.npy'), self.dirs)
+    #     return dir_path
 
     def init_job_dir(self, root_dir, job_id, exist_ok=False):
         """Create a job directory and nested dirs
@@ -416,11 +417,26 @@ class Job:
         if mov is None:
             mov = self.get_registered_movie('registered_fused_data', 'fused')
 
-        self.save_params(copy_dir=corr_map_dir)
+        self.save_params(copy_dir=parent_dir_name + '-corrmap')
         self.corrmap = corrmap.calculate_corrmap(mov = mov, params=self.params, batch_dir = corr_map_dir,
-                                  mov_sub_dir = mov_sub_dir, iter_limit=iter_limit,
+                                  mov_sub_dir = mov_sub_dir, iter_limit=iter_limit, summary=self.load_summary(),
                                   log = self.log)
         
+        return self.corrmap
+        
+    def load_corr_map_results(self, parent_dir_name):
+        files = ['max_img.npy', 'mean_img.npy', 'vmap.npy']
+        corrmap_dir_tag = 'corrmap'
+        if parent_dir_name is not None:
+            corrmap_dir_tag = parent_dir_name + '-corrmap'
+        results = {}
+        for file in files:
+            if file in os.listdir(self.dirs[corrmap_dir_tag]):
+                results[file[:-4]] = n.load(os.path.join(self.dirs[corrmap_dir_tag], file))
+        return results
+
+        
+
 
     def setup_sweep(self, params_to_sweep, sweep_name, sweep_parent_dir = 'sweeps', all_combinations=True):
         # make a copy of the param file before the sweep
@@ -859,6 +875,8 @@ class Job:
         # print(iter_dirs)
         # return iter_dirs
         for dir in iter_dirs:
+            if not os.path.isdir(dir):
+                continue
             # print(os.listdir(dir))
             if 'vmap.npy' in os.listdir(dir) or 'vmap2.npy' in os.listdir(dir):
                 ret.append(dir)
@@ -870,7 +888,7 @@ class Job:
         res = {}
         for filename in ['vmap', 'max_img', 'mean_img', 'sum_img', 'vmap2']:
             if filename + '.npy' in os.listdir(iter_dir):
-                res[filename] = n.load(os.path.join(iter_dir, filename + '.npy'))
+                res[filename] = n.load(os.path.join(iter_dir, filename + '.npy'), allow_pickle=True)
         return res
 
     def fuse_registered_movie(self, files=None, save=True, n_proc=8, delete_original=False, parent_dir=None):

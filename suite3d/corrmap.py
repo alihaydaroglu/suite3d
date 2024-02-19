@@ -4,14 +4,14 @@ import gc
 from dask import array as darr
 from . import default_params 
 from . import detection3d as dtu
-from utils import to_int, default_log, get_matching_params, make_batch_paths
-import utils
+from .utils import to_int, default_log, get_matching_params, make_batch_paths
+from . import utils
 
 
-corr_map_param_names = ['voxel_size_um', 'temporal_hpf', 'edge_crop_pix',
+corr_map_param_names = ['voxel_size_um', 'temporal_hpf', 'edge_crop_npix',
                         'npil_filt_type', 'npil_filt_z_um', 'npil_filt_xy_um',
                         'cell_filt_type', 'cell_filt_z_um', 'cell_filt_xy_um',
-                        'fix_vmap_edge_planes']
+                        'fix_vmap_edge_planes', 'sdnorm_exp', 'intensity_thresh']
 
 computation_param_names = ['n_proc', 'dtype', 't_batch_size']
 
@@ -150,7 +150,7 @@ def compute_corr_map_batch(mov, corr_map_params = None,
     #### correlation map algorithm ##### 
 
     # set the edges of each plane to 0. Otherwise registration causes artifacts
-    mov = utils.edge_crop(mov, edge_crop_npix, summary)
+    mov = utils.edge_crop_movie(mov, summary, edge_crop_npix)
 
     # add the frames from the current batch to accumulated mean,max
     dtu.accumulate_mean(accum['mean_vol'], mov, nt)
