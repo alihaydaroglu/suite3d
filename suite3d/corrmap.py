@@ -3,7 +3,7 @@ import numpy as n
 import gc
 from dask import array as darr
 from . import default_params 
-import detection3d as dtu
+from . import detection3d as dtu
 from utils import to_int, default_log, get_matching_params, make_batch_paths
 import utils
 

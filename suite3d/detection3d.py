@@ -155,7 +155,7 @@ def accumulate_vmap_2(vmap_2, new_vmap_2):
     vmap = n.sqrt(vmap_2)
 
 
-def threshold_reduce(mov: np.ndarray, intensity_threshold: float, fix_edges=False, mean_subtract=False, sqrt=True) -> np.ndarray
+def threshold_reduce(mov: np.ndarray, intensity_threshold: float, fix_edges=False, mean_subtract=False, sqrt=True):
     """
     Returns standard deviation of pixels, thresholded by 'intensity_threshold'.
     Run in a loop to reduce memory footprint.

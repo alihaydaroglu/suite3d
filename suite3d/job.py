@@ -417,9 +417,10 @@ class Job:
             mov = self.get_registered_movie('registered_fused_data', 'fused')
 
         self.save_params(copy_dir=corr_map_dir)
-        corrmap.calculate_corrmap(mov = mov, params=self.params, batch_dir = corr_map_dir,
+        self.corrmap = corrmap.calculate_corrmap(mov = mov, params=self.params, batch_dir = corr_map_dir,
                                   mov_sub_dir = mov_sub_dir, iter_limit=iter_limit,
                                   log = self.log)
+        
 
     def setup_sweep(self, params_to_sweep, sweep_name, sweep_parent_dir = 'sweeps', all_combinations=True):
         # make a copy of the param file before the sweep
