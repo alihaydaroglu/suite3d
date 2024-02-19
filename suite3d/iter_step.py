@@ -81,7 +81,7 @@ def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return
     npil_filt_z = params['npil_filt_z']
     conv_filt_xy = params['conv_filt_xy']
     conv_filt_z = params['conv_filt_z']
-    edge_crop_npix = params.get('edge_crop_npix', 0)
+    edge_crop_npix = int(params.get('edge_crop_npix', 0))
     intensity_thresh = params.get('intensity_thresh', 0)
     dtype = params['dtype']
     n_proc_corr = params['n_proc_corr']
@@ -164,12 +164,13 @@ def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return
         if edge_crop_npix > 0:
             __, nz, ny, nx = movx.shape
             log_cb("Cropping edges by %d pix" % edge_crop_npix)
-            yt, yb, xl, xr = utils.get_shifted_plane_bounds(summary['plane_shifts'], ny, nx, summary['ypad'][0], summary['xpad'][0])
+            yt, yb, xl, xr = utils.get_shifted_plane_bounds(summary['plane_shifts'], ny, 
+                                                            nx, summary['ypad'][0], summary['xpad'][0])
             for i in range(nz):
-                movx[i,:,:yt[i]+edge_crop_npix] = 0
-                movx[i,:,yb[i]-edge_crop_npix:] = 0
-                movx[i,:,:, :xl[i]+edge_crop_npix] = 0
-                movx[i,:,:, xr[i]-edge_crop_npix:] = 0
+                movx[:,i,:yt[i]+edge_crop_npix] = 0
+                movx[:,i,yb[i]-edge_crop_npix:] = 0
+                movx[:,i,:, :xl[i]+edge_crop_npix] = 0
+                movx[:,i,:, xr[i]-edge_crop_npix:] = 0
 
 
         log_cb("Calculating corr map",2); tic = time.time()

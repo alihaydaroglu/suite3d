@@ -249,6 +249,26 @@ class Job:
         self.save_dirs('old_dirs_%d' % n.random.randint(1,1e9), old_dirs)
 
 
+    def make_new_dir(self, dir_name, parent_dir_name = None, exist_ok=True, dir_tag = None):
+        if parent_dir_name is None:
+            parent_dir = self.job_dir
+        else: 
+            if parent_dir_name  not in self.dirs.keys():
+                self.log("Creating parent directory % s" % parent_dir_name)
+                self.make_new_dir(parent_dir_name)
+            parent_dir = self.dirs[parent_dir_name]
+        if dir_tag is None:
+            dir_tag = dir_name
+        
+        dir_path = os.path.join(parent_dir, dir_name)
+        if os.path.exists(dir_path):
+            self.log("Found dir %s with tag %s" % (dir_path, dir_tag), 2)
+        else:
+            os.makedirs(dir_path, exist_ok = exist_ok)
+            self.log("Created dir %s with tag %s" % (dir_path, dir_tag))
+        self.dirs[dir_tag] = dir_path
+        n.save(os.path.join(self.job_dir, 'dirs.npy'), self.dirs)
+        return dir_path
 
     def init_job_dir(self, root_dir, job_id, exist_ok=False):
         """Create a job directory and nested dirs
@@ -949,22 +969,26 @@ class Job:
         mov_sub = utils.npy_to_dask(mov_sub_paths, axis=0)
         return mov_sub
 
-    def get_registered_movie(self, key='registered_fused_data', filename_filter='fused', axis=1, edge_crop = False):
+    def get_registered_movie(self, key='registered_fused_data', filename_filter='fused', axis=1, edge_crop = False, edge_crop_npix=None):
             paths = self.get_registered_files(key, filename_filter)
             mov_reg = utils.npy_to_dask(paths, axis=axis)
             if edge_crop:
-                mov_reg = self.edge_crop_movie(mov_reg)
+                mov_reg = self.edge_crop_movie(mov_reg,edge_crop_npix=edge_crop_npix)
                 
             return mov_reg
 
-    def edge_crop_movie(self, mov):
-        edge_crop_npix = self.params.get('edge_crop_npix', 0)
+    def edge_crop_movie(self, mov, edge_crop_npix=None):
+        if edge_crop_npix is None: 
+            edge_crop_npix = self.params.get('edge_crop_npix', 0)
         if edge_crop_npix == 0:
             return mov
+        self.log("Cropping the edges by %d pixels (accounting for plane shifts)" % edge_crop_npix)
         summary = self.summary
         if summary is None: summary = self.load_summary()
         nz, nt, ny, nx = mov.shape
         yt, yb, xl, xr = utils.get_shifted_plane_bounds(summary['plane_shifts'], ny, nx, summary['ypad'][0], summary['xpad'][0])
+        self.log(str(yt) + str(yb))
+        self.log(str(xl) + str(xr))
         for i in range(nz):
             mov[i,:,:yt[i]+edge_crop_npix] = 0
             mov[i,:,yb[i]-edge_crop_npix:] = 0
@@ -1010,6 +1034,51 @@ class Job:
 
         return nframes, jobids
     
+    def setup_sweep(self, params_to_sweep, sweep_name, sweep_parent_dir = 'sweeps', all_combinations=True):
+        init_params = copy.deepcopy(self.params)
+        sweep_dir = self.make_new_dir(sweep_name, parent_dir_name=sweep_parent_dir)
+        sweep_summary_path = os.path.join(sweep_dir, 'sweep_summary.npy')
+        param_per_run = {}
+        n_per_param = []
+        param_names = []
+        param_vals_list = []
+        for k in params_to_sweep.keys():
+            assert k in self.params.keys()
+            param_names.append(k)
+            n_per_param.append(len(params_to_sweep[k]))
+            param_vals_list.append(params_to_sweep[k])
+            param_per_run[k] = []
+        if all_combinations:
+            n_combs = n.product(n_per_param)
+            combinations = n.array(list(itertools.product(*param_vals_list)))
+        else:
+            n_combs = n.sum(n_per_param)
+            base_vals = [init_params[param_name] for param_name in param_names]
+            combinations = n.stack([base_vals]*n_combs)
+            cidx = 0
+            for pidx in range(len(param_names)):
+                for vidx in range(n_per_param[pidx]):
+                    combinations[cidx][pidx] = param_vals_list[pidx][vidx]
+                    cidx += 1
+        assert len(combinations) == n_combs
+
+        comb_strs = []; comb_params = []; comb_dir_tags = []; comb_dirs = []
+        for comb_idx, comb in enumerate(combinations):
+            comb_param = copy.deepcopy(init_params)
+            comb_str = 'comb%05d-params' % comb_idx
+            for param_idx, param in enumerate(param_names):
+                param_value = comb[param_idx]
+                if type(param_value) != str:
+                    val_str = '%.03f' % param_value
+                else: val_str = param_value
+                comb_str += '-%s_%s' % (param, val_str)
+                comb_param[param] = param_value    
+            comb_dir_tag = testing_dir_tag + '-comb_%05d' % comb_idx
+            comb_dir = self.make_new_dir(comb_dir_tag, parent_dir_name=testing_dir_tag)
+            
+            comb_params.append(comb_param); comb_dirs.append(comb_dir); 
+            comb_strs.append(comb_str); comb_dir_tags.append(comb_dir_tag)
+
 
     def sweep_params(self, params_to_sweep,svd_info=None, mov=None, testing_dir_tag='sweep', 
                              n_test_iters = 1, all_combinations=True, do_vmap=True, svs=None,us=None,
@@ -1066,7 +1135,8 @@ class Job:
             'comb_dirs' : comb_dirs ,
             'param_names' : param_names,
             'combinations' : combinations,
-            'param_sweep_dict' : params_to_sweep}
+            'param_sweep_dict' : params_to_sweep,
+            'complete' : False}
         n.save(sweep_summary_path, sweep_summary)
         self.log("Saving summary for %d combinations to %s" % (n_combs, sweep_summary_path))
 
@@ -1091,6 +1161,8 @@ class Job:
                 sweep_summary['mean_img'] = mean_img
                 sweep_summary['max_img'] = max_img
                 n.save(sweep_summary_path, sweep_summary)
+        sweep_summary['complete'] = True
+        n.save(sweep_summary_path, sweep_summary)
         return sweep_summary
     
     def vis_vmap_sweep(self,summary):
