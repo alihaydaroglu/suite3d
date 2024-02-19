@@ -137,6 +137,7 @@ class GenericNapariUI:
         if not filepath.exists():
             print("Did not find %s" % filepath)
             return None
+        self.log("Loading from %s" % filepath)
         file = n.load(filepath, allow_pickle=allow_pickle, mmap_mode=mmap_mode)
         if file.dtype == 'O' and file.ndim < 1: file = file.item()
         return file
