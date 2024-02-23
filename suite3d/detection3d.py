@@ -386,13 +386,14 @@ def np_sub_and_conv3d_shmem(shmem_in, np_filt_size, conv_filt_size, n_proc=8, ba
         pool.terminate()
 
 
+filter_mode = 'mirror'
 def np_sub_and_conv3d_split_shmem_w(sub_par, filt_par, idxs, np_filt_size, conv_filt_size, c1, c2, np_filt, conv_filt):
     sub_sh, mov_sub = utils.load_shmem(sub_par)
     filt_sh,   mov_filt = utils.load_shmem(filt_par)
     for idx in idxs:
         mov_sub[idx] = mov_sub[idx] - \
-            (np_filt(mov_sub[idx], np_filt_size, mode='constant') / c1)
-        mov_filt[idx] = conv_filt_size[-1] * conv_filt(mov_sub[idx], conv_filt_size, mode='constant') #/ c2
+            (np_filt(mov_sub[idx], np_filt_size, mode=filter_mode, cval = mov_sub[idx].mean()) / c1)
+        mov_filt[idx] = conv_filt_size[-1] * conv_filt(mov_sub[idx], conv_filt_size, mode=filter_mode, cval = mov_sub[idx].mean()) #/ c2
     sub_sh.close(); filt_sh.close()
 
 def np_sub_and_conv3d_split_shmem(shmem_sub, shmem_filt, np_filt_size, conv_filt_size, n_proc=8, batch_size=50, pool=None, np_filt_type='unif', conv_filt_type='unif'):
@@ -403,8 +404,8 @@ def np_sub_and_conv3d_split_shmem(shmem_sub, shmem_filt, np_filt_size, conv_filt
     if conv_filt_type == 'unif' : conv_filt = uniform_filter
     elif conv_filt_type == 'gaussian' : conv_filt = gaussian_filter
 
-    c1 = np_filt(n.ones((Lz, Ly, Lx)), np_filt_size, mode='constant')
-    c2 = conv_filt(n.ones((Lz, Ly, Lx)), conv_filt_size, mode='constant')
+    c1 = np_filt(n.ones((Lz, Ly, Lx)), np_filt_size, mode=filter_mode)
+    c2 = conv_filt(n.ones((Lz, Ly, Lx)), conv_filt_size, mode=filter_mode)
 
     batches = [n.arange(idx, min(nt, idx+batch_size))
                for idx in n.arange(0, nt, batch_size)]

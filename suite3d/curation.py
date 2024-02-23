@@ -1126,6 +1126,7 @@ class SweepUI(GenericNapariUI):
     def select_param(self, param_val_index,param_index):
         self.log("Setting param %s to %s" % (self.param_names[param_index], 
                                                 str(self.param_dict[self.param_names[param_index]][param_val_index])))
+        self.log(self.all_combinations)
         if self.all_combinations:
             self.current_index[param_index] = param_val_index 
             self.current_result = self.sweep_results[tuple(self.current_index)]
@@ -1133,6 +1134,7 @@ class SweepUI(GenericNapariUI):
         else:
             self.current_index = param_val_index
             self.current_param = self.param_names[param_index]
+            self.log("Fixing other values")
             self.current_result = self.sweep_results[self.current_param][self.current_index]
             self.current_params = self.sweep_params[self.current_param][self.current_index]
             self.fix_dropdown_values()
@@ -1142,8 +1144,11 @@ class SweepUI(GenericNapariUI):
         if not self.all_combinations:
             for param_name in self.param_names:
                 if param_name == self.current_param: continue
+                
                 param_val = self.current_params[param_name]
                 param_val_idx = n.where(self.param_dict[param_name] == param_val)[0]
+                
+                self.log("Fixing %s to %.2f (idx %d)" % (param_name, param_val, param_val_idx))
                 self.param_dropdowns[param_name].setCurrentIndex(param_val_idx)
             
 

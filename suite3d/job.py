@@ -444,7 +444,7 @@ class Job:
         
 
     def calculate_corr_map(self, mov=None, save=True, iter_limit=None, 
-                           parent_dir_name=None):
+                           output_dir_name=None):
         '''
         Calculate the correlation map. Saves the correlation map results in 
         parent_dir/corrmap, and saves the neuropil subtracted movie in 
@@ -454,11 +454,11 @@ class Job:
             mov (ndarray or dask array, optional): nz, nt, ny, nx. If none, the registered movie will be used. Defaults to None.
             save (bool, optional): Whether to create dirs and save results. Defaults to True.
             iter_limit (int, optional): Number of batches to run. Set to None for the whole recording. Defaults to None.
-            parent_dir_name (str, optional): Name of the parent directory to place results in. Defaults to None.
+            output_dir_name (str, optional): Name of the parent directory to place results in. Defaults to None.
         '''
         if save:
-            corr_map_dir = self.make_new_dir('corrmap', parent_dir_name=parent_dir_name)
-            mov_sub_dir = self.make_new_dir('mov_sub', parent_dir_name=parent_dir_name)
+            corr_map_dir = self.make_new_dir('corrmap', parent_dir_name=output_dir_name)
+            mov_sub_dir = self.make_new_dir('mov_sub', parent_dir_name=output_dir_name)
         else: 
             corr_map_dir = None
             mov_sub_dir = None
@@ -570,6 +570,39 @@ class Job:
 
         self.save_file(filename = 'sweep_summary', data = sweep_summary,path=sweep_dir)
         return sweep_summary
+
+
+    def sweep_corrmap(self, params_to_sweep, sweep_name='corrmap', all_combinations=True,
+                      mov=None, iter_limit=None):
+        sweep_summary = self.setup_sweep(params_to_sweep, sweep_name,         all_combinations=all_combinations)
+        sweep_summary['sweep_type'] = 'corrmap'
+        sweep_dir_path = sweep_summary['sweep_dir_path']
+        sweep_summary['results'] = []
+        combinations = sweep_summary['combinations']
+        n_combs = len(combinations)
+        for comb_idx in range(n_combs):
+            comb_dir_name = sweep_summary['comb_dir_names'][comb_idx]
+            comb_params = sweep_summary['comb_params'][comb_idx]
+            self.log("Running combination %02d/%02d" % (comb_idx+1, n_combs), 0)
+            self.params = comb_params
+            corrmap = self.calculate_corr_map(output_dir_name = comb_dir_name, 
+                                                 mov=mov, iter_limit=iter_limit)
+            results = {
+                'corrmap' : corrmap,
+                'output_dir' : comb_dir_name}
+            if comb_idx == 0:
+                maps = self.load_corr_map_results(comb_dir_name)
+                sweep_summary['mean_img'] = maps['mean_img']
+                sweep_summary['max_img'] = maps['max_img']
+
+            sweep_summary['results'].append(results)
+            self.save_file('sweep_summary', sweep_summary, path=sweep_dir_path)
+
+        sweep_summary['complete'] = True
+        self.save_file('sweep_summary', sweep_summary, path=sweep_dir_path)
+        self.params = sweep_summary['init_params']
+        return sweep_summary
+
 
     def sweep_segmentation(self, params_to_sweep, sweep_name='seg', all_combinations=False,patches_to_segment=None, ts = None, input_dir_name=None):
         '''
