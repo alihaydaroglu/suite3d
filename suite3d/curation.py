@@ -9,7 +9,8 @@ import copy
 import functools
 import pyqtgraph as pg
 from PyQt5 import QtGui, QtCore, QtWidgets
-from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox
+from PyQt5.QtCore import QSize
+from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox, QSizePolicy
 from PyQt5.QtGui import QKeySequence
 from warnings import warn
 
@@ -35,6 +36,19 @@ QWidget {
     font-family: Arial, sans-serif;
 }
 """
+
+title_style="""
+QLabel {
+    background-color: black;
+    color: green;
+    font-family: Arial, sans-serif;
+    font-size: 20px;
+}
+"""
+
+    # font-family: Arial;
+    # font-size: 40px;
+    # font-weight: bold;
 
 basicButtonStyle = """
 QWidget {
@@ -194,15 +208,19 @@ class GenericNapariUI:
         cmap = self.display_params['cmap']
         if self.display_roi_labels is None:
             self.display_roi_labels = n.ones(self.n_roi)
-        cell_idxs, cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, 
+        cell_idxs, cell_rgb,cell_rgb_unclipped,cell_rgb_counter = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, 
                         iscell_1d = self.display_roi_labels, cmap=cmap)
-        non_cell_idxs, non_cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
+        non_cell_idxs, non_cell_rgb,non_cell_rgb_unclipped,non_cell_rgb_counter = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
         
         self.label_vols = {
         'cell_idxs' : cell_idxs,
         'cell_rgb': cell_rgb,
+        'cell_rgb_unclipped': cell_rgb_unclipped,
+        'cell_rgb_counter': cell_rgb_counter,
         'non_cell_idxs' : non_cell_idxs,
-        'non_cell_rgb' : non_cell_rgb
+        'non_cell_rgb' : non_cell_rgb,
+        'non_cell_rgb_unclipped' : non_cell_rgb_unclipped,
+        'non_cell_rgb_counter' : non_cell_rgb_counter,
         }
     def add_cells_to_viewer(self):
         '''
@@ -223,7 +241,7 @@ class GenericNapariUI:
         self.layers['cell_rgb'].refresh()
         self.layers['non_cell_rgb'].refresh()
     
-    def compute_roi_features(self):
+    def compute_roi_features(self, reset_toggles=True):
         '''
         All features that appear on the histograms are computed here. Each feature should have a 1d 
         array of size n_roi in self.roi_features, and a human-readable name in self.roi_feature_names.
@@ -247,7 +265,7 @@ class GenericNapariUI:
                 vals = self.roi_features[key]
                 self.roi_feature_ranges[key] = vals.min(), vals.max()
             
-            self.filter_toggles[key] = False
+            if reset_toggles: self.filter_toggles[key] = False
 
     def create_histograms(self, plot_area):
         # if we are including the click histogram, leave the first row empty
@@ -259,7 +277,7 @@ class GenericNapariUI:
             feature_name = self.roi_feature_names[key]
             self.hist_graphs[key] = pg.BarGraphItem(x=[0], height=[1], width=1)
             # add the histogram to the plot area
-            print("Adding plot to %s" % str(plot_area))
+            # print("Adding plot to %s" % str(plot_area))
             self.hist_plots[key] = plot_area.addPlot(row=idx+start_idx, col=1, title=feature_name)
             self.hist_plots[key].addItem(self.hist_graphs[key])
 
@@ -341,12 +359,18 @@ class GenericNapariUI:
                 vmin, vmax = self.roi_feature_ranges[key]
                 feature_cells = (vals >= vmin) & (vals <= vmax)
                 self.display_roi_labels &= feature_cells
-        n_final_roi = self.display_roi_labels.sum()
+                self.log("Applying filter %s with values %.2f, %.2f" % (key, vmin, vmax), 2)
+        self.n_final_roi = self.display_roi_labels.sum()
+        self.log("%d cells left" % self.n_final_roi, 2)
 
         update_label_vols(self.label_vols, old_labels, self.display_roi_labels,
                           self.coords, self.lams, self.display_params['lam_max'], 
                           self.display_params['cmap'])
+        self.update_histogram_title()
         self.update_cells_in_viewer()
+
+    def update_histogram_title(self):
+        pass
 
     def create_toggles(self, plot_area):
         if 'click' in self.hist_graphs.keys():
@@ -806,6 +830,7 @@ def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Se
 
     cell_idxs_vol = -n.ones(shape, int)
     cell_rgb_vol = n.zeros(shape + (4,))
+    cell_rgb_vol_counter = n.zeros(shape, int)
 
     n_cells = len(coords)
     if iscell_1d is None:
@@ -819,12 +844,28 @@ def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Se
             cell_idxs_vol[cz,cy,cx] = i
             cell_rgb_vol[cz,cy,cx, :3] += cmap(i % n_cmap)[:3]
             cell_rgb_vol[cz,cy,cx, 3] += lam
+            cell_rgb_vol_counter[cz,cy,cx] += 1
 
     # RGB values are summed for voxels in multiple cells
     # make sure the maximum is 1
     # cell_rgb_vol[cell_rgb_vol > 1][:,:3] = cell_rgb_vol[cell_rgb_vol > 1][:,:3] % 1
-    cell_rgb_vol[cell_rgb_vol > 1] = 1
-    return cell_idxs_vol, cell_rgb_vol
+    cell_rgb_vol_unclipped = cell_rgb_vol.copy()
+    # cell_rgb_vol[cell_rgb_vol_counter > 0] = cell_rgb_vol[cell_rgb_vol_counter > 0] / cell_rgb_vol_counter[cell_rgb_vol_counter > 0]
+    # cell_rgb_vol[:,:,:,3] = cell_rgb_vol_unclipped[:,:,:,3]
+    # cell_rgb_vol[:,:,:,3] 
+    cell_rgb_vol = fix_rgb_vals(cell_rgb_vol, cell_rgb_vol_counter)
+
+    return cell_idxs_vol, cell_rgb_vol, cell_rgb_vol_unclipped, cell_rgb_vol_counter
+
+def fix_rgb_vals(unclipped_rgb_vol, cell_counter):
+    rgb_vol = unclipped_rgb_vol.copy()
+    alphas = rgb_vol[:,:,:,3].copy()
+    alphas[alphas > 1] = 1
+    
+    rgb_vol[cell_counter > 0] = rgb_vol[cell_counter > 0] / cell_counter[cell_counter > 0][:,n.newaxis]
+    rgb_vol[:,:,:,3] = alphas
+    return rgb_vol
+
 
 def update_label_vols(label_vols, old_roi_labels, new_roi_labels, coords, lams, 
                       lam_max=0.3, cmap='Set3'):
@@ -852,17 +893,24 @@ def update_label_vols(label_vols, old_roi_labels, new_roi_labels, coords, lams,
         if new_roi_labels[roi_idx] == 1: # if this ROI is marked a cell
             label_vols['non_cell_idxs'][cz,cy,cx] = -1 # remove from non-cell idxs
             label_vols['cell_idxs'][cz,cy,cx] = roi_idx # add to cell idxs
-            label_vols['non_cell_rgb'][cz,cy,cx, :3] -= cmap(roi_idx % n_cmap)[:3]
-            label_vols['non_cell_rgb'][cz,cy,cx, 3] -= lam # remove from non-cell rgb
-            label_vols['cell_rgb'][cz,cy,cx, :3] += cmap(roi_idx % n_cmap)[:3]
-            label_vols['cell_rgb'][cz,cy,cx, 3] += lam # add to cell rgb
+            label_vols['non_cell_rgb_unclipped'][cz,cy,cx, :3] -= cmap(roi_idx % n_cmap)[:3]
+            label_vols['non_cell_rgb_unclipped'][cz,cy,cx, 3] -= lam # remove from non-cell rgb
+            label_vols['non_cell_rgb_counter'][cz,cy,cx] -= 1
+            label_vols['cell_rgb_unclipped'][cz,cy,cx, :3] += cmap(roi_idx % n_cmap)[:3]
+            label_vols['cell_rgb_unclipped'][cz,cy,cx, 3] += lam # add to cell rgb
+            label_vols['cell_rgb_counter'][cz,cy,cx] += 1
         elif new_roi_labels[roi_idx] == 0: # if this ROI is marked a non-cell
             label_vols['cell_idxs'][cz,cy,cx] = -1 # remove from cell idxs
             label_vols['non_cell_idxs'][cz,cy,cx] = roi_idx # add to non-cell idxs
-            label_vols['cell_rgb'][cz,cy,cx, :3] -= cmap(roi_idx % n_cmap)[:3]
-            label_vols['cell_rgb'][cz,cy,cx, 3] -= lam # remove from cell rgb
-            label_vols['non_cell_rgb'][cz,cy,cx, :3] += cmap(roi_idx % n_cmap)[:3]
-            label_vols['non_cell_rgb'][cz,cy,cx, 3] += lam # add to non-cell rgb
+            label_vols['cell_rgb_unclipped'][cz,cy,cx, :3] -= cmap(roi_idx % n_cmap)[:3]
+            label_vols['cell_rgb_unclipped'][cz,cy,cx, 3] -= lam # remove from cell rgb
+            label_vols['cell_rgb_counter'][cz,cy,cx] -= 1
+            label_vols['non_cell_rgb_unclipped'][cz,cy,cx, :3] += cmap(roi_idx % n_cmap)[:3]
+            label_vols['non_cell_rgb_unclipped'][cz,cy,cx, 3] += lam # add to non-cell rgb
+            label_vols['non_cell_rgb_counter'][cz,cy,cx] += 1
+    
+    label_vols['cell_rgb'] = fix_rgb_vals(label_vols['cell_rgb_unclipped'], label_vols['cell_rgb_counter']) .copy()
+    label_vols['non_cell_rgb'] = fix_rgb_vals(label_vols['non_cell_rgb_unclipped'], label_vols['non_cell_rgb_counter']) .copy()
 
     return label_vols
 
@@ -931,22 +979,45 @@ class SweepUI(GenericNapariUI):
         self.add_corrmap_to_viewer()
     
         if self.sweep_type == 'segmentation':
-            self.make_all_label_vols()
             self.build_histogram_window()
-            self.add_cells_to_viewer()
             self.build_histogram_window()
+            self.build_histogram_title()
             self.create_histograms(self.histogram_plot_area)
             self.create_toggles(self.histogram_plot_area)
-            self.update_histograms()
+
+            self.make_all_label_vols()
+            self.add_cells_to_viewer()
+
+            self.display_current_result()
             self.dock_histogram_window()
 
         self.create_param_display()
 
     def build_histogram_window(self):
         self.histogram_window = pg.GraphicsLayoutWidget()
+        # self.histogram_window.sizeHint = lambda : QSize(h=100, w=100)
+        self.histogram_title_area = pg.GraphicsLayout()
+        # self.histogram_title_area.setSizeHint(QSize(h=10, w=50))
+        # self.histogram_title_area.sizeHint = lambda x:  QSize(h=10, w=50)
+        self.histogram_title_area.setSizePolicy(QSizePolicy.Minimum,QSizePolicy.Maximum)
         self.histogram_plot_area = pg.GraphicsLayout()
-        self.histogram_window.addItem(self.histogram_plot_area)
+        self.histogram_window.addItem(self.histogram_title_area, row=0, col=0)
+        self.histogram_window.addItem(self.histogram_plot_area, row=1, col = 0)
     
+    def build_histogram_title(self):
+        self.histogram_title = QLabel()
+        self.histogram_title.setAlignment(QtCore.Qt.AlignCenter)
+        self.histogram_title.setStyleSheet(title_style)
+        self.histogram_title_proxy = QGraphicsProxyWidget()
+        self.histogram_title_proxy.setWidget(self.histogram_title)
+        self.histogram_title_area.addItem(self.histogram_title_proxy)
+
+    def update_histogram_title(self):
+        # print("UPdating title to %d, %d" % (self.n_final_roi, self.n_roi))
+        self.histogram_title.setText(
+            "<b>%05d</b> of <b>%05d</b> ROIs displayed" % (self.n_final_roi, self.n_roi))
+
+
     def dock_histogram_window(self):
         # dock the curation window to napari
         self.docked_histogram_window = self.viewer.window.add_dock_widget(self.histogram_window, name='ROI Features', area='right')
@@ -958,15 +1029,15 @@ class SweepUI(GenericNapariUI):
             self.stats = self.current_result
             # get the coordaintes of each ROI, and compute ROI features
             self.unpack_stats()
-            self.compute_roi_features()
+            self.compute_roi_features(reset_toggles=False)
             # create the cell label volume and display it 
             self.make_all_label_vols()
-            self.update_cells_in_viewer()
             # update the histograms with new features
             # and apply the current filters 
             self.update_histograms()
+            self.update_histogram_titles()
             self.update_displayed_roi_labels()
-            
+            self.update_histogram_title()
 
 
     def get_sweep_params(self):
@@ -1050,7 +1121,6 @@ class SweepUI(GenericNapariUI):
 
             self.param_dropdowns[param_name] = dropdown
             self.param_labels[param_name] = label 
-        self.log("Docking params")
         self.docked_param_window = self.viewer.window.add_dock_widget(self.param_display_window, name='Params', area='left')
 
     def select_param(self, param_val_index,param_index):
