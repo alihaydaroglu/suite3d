@@ -9,7 +9,6 @@ import copy
 import functools
 import pyqtgraph as pg
 from PyQt5 import QtGui, QtCore, QtWidgets
-from PyQt5.QtCore import Horizontal, Vertical
 from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox
 from PyQt5.QtGui import QKeySequence
 from warnings import warn
@@ -107,7 +106,33 @@ class GenericNapariUI:
 
         self.layers = {}
         self.viewer = None
-    
+        self.display_roi_labels = None
+        self.roi_features = {}
+        self.roi_feature_names = {}
+        self.roi_feature_ranges = {}
+        # these will contain the plot areas, and graphs themselves
+        self.hist_plots = {}
+        self.hist_graphs = {}
+        self.hist_range_lines = {}
+
+        # 
+        self.display_activity = False
+        self.stats    = []
+
+        self.coords   = []
+        self.meds = []
+        self.lams     = []
+        self.n_roi    = 0 
+
+        self.shape    = (0,0,0)
+
+        self.label_vols = {}
+
+        self.viewer = None
+
+        self.toggle_buttons = {}
+        self.toggle_buttons_proxy = {}
+        self.filter_toggles = {}
 
     def start_viewer(self):
         '''
@@ -167,6 +192,8 @@ class GenericNapariUI:
         '''
         lam_max = self.display_params['lam_max']
         cmap = self.display_params['cmap']
+        if self.display_roi_labels is None:
+            self.display_roi_labels = n.ones(self.n_roi)
         cell_idxs, cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, 
                         iscell_1d = self.display_roi_labels, cmap=cmap)
         non_cell_idxs, non_cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
@@ -195,6 +222,154 @@ class GenericNapariUI:
 
         self.layers['cell_rgb'].refresh()
         self.layers['non_cell_rgb'].refresh()
+    
+    def compute_roi_features(self):
+        '''
+        All features that appear on the histograms are computed here. Each feature should have a 1d 
+        array of size n_roi in self.roi_features, and a human-readable name in self.roi_feature_names.
+        Any feature computed here will automatically get added to histograms in create_and_update_histograms
+        '''
+        self.roi_features['npix'] = n.array([len(stat['lam']) for stat in self.stats])
+        self.roi_features['corrmap_val'] = n.array([stat['peak_val'] for stat in  self.stats])
+        self.roi_features['act_thresh'] = n.array([stat['threshold'] for stat in  self.stats])
+
+        self.roi_feature_names['npix'] = '# Pixels in ROI'
+        self.roi_feature_names['corrmap_val'] = 'Max val of ROI in corr. map'
+        self.roi_feature_names['act_thresh'] = 'Activity threshold'
+
+        saved_ranges = self.load_file('histogram_curation.npy')
+
+        for key in self.roi_features.keys():
+            if saved_ranges is not None and key in saved_ranges.keys():
+                if self.verbose: print("Loading saved ranges for %s" % key)
+                self.roi_feature_ranges[key] = saved_ranges[key]
+            else:
+                vals = self.roi_features[key]
+                self.roi_feature_ranges[key] = vals.min(), vals.max()
+            
+            self.filter_toggles[key] = False
+
+    def create_histograms(self, plot_area):
+        # if we are including the click histogram, leave the first row empty
+        if 'click' in self.hist_graphs.keys():
+            start_idx = 1
+        else: start_idx = 0
+        for idx, key in enumerate(self.roi_features.keys()):
+            # get the name of the feature, and array of vals
+            feature_name = self.roi_feature_names[key]
+            self.hist_graphs[key] = pg.BarGraphItem(x=[0], height=[1], width=1)
+            # add the histogram to the plot area
+            print("Adding plot to %s" % str(plot_area))
+            self.hist_plots[key] = plot_area.addPlot(row=idx+start_idx, col=1, title=feature_name)
+            self.hist_plots[key].addItem(self.hist_graphs[key])
+
+            
+            # add draggable max/min lines to the histograms
+            min_line = pg.InfiniteLine(pos=0, movable=True)
+            max_line = pg.InfiniteLine(pos=1, movable=True)            
+            self.hist_plots[key].addItem(min_line)
+            self.hist_plots[key].addItem(max_line)
+            self.hist_range_lines[key] = [min_line, max_line]            
+            # when a movement of the line is finished, call the update_histogram_ranges function
+            min_line.sigPositionChangeFinished.connect(functools.partial(self.update_feature_ranges, key))
+            max_line.sigPositionChangeFinished.connect(functools.partial(self.update_feature_ranges, key))
+
+    def update_histograms(self):
+        '''
+        update the histograms. Show only ROIs that are selected in the 'base_labels'
+        '''
+        nbins = self.display_params['histogram_nbins']
+        
+        # loop over all of the computer ROI features
+        n_hist = len(self.roi_features.keys())
+        for idx,key in enumerate(self.roi_features.keys()):
+            feature = self.roi_features[key]
+            feature = feature[self.base_labels]
+            # compute histogram and plot it 
+            vals, bins = n.histogram(feature, bins=nbins)
+            bin_centers = (bins[1:] + bins[:-1])/2
+            width = n.diff(bins).mean()
+
+            self.hist_graphs[key].setOpts(x = bin_centers, height=vals, width=width)
+
+            min_line, max_line = self.hist_range_lines[key]
+            min_line.setPos(self.roi_feature_ranges[key][0])
+            max_line.setPos(self.roi_feature_ranges[key][1])
+            min_line.setBounds((bins[0]-width, bins[-1]+width))
+            max_line.setBounds((bins[0]-width, bins[-1]+width))
+        self.update_histogram_titles()
+
+        
+    def update_histogram_titles(self):
+        for key in self.roi_features.keys():
+            self.hist_plots[key].setTitle(self.roi_feature_names[key] + '. Range: %.1f - %.1f' % self.roi_feature_ranges[key])
+
+    def update_feature_ranges(self, key, save=True):
+        '''
+        read the position of lines on the curation histograms, and update the displayed ROIs
+
+        Args:
+            key (_type_): _description_
+        '''
+        min_val = self.hist_range_lines[key][0].pos()[0]
+        max_val = self.hist_range_lines[key][1].pos()[0]
+        self.roi_feature_ranges[key] = min_val, max_val
+        self.update_histogram_titles()
+        if save:
+            self.save_file('histogram_curation.npy', self.roi_feature_ranges)
+            if self.verbose: print("Saving curation ranges")
+        self.update_displayed_roi_labels()
+    
+    def update_displayed_roi_labels(self):
+        '''
+        Update the cell/not-cell labels of displayed ROIs with the various filters.
+        Only uses the filter sources that are toggled on in self.filter_toggles
+        '''
+        # print("UPDATING DISPLAY")
+        old_labels = self.display_roi_labels.copy()
+        self.display_roi_labels[:] = self.base_labels.copy()
+        n_total_roi = self.display_roi_labels.sum()
+        if 'click' in self.filter_toggles.keys() and self.filter_toggles['click']:
+            # get the ROIs that have been click-marked as cells/non-cells
+            click_noncells = (self.click_curations['current'] == 0)
+            click_cells = (self.click_curations['current'] == 1)
+            self.display_roi_labels[click_noncells] = False
+            self.display_roi_labels[click_cells] = True
+        for key in self.roi_features.keys():
+            if self.filter_toggles[key]:
+                vals = self.roi_features[key]
+                vmin, vmax = self.roi_feature_ranges[key]
+                feature_cells = (vals >= vmin) & (vals <= vmax)
+                self.display_roi_labels &= feature_cells
+        n_final_roi = self.display_roi_labels.sum()
+
+        update_label_vols(self.label_vols, old_labels, self.display_roi_labels,
+                          self.coords, self.lams, self.display_params['lam_max'], 
+                          self.display_params['cmap'])
+        self.update_cells_in_viewer()
+
+    def create_toggles(self, plot_area):
+        if 'click' in self.hist_graphs.keys():
+            toggle_button_keys = ['click'] + list(self.roi_features.keys())
+        else: 
+            toggle_button_keys = list(self.roi_features.keys())
+        for idx,key in enumerate(toggle_button_keys):
+            self.toggle_buttons[key] = QCheckBox()
+            self.toggle_buttons[key].setCheckable(True)
+            self.toggle_buttons[key].setChecked(self.filter_toggles[key])
+            self.toggle_buttons[key].clicked.connect(functools.partial(self.toggle_filter, filter_key=key))
+            self.toggle_buttons[key].setStyleSheet(qCheckedStyle)
+
+            self.toggle_buttons_proxy[key] = QGraphicsProxyWidget()
+            self.toggle_buttons_proxy[key].setWidget(self.toggle_buttons[key])
+            # self.toggle_area.addItem(self.toggle_buttons_proxy[key], row=idx, col=0)
+            
+            plot_area.addItem(self.toggle_buttons_proxy[key], row=idx, col=0)
+    
+    def toggle_filter(self, filter_key):
+        self.filter_toggles[filter_key] = self.toggle_buttons[filter_key].isChecked()
+        # print("Set filter %s to %s" % (filter_key, str(self.filter_toggles[filter_key])))
+        self.update_displayed_roi_labels()
 
 class CurationUI(GenericNapariUI):
     '''
@@ -210,36 +385,17 @@ class CurationUI(GenericNapariUI):
         '''
         
         super().__init__(base_path, verbose, display_params)
-        self.stats    = []
-        self.coords   = []
-        self.meds = []
-        self.lams     = []
-        self.n_roi    = 0 
         self.info     = {}
-        self.shape    = (0,0,0)
         self.activity = {}
         self.nframes_total = 0
         self.iscells  = {}
         self.display_roi_labels = n.empty(0)
-        self.label_vols = {}
         self.click_curations = {}
-        self.viewer = None
-        self.roi_features = {}
-        self.roi_feature_names = {}
-        self.roi_feature_ranges = {}
         self.base_labels = None
         
-        # these will contain the plot areas, and graphs themselves
-        self.hist_plots = {}
-        self.hist_graphs = {}
-        self.hist_range_lines = {}
 
-        self.toggle_buttons = {}
-        self.toggle_buttons_proxy = {}
-        self.filter_toggles = {}
 
-        # 
-        self.display_activity = False
+
         self.n_roi_activity = None
 
     def load_outputs(self):
@@ -339,10 +495,10 @@ class CurationUI(GenericNapariUI):
         self.create_click_plot()
         self.update_click_plot()
 
-        self.create_histograms()
+        self.create_histograms(self.curation_plot_area)
         self.update_histograms()
         self.create_save_button()
-        self.create_toggles()
+        self.create_toggles(self.curation_plot_area)
         self.create_base_labels_dropdown()
 
         self.dock_curation_window()
@@ -465,60 +621,6 @@ class CurationUI(GenericNapariUI):
         self.update_click_plot()
         self.update_displayed_roi_labels()
 
-    def update_displayed_roi_labels(self):
-        '''
-        Update the cell/not-cell labels of displayed ROIs with the various filters.
-        Only uses the filter sources that are toggled on in self.filter_toggles
-        '''
-        # print("UPDATING DISPLAY")
-        old_labels = self.display_roi_labels.copy()
-        self.display_roi_labels[:] = self.base_labels.copy()
-        n_total_roi = self.display_roi_labels.sum()
-        if self.filter_toggles['click']:
-            # get the ROIs that have been click-marked as cells/non-cells
-            click_noncells = (self.click_curations['current'] == 0)
-            click_cells = (self.click_curations['current'] == 1)
-            self.display_roi_labels[click_noncells] = False
-            self.display_roi_labels[click_cells] = True
-        for key in self.roi_features.keys():
-            if self.filter_toggles[key]:
-                vals = self.roi_features[key]
-                vmin, vmax = self.roi_feature_ranges[key]
-                feature_cells = (vals >= vmin) & (vals <= vmax)
-                self.display_roi_labels &= feature_cells
-        n_final_roi = self.display_roi_labels.sum()
-
-        update_label_vols(self.label_vols, old_labels, self.display_roi_labels,
-                          self.coords, self.lams, self.display_params['lam_max'], 
-                          self.display_params['cmap'])
-        self.update_cells_in_viewer()
-    
-    def compute_roi_features(self):
-        '''
-        All features that appear on the histograms are computed here. Each feature should have a 1d 
-        array of size n_roi in self.roi_features, and a human-readable name in self.roi_feature_names.
-        Any feature computed here will automatically get added to histograms in create_and_update_histograms
-        '''
-        self.roi_features['npix'] = n.array([len(stat['lam']) for stat in self.stats])
-        self.roi_features['corrmap_val'] = n.array([stat['peak_val'] for stat in  self.stats])
-        self.roi_features['act_thresh'] = n.array([stat['threshold'] for stat in  self.stats])
-
-        self.roi_feature_names['npix'] = '# Pixels in ROI'
-        self.roi_feature_names['corrmap_val'] = 'Max val of ROI in corr. map'
-        self.roi_feature_names['act_thresh'] = 'Activity threshold'
-
-        saved_ranges = self.load_file('histogram_curation.npy')
-
-        for key in self.roi_features.keys():
-            if saved_ranges is not None and key in saved_ranges.keys():
-                if self.verbose: print("Loading saved ranges for %s" % key)
-                self.roi_feature_ranges[key] = saved_ranges[key]
-            else:
-                vals = self.roi_features[key]
-                self.roi_feature_ranges[key] = vals.min(), vals.max()
-            
-            self.filter_toggles[key] = False
-
 
     def build_activity_window(self):
         # this window contains the activity traces for the selected cell
@@ -638,89 +740,6 @@ class CurationUI(GenericNapariUI):
         yax = self.hist_plots['click'].getAxis('left')
         yax.setTicks([[(ys[0], str(click_cells)), (ys[1], str(click_non_cells)), (ys[2], str(click_unmarked))], []])
 
-
-    def create_histograms(self):
-        for idx, key in enumerate(self.roi_features.keys()):
-            # get the name of the feature, and array of vals
-            feature_name = self.roi_feature_names[key]
-            self.hist_graphs[key] = pg.BarGraphItem(x=[0], height=[1], width=1)
-            # add the histogram to the plot area
-            self.hist_plots[key] = self.curation_plot_area.addPlot(row=idx+1, col=1, title=feature_name)
-            self.hist_plots[key].addItem(self.hist_graphs[key])
-
-            
-            # add draggable max/min lines to the histograms
-            min_line = pg.InfiniteLine(pos=0, movable=True)
-            max_line = pg.InfiniteLine(pos=1, movable=True)            
-            self.hist_plots[key].addItem(min_line)
-            self.hist_plots[key].addItem(max_line)
-            self.hist_range_lines[key] = [min_line, max_line]            
-            # when a movement of the line is finished, call the update_histogram_ranges function
-            min_line.sigPositionChangeFinished.connect(functools.partial(self.update_feature_ranges, key))
-            max_line.sigPositionChangeFinished.connect(functools.partial(self.update_feature_ranges, key))
-
-    def update_histograms(self):
-        '''
-        update the histograms. Show only ROIs that are selected in the 'base_labels'
-        '''
-        nbins = self.display_params['histogram_nbins']
-        
-        # loop over all of the computer ROI features
-        n_hist = len(self.roi_features.keys())
-        for idx,key in enumerate(self.roi_features.keys()):
-            feature = self.roi_features[key]
-            feature = feature[self.base_labels]
-            # compute histogram and plot it 
-            vals, bins = n.histogram(feature, bins=nbins)
-            bin_centers = (bins[1:] + bins[:-1])/2
-            width = n.diff(bins).mean()
-
-            self.hist_graphs[key].setOpts(x = bin_centers, height=vals, width=width)
-
-            min_line, max_line = self.hist_range_lines[key]
-            min_line.setPos(self.roi_feature_ranges[key][0])
-            max_line.setPos(self.roi_feature_ranges[key][1])
-            min_line.setBounds((bins[0]-width, bins[-1]+width))
-            max_line.setBounds((bins[0]-width, bins[-1]+width))
-        self.update_histogram_titles()
-    def update_histogram_titles(self):
-        for key in self.roi_features.keys():
-            self.hist_plots[key].setTitle(self.roi_feature_names[key] + '. Range: %.1f - %.1f' % self.roi_feature_ranges[key])
-
-    def update_feature_ranges(self, key):
-        '''
-        read the position of lines on the curation histograms, and update the displayed ROIs
-
-        Args:
-            key (_type_): _description_
-        '''
-        min_val = self.hist_range_lines[key][0].pos()[0]
-        max_val = self.hist_range_lines[key][1].pos()[0]
-        self.roi_feature_ranges[key] = min_val, max_val
-        self.update_histogram_titles()
-        self.save_file('histogram_curation.npy', self.roi_feature_ranges)
-        if self.verbose: print("Saving curation ranges")
-        self.update_displayed_roi_labels()
-
-    def create_toggles(self):
-        toggle_button_keys = ['click'] + list(self.roi_features.keys())
-        for idx,key in enumerate(toggle_button_keys):
-            self.toggle_buttons[key] = QCheckBox()
-            self.toggle_buttons[key].setCheckable(True)
-            self.toggle_buttons[key].setChecked(self.filter_toggles[key])
-            self.toggle_buttons[key].clicked.connect(functools.partial(self.toggle_filter, filter_key=key))
-            self.toggle_buttons[key].setStyleSheet(qCheckedStyle)
-
-            self.toggle_buttons_proxy[key] = QGraphicsProxyWidget()
-            self.toggle_buttons_proxy[key].setWidget(self.toggle_buttons[key])
-            # self.toggle_area.addItem(self.toggle_buttons_proxy[key], row=idx, col=0)
-            
-            self.curation_plot_area.addItem(self.toggle_buttons_proxy[key], row=idx, col=0)
-    
-    def toggle_filter(self, filter_key):
-        self.filter_toggles[filter_key] = self.toggle_buttons[filter_key].isChecked()
-        # print("Set filter %s to %s" % (filter_key, str(self.filter_toggles[filter_key])))
-        self.update_displayed_roi_labels()
 
     def create_base_labels_dropdown(self):
         self.dropdown = QComboBox()
@@ -864,7 +883,7 @@ class SweepUI(GenericNapariUI):
         self.sweep_summary = self.load_file('sweep_summary.npy')
 
         self.get_sweep_params()
-        self.log("Loaded summary for sweep of type: %s")
+        self.log("Loaded summary for sweep of type: %s" % self.sweep_type)
         self.log("Sweep over %d total combinations, varying the following parameters:" % self.n_combinations)
 
         for param in self.param_names:
@@ -884,9 +903,10 @@ class SweepUI(GenericNapariUI):
             self.mean_img = self.info['mean_img']
             self.max_img = self.info['max_img']
             self.corr_map = self.info['vmap']
+            self.shape = self.corr_map.shape
 
         if self.all_combinations:
-            self.current_index = n.zeros(self.n_params)
+            self.current_index = n.zeros(self.n_params, int)
             self.current_result = self.sweep_results[tuple(self.current_index)]
             self.current_params = self.sweep_params[tuple(self.current_index)]
         else:
@@ -901,6 +921,8 @@ class SweepUI(GenericNapariUI):
         if self.sweep_type == 'segmentation':
             self.stats = self.current_result
             self.unpack_stats()
+            self.compute_roi_features()
+            
             
 
     def create_ui(self):
@@ -910,17 +932,41 @@ class SweepUI(GenericNapariUI):
     
         if self.sweep_type == 'segmentation':
             self.make_all_label_vols()
+            self.build_histogram_window()
             self.add_cells_to_viewer()
+            self.build_histogram_window()
+            self.create_histograms(self.histogram_plot_area)
+            self.create_toggles(self.histogram_plot_area)
+            self.update_histograms()
+            self.dock_histogram_window()
 
+        self.create_param_display()
+
+    def build_histogram_window(self):
+        self.histogram_window = pg.GraphicsLayoutWidget()
+        self.histogram_plot_area = pg.GraphicsLayout()
+        self.histogram_window.addItem(self.histogram_plot_area)
+    
+    def dock_histogram_window(self):
+        # dock the curation window to napari
+        self.docked_histogram_window = self.viewer.window.add_dock_widget(self.histogram_window, name='ROI Features', area='right')
 
     def display_current_result(self):
         if self.sweep_type == 'corrmap':
             self.update_corr_map(self.current_result)
         elif self.sweep_type == 'segmentation':
             self.stats = self.current_result
+            # get the coordaintes of each ROI, and compute ROI features
             self.unpack_stats()
+            self.compute_roi_features()
+            # create the cell label volume and display it 
             self.make_all_label_vols()
             self.update_cells_in_viewer()
+            # update the histograms with new features
+            # and apply the current filters 
+            self.update_histograms()
+            self.update_displayed_roi_labels()
+            
 
 
     def get_sweep_params(self):
@@ -929,7 +975,7 @@ class SweepUI(GenericNapariUI):
         self.n_params = len(self.param_names)
         self.combinations = self.sweep_summary['combinations']
         
-        self.sweep_type = self.sweep_summary.get('sweep_type', 'corrmap')
+        self.sweep_type = self.sweep_summary.get('sweep_type', 'segmentation')
         self.all_combinations = self.sweep_summary['all_combinations']
 
         self.n_combinations = len(self.combinations)
@@ -966,31 +1012,46 @@ class SweepUI(GenericNapariUI):
         self.meds = n.array([stat['med'] for stat in self.stats])
         # number of ROIs 
         self.n_roi = len(self.coords)
+        self.display_roi_labels = n.ones(self.n_roi, bool)
+        self.base_labels = n.ones(self.n_roi, bool)
 
 
     def create_param_display(self):
         self.param_display_window = pg.GraphicsLayoutWidget()
-        self.param_display_area = pg.GraphicsLayout()
-        self.param_display_window.addItem(self.param_display_area)
+        self.all_param_display_area = pg.GraphicsLayout()
+        self.param_display_window.addItem(self.all_param_display_area)
 
         self.param_labels = {}
         self.param_dropdowns = {}
+        self.param_display_areas = {}
         for pidx, param_name in enumerate(self.param_names):
             possible_vals = self.param_dict[param_name]
             dropdown = QComboBox()
-            label = QLabel()
+            label = QLabel()            
+            dropdown.setStyleSheet(dropdown_style)
+            label.setStyleSheet(dropdown_style)
+
+            param_display_area = pg.GraphicsLayout()
+
+            label_proxy = QGraphicsProxyWidget()
+            label_proxy.setWidget(label)
+            dropdown_proxy = QGraphicsProxyWidget()
+            dropdown_proxy.setWidget(dropdown)
 
             label.setText(param_name)
             dropdown.addItems([str(val) for val in possible_vals])
             
-            self.param_display_area.addItem(label, row=0, col=pidx)
-            self.param_display_area.addItem(dropdown, row=0, col=pidx)
+            param_display_area.addItem(label_proxy, row=1, col=0)
+            param_display_area.addItem(dropdown_proxy, row=0, col=0)
+            self.all_param_display_area.addItem(param_display_area, row=0, col=pidx)
 
             callback = functools.partial(self.select_param, param_index=pidx )
             dropdown.activated.connect(callback)
 
             self.param_dropdowns[param_name] = dropdown
             self.param_labels[param_name] = label 
+        self.log("Docking params")
+        self.docked_param_window = self.viewer.window.add_dock_widget(self.param_display_window, name='Params', area='left')
 
     def select_param(self, param_val_index,param_index):
         self.log("Setting param %s to %s" % (self.param_names[param_index], 
@@ -1005,6 +1066,7 @@ class SweepUI(GenericNapariUI):
             self.current_result = self.sweep_results[self.current_param][self.current_index]
             self.current_params = self.sweep_params[self.current_param][self.current_index]
             self.fix_dropdown_values()
+        self.display_current_result()
 
     def fix_dropdown_values(self):
         if not self.all_combinations:
