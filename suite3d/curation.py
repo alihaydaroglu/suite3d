@@ -9,6 +9,7 @@ import copy
 import functools
 import pyqtgraph as pg
 from PyQt5 import QtGui, QtCore, QtWidgets
+from PyQt5.QtCore import Horizontal, Vertical
 from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox
 from PyQt5.QtGui import QKeySequence
 from warnings import warn
@@ -104,7 +105,7 @@ class GenericNapariUI:
             else:
                 self.log("Display params: Invalid key %s!" % display_params, 1)
 
-
+        self.layers = {}
         self.viewer = None
     
 
@@ -159,6 +160,41 @@ class GenericNapariUI:
             print("Overwriting existing %s" % filepath)
         n.save(filepath, data)
 
+        
+    def make_all_label_vols(self):
+        '''
+        Makes four volumes of size self.shape. Two of them are RGB volumes with each cell colored differently, one for ROIs labeled cells and one for non-cells. Two are integers, with -1 in all voxels that aren't part of an ROI, and cell_idx in all voxels that are part of an ROI, separated by cells and non-cells.
+        '''
+        lam_max = self.display_params['lam_max']
+        cmap = self.display_params['cmap']
+        cell_idxs, cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, 
+                        iscell_1d = self.display_roi_labels, cmap=cmap)
+        non_cell_idxs, non_cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
+        
+        self.label_vols = {
+        'cell_idxs' : cell_idxs,
+        'cell_rgb': cell_rgb,
+        'non_cell_idxs' : non_cell_idxs,
+        'non_cell_rgb' : non_cell_rgb
+        }
+    def add_cells_to_viewer(self):
+        '''
+        Once self.make_all_label_vols() is called, use this to add the cells to the UI
+        '''
+        scale = self.display_params['scale']
+        self.layers['non_cell_rgb'] = self.viewer.add_image(self.label_vols['non_cell_rgb'], name='Non-cells',rgb=True, scale=scale, visible=False)
+        self.layers['cell_rgb'] = self.viewer.add_image(self.label_vols['cell_rgb'], name='Cells', rgb=True, scale=scale)
+
+        
+    def update_cells_in_viewer(self):
+        '''
+        Once self.label_vols is updated, use this to update the data displayed on the viewer
+        '''
+        self.layers['cell_rgb'].data = self.label_vols['cell_rgb']
+        self.layers['non_cell_rgb'].data = self.label_vols['non_cell_rgb']
+
+        self.layers['cell_rgb'].refresh()
+        self.layers['non_cell_rgb'].refresh()
 
 class CurationUI(GenericNapariUI):
     '''
@@ -188,7 +224,6 @@ class CurationUI(GenericNapariUI):
         self.label_vols = {}
         self.click_curations = {}
         self.viewer = None
-        self.layers = {}
         self.roi_features = {}
         self.roi_feature_names = {}
         self.roi_feature_ranges = {}
@@ -318,23 +353,6 @@ class CurationUI(GenericNapariUI):
             self.add_activity_callbacks()
             self.dock_activity_window()
 
-    def make_all_label_vols(self):
-        '''
-        Makes four volumes of size self.shape. Two of them are RGB volumes with each cell colored differently, one for ROIs labeled cells and one for non-cells. Two are integers, with -1 in all voxels that aren't part of an ROI, and cell_idx in all voxels that are part of an ROI, separated by cells and non-cells.
-        '''
-        lam_max = self.display_params['lam_max']
-        cmap = self.display_params['cmap']
-        cell_idxs, cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, 
-                        iscell_1d = self.display_roi_labels, cmap=cmap)
-        non_cell_idxs, non_cell_rgb = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
-        
-        self.label_vols = {
-        'cell_idxs' : cell_idxs,
-        'cell_rgb': cell_rgb,
-        'non_cell_idxs' : non_cell_idxs,
-        'non_cell_rgb' : non_cell_rgb }
-
-
     def load_click_curations(self):
         '''
         Cells curated by clicking are saved into click_curations.npy. This contains a dictionary. The 'current' element of the dictionary contains a 1D array of size n_rois which is 1 for ROIs that have been marked as cells, 0 for ROIs marked as non-cells, and None for ROIs that have not been marked. Other elements of the dictionary can correspond to previously saved curations in future versions.
@@ -373,26 +391,8 @@ class CurationUI(GenericNapariUI):
             self.layers[image_key] = self.viewer.add_image(image, name=image_label, 
                                     contrast_limits=clims, scale=scale)
 
-    def add_cells_to_viewer(self):
-        '''
-        Once self.make_all_label_vols() is called, use this to add the cells to the UI
-        '''
-        scale = self.display_params['scale']
-        self.layers['non_cell_rgb'] = self.viewer.add_image(self.label_vols['non_cell_rgb'], name='Non-cells',rgb=True, scale=scale, visible=False)
-        self.layers['cell_rgb'] = self.viewer.add_image(self.label_vols['cell_rgb'], name='Cells', rgb=True, scale=scale)
-
         
         # self.update_displayed_roi_labels()
-
-    def update_cells_in_viewer(self):
-        '''
-        Once self.label_vols is updated, use this to update the data displayed on the viewer
-        '''
-        self.layers['cell_rgb'].data = self.label_vols['cell_rgb']
-        self.layers['non_cell_rgb'].data = self.label_vols['non_cell_rgb']
-
-        self.layers['cell_rgb'].refresh()
-        self.layers['non_cell_rgb'].refresh()
 
     def add_activity_callbacks(self):
         '''
@@ -862,26 +862,65 @@ class SweepUI(GenericNapariUI):
 
     def load_outputs(self):
         self.sweep_summary = self.load_file('sweep_summary.npy')
-        self.sweep_type = self.sweep_summary.get('type', 'corrmap')
-        self.vol_shape = self.sweep_summary['mean_img'].shape
-        self.mean_img = self.sweep_summary['mean_img']
-        self.max_img = self.sweep_summary['max_img']
 
-        self.log("Loaded summary for sweep of type: %s, with volume shape %02d, %04d, %04d" % ((self.sweep_type, ) + self.vol_shape))
-        
         self.get_sweep_params()
+        self.log("Loaded summary for sweep of type: %s")
         self.log("Sweep over %d total combinations, varying the following parameters:" % self.n_combinations)
+
         for param in self.param_names:
             self.log("%2d values for %s: %s" % (len(self.param_dict[param]), param, str(self.param_dict[param])), 1)
 
         if self.sweep_type == 'corrmap':
-            self.parse_corrmap_sweep()
+            self.sweep_results, self.sweep_params = collate_sweep_results(self.sweep_summary,
+                                                                          result_key='corrmap')
+            self.vol_shape = self.sweep_summary['mean_img'].shape
+            self.mean_img = self.sweep_summary['mean_img']
+            self.max_img = self.sweep_summary['max_img']
+
+        elif self.sweep_type == 'segmentation':
+            self.sweep_results, self.sweep_params = collate_sweep_results(self.sweep_summary,
+                                                                          result_key='stats')
+            self.info = self.sweep_summary['results'][0]['info']
+            self.mean_img = self.info['mean_img']
+            self.max_img = self.info['max_img']
+            self.corr_map = self.info['vmap']
+
+        if self.all_combinations:
+            self.current_index = n.zeros(self.n_params)
+            self.current_result = self.sweep_results[tuple(self.current_index)]
+            self.current_params = self.sweep_params[tuple(self.current_index)]
+        else:
+            self.current_param = self.sweep_params[0]
+            self.current_index = 0
+            self.current_result = self.sweep_results[self.current_param][self.current_index]
+            self.current_params = self.sweep_params[self.current_param][self.current_index]
+        
+        if self.sweep_type == 'corrmap':
+            self.corr_map = self.current_result
+
+        if self.sweep_type == 'segmentation':
+            self.stats = self.current_result
+            self.unpack_stats()
+            
 
     def create_ui(self):
         self.start_viewer()
         self.add_background_images_to_viewer()
+        self.add_corrmap_to_viewer()
+    
+        if self.sweep_type == 'segmentation':
+            self.make_all_label_vols()
+            self.add_cells_to_viewer()
+
+
+    def display_current_result(self):
         if self.sweep_type == 'corrmap':
-            self.add_swept_corrmap_to_viewer()
+            self.update_corr_map(self.current_result)
+        elif self.sweep_type == 'segmentation':
+            self.stats = self.current_result
+            self.unpack_stats()
+            self.make_all_label_vols()
+            self.update_cells_in_viewer()
 
 
     def get_sweep_params(self):
@@ -889,21 +928,16 @@ class SweepUI(GenericNapariUI):
         self.param_names = self.sweep_summary['param_names']
         self.n_params = len(self.param_names)
         self.combinations = self.sweep_summary['combinations']
+        
+        self.sweep_type = self.sweep_summary.get('sweep_type', 'corrmap')
+        self.all_combinations = self.sweep_summary['all_combinations']
 
         self.n_combinations = len(self.combinations)
         self.n_vals_per_param = tuple([len(self.param_dict[k]) for k in self.param_names])
-        self.disp_shape = self.n_vals_per_param + self.vol_shape
-        self.disp_scale = tuple([1] * self.n_params) + self.display_params['scale']
-        self.axis_labels = tuple(self.param_names + ['z','y','x'])
+        # self.disp_shape = self.n_vals_per_param + self.vol_shape
+        # self.disp_scale = tuple([1] * self.n_params) + self.display_params['scale']
+        # self.axis_labels = tuple(self.param_names + ['z','y','x'])
 
-    def parse_corrmap_sweep(self):
-        self.shape = self.sweep_summary['vmaps'][0].shape
-        self.corrmap_vol = n.zeros(self.disp_shape)
-        for cidx, combination in enumerate(self.combinations):
-            param_idxs = [n.where(self.param_dict[self.param_names[pidx]] == combination[pidx])[0][0] \
-                            for pidx in range(self.n_params)]
-            self.corrmap_vol[tuple(param_idxs)] = self.sweep_summary['vmaps'][cidx]
-    
     def add_background_images_to_viewer(self):
         scale = self.display_params['scale']
         pmin, pmax = self.display_params['contrast_percentiles']
@@ -914,9 +948,72 @@ class SweepUI(GenericNapariUI):
         clims = get_percentiles(self.max_img, pmin, pmax)
         self.viewer.add_image(self.max_img, name='Max Image', scale = scale, contrast_limits=clims)
 
-    def add_swept_corrmap_to_viewer(self):
-        self.viewer.add_image(self.corrmap_vol, scale = self.disp_scale, name='Corrmap Sweep')
-        self.viewer.dims.axis_labels = self.axis_labels
+    def add_corrmap_to_viewer(self):
+        scale = self.display_params['scale']
+        pmin, pmax = self.display_params['contrast_percentiles']
+        clims = get_percentiles(self.corr_map, pmin, pmax)
+        self.layers['corr_map'] = self.viewer.add_image(self.corr_map, name='Correlation Map', scale = scale, contrast_limits=clims)
+
+    def update_corr_map(self, new_corr_map):
+        self.corr_map = new_corr_map
+        self.layers['corr_map'].data = self.corr_map
+        self.layers['corr_map'].refresh()
+
+    def unpack_stats(self):
+        # unpack coords and lams from stats
+        self.coords = [stat['coords'] for stat in self.stats]
+        self.lams = [stat['lam'] for stat in self.stats]
+        self.meds = n.array([stat['med'] for stat in self.stats])
+        # number of ROIs 
+        self.n_roi = len(self.coords)
+
+
+    def create_param_display(self):
+        self.param_display_window = pg.GraphicsLayoutWidget()
+        self.param_display_area = pg.GraphicsLayout()
+        self.param_display_window.addItem(self.param_display_area)
+
+        self.param_labels = {}
+        self.param_dropdowns = {}
+        for pidx, param_name in enumerate(self.param_names):
+            possible_vals = self.param_dict[param_name]
+            dropdown = QComboBox()
+            label = QLabel()
+
+            label.setText(param_name)
+            dropdown.addItems([str(val) for val in possible_vals])
+            
+            self.param_display_area.addItem(label, row=0, col=pidx)
+            self.param_display_area.addItem(dropdown, row=0, col=pidx)
+
+            callback = functools.partial(self.select_param, param_index=pidx )
+            dropdown.activated.connect(callback)
+
+            self.param_dropdowns[param_name] = dropdown
+            self.param_labels[param_name] = label 
+
+    def select_param(self, param_val_index,param_index):
+        self.log("Setting param %s to %s" % (self.param_names[param_index], 
+                                                str(self.param_dict[self.param_names[param_index]][param_val_index])))
+        if self.all_combinations:
+            self.current_index[param_index] = param_val_index 
+            self.current_result = self.sweep_results[tuple(self.current_index)]
+            self.current_params = self.sweep_params[tuple(self.current_index)]
+        else:
+            self.current_index = param_val_index
+            self.current_param = self.param_names[param_index]
+            self.current_result = self.sweep_results[self.current_param][self.current_index]
+            self.current_params = self.sweep_params[self.current_param][self.current_index]
+            self.fix_dropdown_values()
+
+    def fix_dropdown_values(self):
+        if not self.all_combinations:
+            for param_name in self.param_names:
+                if param_name == self.current_param: continue
+                param_val = self.current_params[param_name]
+                param_val_idx = n.where(self.param_dict[param_name] == param_val)[0]
+                self.param_dropdowns[param_name].setCurrentIndex(param_val_idx)
+            
 
 def get_percentiles(image, pmin=1, pmax=99, eps = 0.0001):
     '''
@@ -947,6 +1044,54 @@ def create_arg_parser():
     return parser
 
 
+def collate_sweep_results(sweep_summary, result_key = 'stats'):
+    '''
+    Load the results of a sweep and arrange in a way that is easy to visualize
+
+    Args:
+        sweep_summary (dict): Loaded from sweep_summary.npy
+        result_key (str, optional): Key of the saved result from each run we care about. For a corrmap sweep, it should be corrmap. For a segmentation sweep, it should be stats.
+
+    Returns:
+        if all combinations of parameters were swept, returns a P-dim array where P is the number of parameters that were swept, and each coordinate corresponds to combinations of coordinate values
+        else, it returns a dictionary, where each key is a parameter name, and the values are arrays of results for a sweep over the given parameter
+    '''
+    param_dict = sweep_summary['param_sweep_dict']
+    param_names = sweep_summary['param_names']
+    combinations = sweep_summary['combinations']
+    results = sweep_summary['results']
+    n_val_per_param = [len(param_dict[k]) for k in param_names]
+    n_params = len(param_names)
+    if sweep_summary['all_combinations']:
+        collated_results = n.empty(n_val_per_param, dtype='O')
+        param_values = n.empty(n_val_per_param, dtype='O')
+
+        for cidx, combination in enumerate(combinations):
+            param_idxs = [n.where(param_dict[param_names[pidx]] == combination[pidx])[0][0] \
+                                for pidx in range(n_params)]
+            collated_results[tuple(param_idxs)] = results[cidx][result_key]
+            parvals = {}
+            for param_idx, param_name in enumerate(param_names):
+                parvals[param_name] = combinations[cidx][param_idx]
+            param_values[tuple(param_idxs)] = parvals
+    else:
+        collated_results = {}
+        param_values = {}
+        cidx = 0
+        for pidx in range(len(param_names)):
+            collated_results[param_names[pidx]] = n.empty(n_val_per_param[pidx], dtype='O')
+            param_values[param_names[pidx]] = n.empty(n_val_per_param[pidx], dtype='O')
+            for vidx in range(n_val_per_param[pidx]):
+                collated_results[param_names[pidx]][vidx] = results[cidx][result_key]
+                parvals = {}
+                for param_idx, param_name in enumerate(param_names):
+                    parvals[param_name] = combinations[cidx][param_idx]
+                param_values[param_names[pidx]][vidx] = parvals
+                cidx += 1
+        assert cidx == n.sum(n_val_per_param) - 1
+
+    return collated_results, param_values
+
 
 if __name__ == '__main__':
     
@@ -969,3 +1114,5 @@ if __name__ == '__main__':
         
 
     napari.run()
+
+

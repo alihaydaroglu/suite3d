@@ -20,7 +20,7 @@ def detect_cells(patch, vmap, max_iter = 10000, peak_thresh = 2.5, activity_thre
     vmultiplier = 1 #max(1, nt / magic_number)
     peak_thresh = vmultiplier * peak_thresh
     vmin = vmap.min()
-    log("Starting extraction with peak_thresh: %0.3f and Th2: %0.3f" % (peak_thresh, Th2), 1)
+    log("Starting extraction with peak_thresh: %0.3f and Th2: %0.3f" % (peak_thresh, Th2), 2)
 
     for iter_idx in range(max_iter):
         med, zz, yy, xx, lam, peak_val = find_top_roi3d(vmap, xy_pix_scale = 3)
@@ -73,42 +73,43 @@ def detect_cells(patch, vmap, max_iter = 10000, peak_thresh = 2.5, activity_thre
         stats.append(stat)
         # 
         # log("Cell %d activity_thresh %.3f, peak_thresh: %.3f, %d active_frames" % (iter_idx+1, threshold, peak_thresh, len(active_frames)), 2)
-        log("Added cell %d at %02d, %03d, %03d, peak: %0.3f, %d frames, %d pixels" % (len(stats), stat['med'][0],stat['med'][1],stat['med'][2], peak_val, len(active_frames), npix), 2)
+        log("Added cell %d at %02d, %03d, %03d, peak: %0.3f, %d frames, %d pixels" % (len(stats), stat['med'][0],stat['med'][1],stat['med'][2], peak_val, len(active_frames), npix), 3)
         if savepath is not None and iter_idx % 250 == 0 and iter_idx > 0:
             n.save(savepath,stats)
             log("Saving checkpoint to %s" % savepath)
-    log("Found %d cells in %d iterations" % (len(stats), iter_idx+1))
+    log("Found %d cells in %d iterations" % (len(stats), iter_idx+1), 1)
     if savepath is not None:
-        log("Saving cells to %s" % savepath)
+        log("Saving cells to %s" % savepath, 1)
         n.save(savepath, stats)
         # bad way to change the ...//stats.npy path to iscell.npy
         is_cell_path = savepath[:-9] + 'iscell.npy'
         is_cell = n.ones((len(stats), 2), dtype=int)
-        log("Saving iscell.npy to %s" % is_cell_path)
+        log("Saving iscell.npy to %s" % is_cell_path, 1)
         n.save(is_cell_path, is_cell)
     return stats
     
 
-def detect_cells_mp(patch, vmap, n_proc = 8, max_iter = 10000, peak_thresh = 2.5, activity_thresh = 2.5, extend_thresh=0.2, 
+def detect_cells_mp(patch, vmap, n_proc_detect = 8, max_iter = 10000, peak_thresh = 2.5, activity_thresh = 2.5, extend_thresh=0.2, 
                     roi_ext_iterations=2, max_ext_iters=20, percentile=0, log=default_log, max_pix = 250,
                     recompute_v = False, allow_overlap = True, offset=(0,0,0), savepath=None, debug=False,patch_idx = -1, **kwargs):
     stats = []
-    log("Loading movie patch to shared memory")
+    log("Loading movie patch to shared memory", 3)
     shmem_patch, shmem_par_patch, patch = utils.create_shmem_from_arr(patch, copy=True)
+    log("Loaded", 3)
     Th2 = activity_thresh
     vmultiplier = 1 #max(1, nt / magic_number)
     peak_thresh = vmultiplier * peak_thresh
     vmin = vmap.min()
-    log("Starting extraction with peak_thresh: %0.3f and Th2: %0.3f" % (peak_thresh, Th2), 1)
+    log("Starting extraction with peak_thresh: %0.3f and Th2: %0.3f" % (peak_thresh, Th2), 2)
     nt, nz,ny,nx = patch.shape
-    n_iters = max_iter // n_proc
+    n_iters = max_iter // n_proc_detect
     roi_idx = 0
-    widxs = n.arange(n_proc)
+    widxs = n.arange(n_proc_detect)
     # print(vmap.shape)
-    with Pool(n_proc) as p:
+    with Pool(n_proc_detect) as p:
         for iter_idx in range(n_iters):
             # med, zz, yy, xx, lam, peak_val = find_top_roi3d(vmap, xy_pix_scale = 3)
-            outs = find_top_n_rois(vmap, n_rois = n_proc)
+            outs = find_top_n_rois(vmap, n_rois = n_proc_detect)
             good_outs = [] 
             for out in outs:
                 if out[-1] < peak_thresh:
@@ -119,7 +120,7 @@ def detect_cells_mp(patch, vmap, n_proc = 8, max_iter = 10000, peak_thresh = 2.5
             if len(good_outs) < 1:
                 log("Iter %04d: peak is too small  - ending extraction" % (iter_idx), 2)
                 break
-            log("Iter %04d: running %02d ROIs in parallel" % (iter_idx, len(good_outs)))
+            log("Iter %04d: running %02d ROIs in parallel" % (iter_idx, len(good_outs)), 3)
             roi_idxs = n.arange(len(good_outs)) + roi_idx + 1
 
             returns = p.starmap(detect_cells_worker, 
@@ -147,20 +148,20 @@ def detect_cells_mp(patch, vmap, n_proc = 8, max_iter = 10000, peak_thresh = 2.5
                 peak_val = batch_stats['peak_val']
                 npix = len(zz)
                 log("Added cell %d at %02d, %03d, %03d, peak: %0.3f, thresh: %.03f, %d frames, %d pixels" % (
-                    len(stats), med[0], med[1], med[2], peak_val, threshold, len(batch_stats['active_frames']), npix), 2)
+                    len(stats), med[0], med[1], med[2], peak_val, threshold, len(batch_stats['active_frames']), npix), 3)
 
         if savepath is not None and roi_idx % 250 == 0 and roi_idx > 0:
             n.save(savepath,stats)
-            log("Saving checkpoint to %s" % savepath)
+            log("Saving checkpoint to %s" % savepath,2)
     shmem_patch.close(); shmem_patch.unlink()
     log("Found %d cells in %d iterations" % (roi_idx, iter_idx))
     if savepath is not None:
-        log("Saving cells to %s" % savepath)
+        log("Saving cells to %s" % savepath, 1)
         n.save(savepath, stats)
         # bad way to change the ...//stats.npy path to iscell.npy
         is_cell_path = savepath[:-9] + 'iscell.npy'
         is_cell = n.ones((len(stats), 2), dtype=int)
-        log("Saving iscell.npy to %s" % is_cell_path)
+        log("Saving iscell.npy to %s" % is_cell_path, 1)
         n.save(is_cell_path, is_cell)
     return stats
     
@@ -177,6 +178,7 @@ def detect_cells_worker(worker_idx, roi_idx, patch_par, out, Th2, percentile, ro
     for i in range(roi_ext_iterations):
         # default_log("%d active frames" % (len(active_frames)), 3)
         if len(active_frames) == 0:
+            # continue
             default_log(1,"WARNING: no active frames in roi %d" % roi_idx)
         zz,yy,xx,lam = iter_extend3d(zz,yy,xx,active_frames, patch, extend_thresh=extend_thresh,
                                         max_ext_iters=max_ext_iters, max_pix = max_pix)

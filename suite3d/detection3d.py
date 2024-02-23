@@ -150,9 +150,9 @@ def filter_and_reduce_movie(mov, npil_filt_type, npil_filt_size,
     return vmap_2, mov_sub_return
     
 
-def accumulate_vmap_2(vmap_2, new_vmap_2):
+def accumulate_vmap_2(vmap_2, new_vmap_2, ns_total):
     vmap_2 += new_vmap_2
-    vmap = n.sqrt(vmap_2)
+    vmap = n.sqrt(vmap_2 / ns_total)
     return vmap
 
 

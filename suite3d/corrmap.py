@@ -167,7 +167,7 @@ def compute_corr_map_batch(mov, corr_map_params = None,
     vmap_2, mov_sub = dtu.filter_and_reduce_movie(mov, 
                                 npil_filt_type, npil_filt_pix,cell_filt_type, cell_filt_pix,
                                 intensity_thresh, n_processors, minibatch_size, log)
-    vmap = dtu.accumulate_vmap_2(accum['vmap_2'], vmap_2)
+    vmap = dtu.accumulate_vmap_2(accum['vmap_2'], vmap_2, nt + nb)
     
     accum['n_frames_proc'] += nb
 
