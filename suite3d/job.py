@@ -565,7 +565,7 @@ class Job:
             'comb_dirs' : comb_dirs ,
             'param_names' : param_names,
             'combinations' : combinations,
-            'all_combinations' : True,
+            'all_combinations' : all_combinations,
             'param_sweep_dict' : params_to_sweep}
 
         self.save_file(filename = 'sweep_summary', data = sweep_summary,path=sweep_dir)

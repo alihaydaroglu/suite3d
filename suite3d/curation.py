@@ -1225,7 +1225,7 @@ def collate_sweep_results(sweep_summary, result_key = 'stats'):
                     parvals[param_name] = combinations[cidx][param_idx]
                 param_values[param_names[pidx]][vidx] = parvals
                 cidx += 1
-        assert cidx == n.sum(n_val_per_param) - 1
+        assert cidx == n.sum(n_val_per_param)
 
     return collated_results, param_values
 

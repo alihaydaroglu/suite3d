@@ -403,7 +403,7 @@ def np_sub_and_conv3d_split_shmem(shmem_sub, shmem_filt, np_filt_size, conv_filt
 
     if conv_filt_type == 'unif' : conv_filt = uniform_filter
     elif conv_filt_type == 'gaussian' : conv_filt = gaussian_filter
-
+    print(np_filt_size)
     c1 = np_filt(n.ones((Lz, Ly, Lx)), np_filt_size, mode=filter_mode)
     c2 = conv_filt(n.ones((Lz, Ly, Lx)), conv_filt_size, mode=filter_mode)
 
