@@ -521,11 +521,12 @@ class Job:
             assert self.params[k] in params_to_sweep[k], "The 'base' value of the parameter %s should be included in the sweep (%s)" % (k, str(self.params[k]))
         if all_combinations:
             n_combs = n.product(n_per_param)
-            combinations = n.array(list(itertools.product(*param_vals_list)))
+            combinations = (list(itertools.product(*param_vals_list)))
         else:
             n_combs = n.sum(n_per_param)
             base_vals = [init_params[param_name] for param_name in param_names]
-            combinations = n.stack([base_vals]*n_combs)
+            for i in range(n_combs):
+                combinations.append(copy.copy(base_vals))
             cidx = 0
             for pidx in range(len(param_names)):
                 for vidx in range(n_per_param[pidx]):
@@ -542,9 +543,10 @@ class Job:
             comb_str = 'comb%05d-params' % comb_idx
             for param_idx, param in enumerate(param_names):
                 param_value = comb[param_idx]
-                if type(param_value) != str:
+                if type(param_value) == str or type(param_value) == n.str_:
+                    val_str = param_value
+                else:
                     val_str = '%.03f' % param_value
-                else: val_str = param_value
                 comb_str += '-%s_%s' % (param, val_str)
                 comb_param[param] = param_value    
             comb_dir_tag = 'comb_%05d' % comb_idx

@@ -1204,7 +1204,7 @@ def collate_sweep_results(sweep_summary, result_key = 'stats'):
         param_values = n.empty(n_val_per_param, dtype='O')
 
         for cidx, combination in enumerate(combinations):
-            param_idxs = [n.where(param_dict[param_names[pidx]] == combination[pidx])[0][0] \
+            param_idxs = [n.where(n.array(param_dict[param_names[pidx]]) == combination[pidx])[0][0] \
                                 for pidx in range(n_params)]
             collated_results[tuple(param_idxs)] = results[cidx][result_key]
             parvals = {}
