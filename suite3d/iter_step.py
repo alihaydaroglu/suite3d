@@ -547,7 +547,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
                     break
             idx0 = gpu_reg_batchsize * gpu_batch_idx
             idx1 = min(idx0 + gpu_reg_batchsize, nt)
-            log_cb("Sending frames %d-%d to GPU for rigid registration" % (idx0, idx1), 2)
+            log_cb("Sending frames %d-%d to GPU for rigid registration" % (idx0, idx1), 3)
             tic_rigid = time.time()
 
             # print("######\n\nBEFORE RIGID: 0.5p: %.3f 99.5p: %.3f, Mean: %.3f, Min: %.3f, Max:%.3f" % 
@@ -562,13 +562,13 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
                                     fuse_and_pad = fuse_strips, log_cb = log_cb)
             
             mov_shifted_cpu = mov_shifted_gpu.get()
-            log_cb("Completed rigid registration in %.2f sec" % (time.time() - tic_rigid), 2)
+            log_cb("Completed rigid registration in %.2f sec" % (time.time() - tic_rigid), 3)
             tic_nonrigid = time.time()
             ymaxs_nr_gpu, xmaxs_nr_gpu, snrs = reg_gpu.nonrigid_2d_reg_gpu(mov_shifted_gpu, mask_mul_nr[:,:,0], mask_offset_nr[:,:,0],
                                       ref_nr[:,:,0], yblocks, xblocks, snr_thresh, NRsm, rmins, rmaxs,
                                       max_shift=max_shift_nr, npad=nr_npad, n_smooth_iters=nr_smooth_iters, subpixel=nr_subpixel,
                                       log_cb=log_cb)
-            log_cb("Computed non-rigid shifts in %.2f sec" % (time.time() - tic_rigid), 2)
+            log_cb("Computed non-rigid shifts in %.2f sec" % (time.time() - tic_rigid), 3)
 
             tic_get = time.time()
             ymaxs_nr_cpu = ymaxs_nr_gpu.get()
@@ -584,11 +584,11 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
             # print("SHAPE")
             # print(mov_shifted_cpu.shape)
             del mov_shifted_gpu
-            log_cb("Transferred shifted mov of shape %s to CPU in %.2f sec" % (str(mov_shifted_cpu.shape), time.time() - tic_get), 2)
+            log_cb("Transferred shifted mov of shape %s to CPU in %.2f sec" % (str(mov_shifted_cpu.shape), time.time() - tic_get), 3)
 
             if mov_shifted is None:
                 mov_shifted = n.zeros((mov_shifted_cpu.shape[1], nt, mov_shifted_cpu.shape[2], mov_shifted_cpu.shape[3]), n.float32)
-                log_cb("Allocated array of shape %s to store CPU movie" % str(mov_shifted.shape), 2)
+                log_cb("Allocated array of shape %s to store CPU movie" % str(mov_shifted.shape), 3)
                 log_cb("After array alloc:", level=3,log_mem_usage=True )
                 
 
@@ -605,7 +605,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
             #        (n.percentile(mov_shifted[10,idx0:idx1],0.5), n.percentile(mov_shifted[10,idx0:idx1],99.5),
             #         mov_shifted[10,idx0:idx1].mean(), mov_shifted[10,idx0:idx1].min(), 
             #         mov_shifted[10,idx0:idx1].max()))
-            log_cb("Non rigid transformed (on CPU) in %.2f sec" % (time.time() - shift_tic))
+            log_cb("Non rigid transformed (on CPU) in %.2f sec" % (time.time() - shift_tic), 3)
 
             # mov_shifted.append(mov_shifted_cpu)
             ymaxs_rr.append(ymaxs_rr_cpu.T); xmaxs_rr.append(xmaxs_rr_cpu.T)

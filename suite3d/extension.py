@@ -553,7 +553,7 @@ def prune_overlapping_cells(stats, dist_thresh = 5, lam_overlap_thresh=0.5):
     # med_patchs = n.array([s['med_patch'] for s in stats])
     coords = ([n.array(s['coords']).T for s in stats])
 
-    dm = distance_matrix(meds, meds)
+    dm = distance_matrix(meds, meds, threshold=10000)
     dm[ n.tril_indices(dm.shape[0],1)] = dist_thresh+1
 
     pairs = n.array(n.where((dm < dist_thresh)))

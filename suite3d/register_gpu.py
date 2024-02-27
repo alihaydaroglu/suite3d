@@ -43,7 +43,7 @@ def nonrigid_2d_reg_gpu(mov_gpu, mult_mask, add_mask, refs_nr_f, yblocks, xblock
     add_mask = cp.asarray(add_mask)
 
     load_t = time.time()
-    log_cb("Allocated GPU array for non-rigid reg in %.2f sec" % ((load_t-start_t),), 3)
+    log_cb("Allocated GPU array for non-rigid reg in %.2f sec" % ((load_t-start_t),), 4)
     log_cb("Blocked movie is %2.2fGB" % (mov_blocks.nbytes/1024**3), 4)
     log_cb(log_gpu_memory(mempool),4)
     # print(mov_gpu.std())
@@ -51,7 +51,7 @@ def nonrigid_2d_reg_gpu(mov_gpu, mult_mask, add_mask, refs_nr_f, yblocks, xblock
         clip_t = time.time()
         for zidx in range(nz):
             mov_gpu[:,zidx] = clip_and_mask_mov(mov_gpu[:,zidx], rmins[zidx], rmaxs[zidx])
-        log_cb("Clipped movie in %.2f sec" % (time.time() - clip_t))
+        log_cb("Clipped movie in %.2f sec" % (time.time() - clip_t), 4)
     # print(mov_gpu.std())
 
     block_t = time.time()
@@ -59,24 +59,24 @@ def nonrigid_2d_reg_gpu(mov_gpu, mult_mask, add_mask, refs_nr_f, yblocks, xblock
     mov_blocks *= mult_mask
     mov_blocks += add_mask
     
-    log_cb("Split movie into blocks in %.2f sec" % (time.time() - block_t))
+    log_cb("Split movie into blocks in %.2f sec" % (time.time() - block_t),4)
 
     fft_t = time.time()
     mov_blocks[:] = convolve_2d_gpu(mov_blocks, refs_nr_f, axes=(3,4))
     phase_corr = cp.zeros((nt, nz, nb, ncc, ncc), dtype=cp.float32)
     phase_corr = unwrap_fft_2d(mov_blocks.real, nr = nr, out=phase_corr)
     log_cb("Completed FFT of blocks and computed phase correlations in %.2f sec" %\
-           (time.time() - fft_t))
+           (time.time() - fft_t), 4)
     # print(mov_blocks.std())
     # print(phase_corr.std())
     smooth_t = time.time()
     pc, snrs = compute_snr_and_smooth(phase_corr, smooth_mat, n_smooth_iters,
                                       snr_thresh,log_cb=log_cb)
-    log_cb("Computed SNR and smoothed phase corrs in %.2f sec" % (time.time() - smooth_t))
+    log_cb("Computed SNR and smoothed phase corrs in %.2f sec" % (time.time() - smooth_t),4)
     
     shift_t = time.time()
     ymaxs, xmaxs = get_subpixel_shifts(pc, max_shift, npad, subpixel, n_gpu_threads_per_block)
-    log_cb("Computed subpixel shifts in %.2f sec" % (time.time() - shift_t), 3)
+    log_cb("Computed subpixel shifts in %.2f sec" % (time.time() - shift_t), 4)
     mempool.free_all_blocks(); log_cb(log_gpu_memory(mempool), 4)
     return ymaxs, xmaxs, snrs
 
@@ -132,27 +132,27 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     phase_corr = cp.zeros((nt, ncc, ncc))
 
     load_t = time.time()
-    log_cb("Loaded mov and masks to GPU for rigid reg in %.2f sec" % ((load_t-start_t),), 3)
+    log_cb("Loaded mov and masks to GPU for rigid reg in %.2f sec" % ((load_t-start_t),), 4)
 
     if min_pix_vals is not None:
-        log_cb("Subtracting min pix vals to enforce positivity", 3)
+        log_cb("Subtracting min pix vals to enforce positivity", 4)
         min_pix_vals = cp.asarray(min_pix_vals, dtype=mov_gpu.dtype)
         mov_gpu[:] -= min_pix_vals[:nz, cp.newaxis, cp.newaxis, cp.newaxis]
 
     if crosstalk_coeff is not None: 
-        log_cb("Subtracting crosstalk", 3)
+        log_cb("Subtracting crosstalk", 4)
         mov_gpu = crosstalk_subtract(mov_gpu, crosstalk_coeff)
     
     if fuse_and_pad:
-        log_cb("Fusing and padding movie",3)
+        log_cb("Fusing and padding movie",4)
         mov_gpu = fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs)
         nz,nt,ny,nx = mov_gpu.shape
-        log_cb("GPU Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),3)
+        log_cb("GPU Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),4)
         mempool.free_all_blocks()
         log_cb(log_gpu_memory(mempool), 4)
 
     if shift:
-        log_cb("Allocating memory for shifted movie", 3)
+        log_cb("Allocating memory for shifted movie", 4)
         mov_shifted = cp.zeros((nt,nz,ny,nx), dtype=cp.float32)
         mov_shifted[:] = mov_gpu.real.swapaxes(0,1).copy()
 
