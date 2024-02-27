@@ -576,7 +576,7 @@ class Job:
 
     def sweep_corrmap(self, params_to_sweep, sweep_name='corrmap', all_combinations=True,
                       mov=None, iter_limit=None):
-        sweep_summary = self.setup_sweep(params_to_sweep, sweep_name,         all_combinations=all_combinations)
+        sweep_summary = self.setup_sweep(params_to_sweep, sweep_name,all_combinations=all_combinations)
         sweep_summary['sweep_type'] = 'corrmap'
         sweep_dir_path = sweep_summary['sweep_dir_path']
         sweep_summary['results'] = []
@@ -921,6 +921,23 @@ class Job:
             to_return[file] = data
         return to_return
     
+    def export_results(self, export_path, result_dir_name = 'rois', results_to_export=None):
+        full_export_path = os.path.join(export_path, 's3d-results-%s' % self.job_id)
+        os.makedirs(full_export_path, exist_ok=True)
+        self.log("Created dir %s to export results" % full_export_path)
+        if results_to_export is None:
+            results_to_export = ['stats_small.npy', 'info.npy', 'F.npy', 'spks.npy', 'Fneu.npy']
+        results = self.load_segmentation_results(result_dir_name)
+        for result in results.keys():
+            data = results[result]
+            # stats_small doesn't contain the neuropil coordinates,
+            # which take up a lot of space and are kind of useless for further analysis
+            if result == 'stats_small.npy': result = 'stats.npy'
+            self.save_file(data=data, filename=result, path=full_export_path)
+            self.log("Saved %s to %s" % (result, full_export_path), 2)
+        
+
+
 
     def extract_and_deconvolve(self, patch_idx=0, mov=None, batchsize_frames = 500, stats = None, offset=None, 
                                n_frames=None, stats_dir=None, iscell = None, ts=None, load_F_from_dir=False,

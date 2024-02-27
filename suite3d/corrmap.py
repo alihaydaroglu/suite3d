@@ -92,6 +92,7 @@ def calculate_corrmap(mov, params, summary=None, batch_dir=None,
 def compute_corr_map_batch(mov, corr_map_params = None, 
                            computation_params = None, accum = None,
                            summary = None, log = default_log):
+    # TODO DOCSTRING
 
     # get the size of the movie
     nb, nz, ny, nx = mov.shape
