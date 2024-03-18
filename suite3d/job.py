@@ -496,7 +496,8 @@ class Job:
                                     of values for the param to sweep through 
             sweep_name (str): name of the sweep
             sweep_parent_dir (str, optional): Parent directory name for the sweep to be stored in. Defaults to 'sweeps'.
-            all_combinations (bool, optional): Whether to do all combinations of all values of parameters, or to start with a base set of params (self.params) and only vary a single parameter at a time. If set to True, you get a lot of combinations. Defaults to True.
+            all_combinations (bool, optional): Whether to do all combinations of all values of parameters, or to start with a base set of params (self.params) and only vary a single parameter at a time.
+              If set to True, you get a lot of combinations. Defaults to True.
 
         Returns:
             dict: sweep_summary: contains combinations of parameters for each run, and directories, etc.
@@ -606,7 +607,7 @@ class Job:
         return sweep_summary
 
 
-    def sweep_segmentation(self, params_to_sweep, sweep_name='seg', all_combinations=False,patches_to_segment=None, ts = None, input_dir_name=None):
+    def sweep_segmentation(self, params_to_sweep, sweep_name='seg', all_combinations=False, patches_to_segment=None, ts = None, input_dir_name=None):
         '''
         Run segmentation with many different parameters
 
@@ -622,7 +623,7 @@ class Job:
         Returns:
             dict: sweep_summary containing results and sweep info
         '''
-        sweep_summary = self.setup_sweep(params_to_sweep, sweep_name,         all_combinations=all_combinations)
+        sweep_summary = self.setup_sweep(params_to_sweep, sweep_name, all_combinations=all_combinations)
         sweep_summary['sweep_type'] = 'segmentation'
         sweep_dir_path = sweep_summary['sweep_dir_path']
         sweep_summary['results'] = []
@@ -1035,6 +1036,7 @@ class Job:
         patch_dir = self.make_new_dir(patch_str, parent_dir_name= parent_dir_name, 
                                         dir_tag = parent_dir_name + '-' + patch_str)
         return patch_dir
+    
     def load_patch_results(self, patch_idx=0, parent_dir_name = 'detection'):
         patch_dir = self.get_patch_dir(patch_idx, parent_dir_name)
         stats = n.load(os.path.join(patch_dir, 'stats.npy'), allow_pickle=True)
@@ -1096,6 +1098,7 @@ class Job:
         stats = n.load(os.path.join(patch_dir, 'stats.npy'), allow_pickle=True)
         info = n.load(os.path.join(patch_dir, 'info.npy'), allow_pickle=True).item()
         return stats, info
+    
     def get_traces(self, patch_idx=0, parent_dir_name='detection', patch_dir=None):
         if patch_dir is None:
             patch_dir = self.get_patch_dir(patch_idx, parent_dir_name=parent_dir_name)
@@ -1105,12 +1108,12 @@ class Job:
                 traces[filename[:-4]] = n.load(os.path.join(patch_dir, filename))
         return traces
         
-
     def get_registered_files(self, key='registered_fused_data', filename_filter='fused', sort=True):
         all_files = os.listdir(self.dirs[key])
         reg_files = [os.path.join(self.dirs[key],x) for x in all_files if x.startswith(filename_filter)]
         if sort: reg_files = sorted(reg_files)
         return reg_files
+    
     def get_denoised_files(self):
         all_files = n.os.listdir(self.dirs['deepinterp'])
         reg_files = [os.path.join(self.dirs['deepinterp'],x) for x in all_files if x.startswith('dp')]

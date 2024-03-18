@@ -33,7 +33,7 @@ def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plan
     full_mov = lbmio.load_and_stitch_tifs(init_tifs, planes = planes, convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids,
                                           n_ch = n_ch_tif, filt=filter_params, concat=False, fix_fastZ=fix_fastZ)
 
-    mov_lens = [mov.shape[1] for mov in full_mov]
+    mov_lens = [mov.shape[1] for mov in full_mov] #not needed anymore?
     full_mov = n.concatenate(full_mov, axis=1)
 
     return full_mov
@@ -70,7 +70,7 @@ def prep_registration(full_mov, reg_ops, log_callback=default_log, filter_pcorr=
 
     return tvecs, ref_img_3d_aligned, all_ops, all_ref_and_masks, ref_img_3d_unaligned
 
-
+#Is this the old version, which uses suite 2p? 
 def register_sample_movie(full_mov, all_ops, all_refs, in_place=True, log_callback=default_log):
     nz = full_mov.shape[0]
     if not in_place:

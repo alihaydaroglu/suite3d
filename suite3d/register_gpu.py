@@ -19,7 +19,7 @@ def log_gpu_memory(mempool=None):
     n_blocks = mempool.n_free_blocks()
     total_pool_gb = mempool.total_bytes() / 1024**3
     used_pool_gb = mempool.used_bytes() / 1024**3
-
+    #TODO confirm if this is correct
     string = "GPU RAM: %d blocks allocated, %2.2f / %2.2f GB used" \
              % (n_blocks, used_pool_gb, total_pool_gb)
     return string
@@ -306,7 +306,7 @@ def convolve_2d_cpu(mov, ref_f):
     mov[:] = mkl_fft.ifft2(mov, axes=(1,2), overwrite_x=True)
     return mov
 
-
+#TODO make dependant on parameter not 15
 def crosstalk_subtract(mov, crosstalk_coeff):
     nz, nt, ny, nx = mov.shape
     if nz <= 15: 
