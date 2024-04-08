@@ -39,7 +39,7 @@ def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plan
 
     return full_mov
 
-#TODO delete outdate if new reference function are used instead
+#TODO delete outdated if new reference function are used instead
 def prep_registration(full_mov, reg_ops, log_callback=default_log, filter_pcorr=0, force_plane_shifts=None):
     nz, nt, ny, nx = full_mov.shape
     ref_img_3d = []
@@ -229,30 +229,24 @@ def run_init_pass(job):
     # }
 
     ##### new function
-    #TODO discus and add params to get_default_params
-    reference_params = {'percent_contribute' : params.get('percent_contribute',0.9), 
+    reference_params = {'percent_contribute' : params.get('percent_contribute', 0.9), 
                         'block_size' : params.get('block_size', [128, 128]),
-                        'Sigma' : params.get('Sigma_reference', [1.45, 0]), #Y/X smooth, Z smooth
-                        'smooth_sigma' : params.get('smooth_sigma_referemce', 1.15), #spatial taper width
+                        'Sigma' : params.get('sigma_reference', [1.45, 0]), #Y/X smooth, Z smooth
+                        'smooth_sigma' : params.get('smooth_sigma_reference', 1.15), #spatial taper width
                         'niter' : params.get('n_reference_iterations', 8),
-                        'max_reg_xy' : params.get('max_reg_xy', 50), #TODO pick a better value
+                        'max_reg_xy_reference' : params.get('max_reg_xy_reference', 50),
                         'batch_size' : params.get('gpu_reference_batch_size', 20), #keep in gpu RAM
                         }
     mov_fuse, new_xs, og_xs = ref.fuse_mov(init_mov, fuse_shift, xs)
 
     tvecs, ref_image, ref_padded, all_refs_and_masks, pad_sizes, reference_params = \
-    ref.compute_reference_and_masks(mov_fuse, reference_params, log_callback = job.log ,use_GPU = True)
-
-    #TODO check if needed if not delete takes ~30-60 s
-    img_pad4D = ref.apply_plane_shiftd4D(init_mov, tvecs[0])
-    img_pad = img_pad4D.mean(axis=1)
+    ref.compute_reference_and_masks(mov_fuse, reference_params, log_callback = job.log , use_GPU = params.get('use_GPU_registration', True))
 
     summary = {
         'ref_img_3d' : ref_image, # ctalk-sub and padded and plane-shifted
         'ref_img_3d_unaligned' : ref_padded, #ctalk-sub and padded
         'raw_img' : im3d_raw, # right from the tiff file
         'img' : im3d, # crosstalk-subtracted
-        'img_pad' : img_pad, #ctalk-sub and padded
         'crosstalk_coeff' : cross_coeff,
         'plane_shifts' : tvecs[0],
         'plane_shifts_uncorrected' : tvecs[1],

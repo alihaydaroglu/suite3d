@@ -437,21 +437,33 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
     ref_img_3d         = summary['ref_img_3d']
     min_pix_vals       = summary['min_pix_vals']
     crosstalk_coeff    = summary['crosstalk_coeff']
-    all_ops            = summary['all_ops']
     xpad               = summary['xpad']
     ypad               = summary['ypad']
     plane_shifts       = summary['plane_shifts']
     fuse_shift         = summary['fuse_shift']
     new_xs             = summary['new_xs']
     old_xs             = summary['og_xs']
+
+    # new parameters
+    reference_params   = summary['reference_params']
+    rmins = reference_params['plane_mins']
+    rmaxs = reference_params['plane_maxs']
+    snr_thresh = 1.2 #TODO add values to a default params dictionary
+    NRsm = reference_params['NRsm']
+    yblocks, xblocks = reference_params['yblock'], reference_params['xblocks']
+    nblocks = reference_params['nblocks'] 
+
+    # from old code
+    # all_ops            = summary['all_ops']
+    # rmins = n.array([op['rmin'] for op in all_ops])
+    # rmaxs = n.array([op['rmax'] for op in all_ops])
+    # snr_thresh = all_ops[0]['snr_thresh']
+    # NRsm = all_ops[0]['NRsm'].astype(n.float32)
+    # yblocks, xblocks = all_ops[0]['yblock'], all_ops[0]['xblock']
+    # nblocks = all_ops[0]['nblocks']
+
     mask_mul, mask_offset, ref_2ds = n.stack([r[:3] for r in refs_and_masks],axis=1)
     mask_mul_nr, mask_offset_nr, ref_nr = n.stack([r[3:] for r in refs_and_masks],axis=1)
-    rmins = n.array([op['rmin'] for op in all_ops])
-    rmaxs = n.array([op['rmax'] for op in all_ops])
-    snr_thresh = all_ops[0]['snr_thresh']
-    NRsm = all_ops[0]['NRsm'].astype(n.float32)
-    yblocks, xblocks = all_ops[0]['yblock'], all_ops[0]['xblock']
-    nblocks = all_ops[0]['nblocks']
     max_shift_nr = 5
     
 
@@ -554,7 +566,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
             #        (n.percentile(mov_cpu[10,idx0:idx1],0.5), n.percentile(mov_cpu[10,idx0:idx1],99.5),
             #         mov_cpu[10,idx0:idx1].mean(), mov_cpu[10,idx0:idx1].min(), mov_cpu[10,idx0:idx1].max()))
 
-            mov_shifted_gpu, ymaxs_rr_gpu, xmaxs_rr_gpu = reg_gpu.rigid_2d_reg_gpu(mov_cpu[:,idx0:idx1], 
+            mov_shifted_gpu, ymaxs_rr_gpu, xmaxs_rr_gpu, __ = reg_gpu.rigid_2d_reg_gpu(mov_cpu[:,idx0:idx1], 
                                     mask_mul, mask_offset, 
                                     ref_2ds, max_reg_xy=max_rigid_shift,  min_pix_vals=min_pix_vals,
                                     rmins=rmins, rmaxs=rmaxs, crosstalk_coeff=crosstalk_coeff, shift=True,
@@ -596,6 +608,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
             nz = mov_shifted_cpu.shape[1]
             for zidx in range(nz):
                 # print("SHIFITNG: %d" % zidx)
+                #TODO migrate to suite3D?
                 mov_shifted[zidx, idx0:idx1] = nonrigid.transform_data(mov_shifted_cpu[:,zidx], nblocks, 
                                                                   xblock=xblocks, yblock=yblocks, ymax1=ymaxs_nr_cpu[:,zidx],
                                                                   xmax1=xmaxs_nr_cpu[:,zidx])

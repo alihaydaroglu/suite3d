@@ -1,6 +1,5 @@
 #Function used for creating the reference image 
-#It will have functions from suite3D which have been slightly modified 
-#Used to test function and help intergrae with suite3D proper
+#It will have functions from suite2P which have been slightly modified 
 import numpy as np
 n = np
 import cupy as cp
@@ -24,9 +23,6 @@ def default_log(string, val):
 
 #Function which runs createion of reference image+ masks
 #TODO detrimmine how to give refernce GPU
-#TODO add before calling compute_refernce_and_masks
-    # #Fuse the raw movie
-    # mov_fuse, new_xs, og_xs = fuse_mov(mov_raw, fuse_shift, xs)
 
 def compute_reference_and_masks(mov_fuse, reference_params, log_callback = default_log, rmins = None, rmaxs = None, use_GPU = True):
     """
@@ -70,7 +66,7 @@ def compute_reference_and_masks(mov_fuse, reference_params, log_callback = defau
     percent_contribute = reference_params['percent_contribute']
     niter = reference_params['niter']
     Sigma = reference_params['Sigma']
-    max_reg_xy = reference_params['max_reg_xy']
+    max_reg_xy = reference_params['max_reg_xy_reference']
     
     nZ, nT, nY, nX = mov_fuse.shape
 
@@ -159,7 +155,11 @@ def get_phasecorr_and_masks(ref_image, reference_params):
         refs_fft_rigid[z] = phasecorr_ref(ref_image[z,:,:].squeeze(), smooth_sigma = smooth_sigma)
 
     #Non-rgid phascorr refernce and masks
-    yblock, xblock, nblocks, block_size, NRsm = make_blocks(Ly=Ly, Lx=Lx, block_size=block_size)
+    yblock, xblock, nblocks, block_size, reference_params['NRsm'] = make_blocks(Ly=Ly, Lx=Lx, block_size=block_size)
+    # these params are needed for registration
+    reference_params['nblocks'] = nblocks
+    reference_params['xblock'] = xblock
+    reference_params['yblock'] = yblock
 
     mult_mask_NR = np.zeros((nblocks[0]*nblocks[1], nZ, 1, block_size[0], block_size[1]))
     add_mask_NR = np.zeros((nblocks[0]*nblocks[1], nZ, 1, block_size[0], block_size[1]))
@@ -183,7 +183,7 @@ def get_phasecorr_and_masks(ref_image, reference_params):
         
         all_refs_and_masks.append(a_plane_refs_and_masks)
     
-    return all_refs_and_masks
+    return all_refs_and_masks, reference_params
 
 
 #The 3D version of the reference image
@@ -452,7 +452,7 @@ def register_planes(mov3D, reference_params):
 
     Sigma = reference_params['Sigma']
     smooth_sigma = reference_params['smooth_sigma']
-    max_reg_xy = reference_params['max_reg_xy']
+    max_reg_xy = reference_params['max_reg_xy_reference']
 
     mov3D = n.asarray(mov3D, dtype=n.complex64)
     mov3D = np.expand_dims(mov3D, axis = 1) #make it (nz, 1, ny, nx) so it is in for used by other registration function
@@ -539,7 +539,7 @@ def apply_plane_shiftd4D(mov, tvecs):
 
 ##########################################
 #reference image function cpu and gpu
-def get_referance_img_gpu(frames, percent_contribute, niter, rmins = None, rmaxs = None, batch_size = 20, max_reg_xy = 30, sigma = [1.45, 0]):
+def get_referance_img_gpu(frames, percent_contribute, niter, rmins = None, rmaxs = None, batch_size = 20, max_reg_xy = 50, sigma = [1.45, 0]):
     """
     This function creates a reference image using the GPU for a speed up
 
@@ -558,7 +558,7 @@ def get_referance_img_gpu(frames, percent_contribute, niter, rmins = None, rmaxs
     batch_size : int, optional
         The amount of frames sent to the GPU in one batch, by default 20
     max_reg_xy : int, optional
-        The maximum allowed x/y shift, by default 30
+        The maximum allowed x/y shift, by default 50
     sigma : list, optional
         The smoothing values in x/y and z, by default [1.45, 0]
 

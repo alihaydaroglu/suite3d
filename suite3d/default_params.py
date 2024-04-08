@@ -68,7 +68,7 @@ params = {
     'crosstalk_n_planes' : 10,
 
     ### Registration ###
-
+    'use_GPU_registration' : True, #TODO intergrate with registration
     # whether or not to fuse the mesoscope strips
     'fuse_strips' : True, 
     # number of pixels to skip between strips - None will auto estimate
@@ -81,6 +81,18 @@ params = {
     'nr_npad' :  3,
     'nr_subpixel' : 10,
     'nr_smooth_iters' : 2,
+
+    # reference image paramaters
+    'percent_contribute' : 0.9, 
+    # percentage of frames which contribute to the reference image
+    'block_size' : (128, 128),
+    # size of a non-rigid block
+    'sigma_reference' : (1.45, 0),
+    'smooth_sigma_reference' : 1.15,
+    'n_reference_iterations' : 8,
+    'max_reg_xy_reference' : 50,
+    # max value in x/y which a plane can be shifted for the reference
+    'gpu_reference_batch_size' : 20,
 
     # parameters from suite2p
     'nonrigid' : True,
