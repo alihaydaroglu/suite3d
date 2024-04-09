@@ -111,7 +111,7 @@ def compute_reference_and_masks(mov_fuse, reference_params, log_callback = defau
     ref_image = apply_plane_shifts3D(ref_padded, uncorrected_tvecs)
 
     #Option to clip the ref_image per plane for below
-    if reference_params.get('norm_frames', False):
+    if reference_params.get('norm_frames', True): #TODO check this, registration eneds rmins/rmaxs so I think it needs to be True but the orginal code seems to default to false
         plane_mins = np.zeros(nZ)
         plane_maxs = np.zeros(nZ)
         clipped_ref_img = np.zeros_like(ref_image)
@@ -121,9 +121,9 @@ def compute_reference_and_masks(mov_fuse, reference_params, log_callback = defau
             plane_mins[z], plane_maxs[z] = rmin, rmax
         reference_params['plane_mins'] = plane_mins
         reference_params['plane_maxs'] = plane_maxs
-        all_refs_and_masks = get_phasecorr_and_masks(clipped_ref_img, reference_params)
+        all_refs_and_masks, reference_params = get_phasecorr_and_masks(clipped_ref_img, reference_params)
     else:
-        all_refs_and_masks = get_phasecorr_and_masks(ref_image, reference_params)
+        all_refs_and_masks, reference_params = get_phasecorr_and_masks(ref_image, reference_params)
     
     tvecs = [corrected_tvecs, uncorrected_tvecs] #return both 
     return tvecs, ref_image, ref_padded, all_refs_and_masks, pad_sizes, reference_params

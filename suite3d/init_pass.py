@@ -257,8 +257,8 @@ def run_init_pass(job):
         'fuse_shift' : fuse_shift,
         'fuse_ccs' : fuse_ccs,
         'tiffile_xs' : xs,
-        'xpad': pad_sizes[1],
-        'ypad' : pad_sizes[0],
+        'xpad': pad_sizes[0],
+        'ypad' : pad_sizes[1],
         'new_xs' : new_xs,
         'og_xs' : og_xs
     }

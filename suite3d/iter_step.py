@@ -450,7 +450,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
     rmaxs = reference_params['plane_maxs']
     snr_thresh = 1.2 #TODO add values to a default params dictionary
     NRsm = reference_params['NRsm']
-    yblocks, xblocks = reference_params['yblock'], reference_params['xblocks']
+    yblocks, xblocks = reference_params['yblock'], reference_params['xblock']
     nblocks = reference_params['nblocks'] 
 
     # from old code
