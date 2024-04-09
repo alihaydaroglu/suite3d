@@ -446,8 +446,8 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
 
     # new parameters
     reference_params   = summary['reference_params']
-    rmins = reference_params['plane_mins']
-    rmaxs = reference_params['plane_maxs']
+    rmins = reference_params.get(['plane_mins'], None)
+    rmaxs = reference_params.get(['plane_maxs'], None)
     snr_thresh = 1.2 #TODO add values to a default params dictionary
     NRsm = reference_params['NRsm']
     yblocks, xblocks = reference_params['yblock'], reference_params['xblock']
@@ -490,11 +490,18 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
     nr_smooth_iters    = params.get('nr_smooth_iters', 2)
     fuse_strips        = params.get('fuse_strips', True)
     fix_fastZ          = params.get('fix_fastZ', False)
-    reg_norm_frames           = params.get('reg_norm_frames', True)
-    if not reg_norm_frames:
+    reg_norm_frames    = params.get('reg_norm_frames', True)
+
+    # catch if rmins/rmaxs where not calculate in init_pass
+    if rmins is None and rmaxs is None:
         log_cb("Not clipping frames for registration")
-        rmins = n.array([None for i in range(len(rmins))])
-        rmaxs = n.array([None for i in range(len(rmaxs))])
+        rmins = n.array([None for i in range(n_ch_tif)])
+        rmaxs = n.array([None for i in range(n_ch_tif)])
+    else:
+        if not reg_norm_frames:
+            log_cb("Not clipping frames for registration")
+            rmins = n.array([None for i in range(len(rmins))])
+            rmaxs = n.array([None for i in range(len(rmaxs))])
 
     if max_rigid_shift < n.ceil(n.max(n.abs(summary['plane_shifts']))) + 5:
         max_rigid_shift = n.ceil(n.max(n.abs(summary['plane_shifts']))) + 5
