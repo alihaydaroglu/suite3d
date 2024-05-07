@@ -1502,11 +1502,13 @@ class Job:
         # plt.show()
         return f,axs
     
+    #TODO add a non-rigid = False so can load rigid-only data
     def load_registration_results(self, offset_dir='registered_fused_data'):
         offset_files = self.get_registered_files(offset_dir, 'offsets')
         n_offset_files = len(offset_files)
         summary = self.load_summary()
-        nyb, nxb = summary['all_ops'][0]['nblocks']
+        nyb, nxb =  summary['reference_params']['block_size'] 
+        #nyb, nxb = summary['all_ops'][0]['nblocks'] #old method
         nz = len(self.params['planes'])
 
         rigid_xs = []

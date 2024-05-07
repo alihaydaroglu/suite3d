@@ -101,11 +101,16 @@ def compute_reference_and_masks(mov_fuse, reference_params, log_callback = defau
             yshift[z] += ymax[i,z, np.asarray(used_frames[i])[z]].mean(axis=0)
 
     #allign from raw data
-    corrected_tvecs_x = uncorrected_tvecs[:,1] + xshift
-    corrected_tvecs_y = uncorrected_tvecs[:,0] - yshift 
+    corrected_tvecs_x = uncorrected_tvecs[:,1] + xshift - xshift[0]
+    corrected_tvecs_y = uncorrected_tvecs[:,0] - yshift + yshift[0] #Make the tvecs start at 0!
     corrected_tvecs = np.stack((corrected_tvecs_y, corrected_tvecs_x), axis = 1)
+    corrected_tvecs = np.round(corrected_tvecs)
+    # pad the movie byusing the maximum of either tvecs
+    stack_tmp = np.stack((corrected_tvecs, uncorrected_tvecs))
+    max_tvecs = np.max(np.abs(stack_tmp), axis = 0)
+    max_tvecs *= np.sign(corrected_tvecs) #may want to change this, the point is to return correct sign after abs
 
-    ref_padded, xpad, ypad = pad_mov3D(ref_image, uncorrected_tvecs)
+    ref_padded, xpad, ypad = pad_mov3D(ref_image, max_tvecs)
     pad_sizes = [xpad, ypad]
 
     ref_image = apply_plane_shifts3D(ref_padded, uncorrected_tvecs)
@@ -421,8 +426,9 @@ def compute_mask_offset(refImg, mask_mul):
     mask_offset = refImg.mean() * (1. - mask_mul)
     return mask_offset   
 
+#TODO look at this function
 @vectorize(nopython=True, target="parallel", cache=True)
-def apply_mask(data, MaskMul, MaskOffset):
+def apply_mask(data, mask_mul, mask_offset):
     """ 
     Applies the mask to the data
 
@@ -440,7 +446,7 @@ def apply_mask(data, MaskMul, MaskOffset):
     data: ndarray(nT, nZ, nY, nX)
         the data with the multiplication and offset masks applied
     """
-    return np.complex64(np.float32(data) * MaskMul + MaskOffset)
+    return np.complex64(np.float32(data) * mask_mul + mask_offset)
 
 ###############################################################################
 # New functions needed for creating a reference image
