@@ -377,8 +377,31 @@ def animate_frame(Frame, ax, FrameNo, flip=1, cmap='Greys_r', colorbar=False, al
 
 def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args = {}, figsize=(8,6), dpi=150, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None,
                   **kwargs):
-    """ 
-    This function requires a 3D array and will return a .gif, the array will be animated over the first axis and will display ~ show_tiff for each frame.
+    """
+    This function requires a 3D image e.g (nz, ny, nx) and will return an animated gif.
+
+    Parameters
+    ----------
+    Im3D : ndarray
+        A 3D array, which will be animated over the first axis (0)
+    SaveDir : path
+        Path to the save directory should end in .gif
+    interval : int, optional
+        The time delay between frames in ms, by default 500
+    repeat_delay : int, optional
+        The time delay between repeats of the gif, by default 5000
+    other_args : dict, optional
+        Optional arguments for the call of show_tif for each plane, by default {}
+    figsize : tuple, optional
+        figure size, by default (8,6)
+    dpi : int, optional
+        dpi , by default 150
+    exact_pixels : bool, optional
+        If true adapt figure size to show the exact pixels, by default False
+    vminmax_percentile : tuple, optional
+        Threshold to clip movie, by default (0.5,99.5)
+    vminmax : tuple, optional
+        Values to clip the movie, by default None
     """
 
     Mov = Im3D.copy()

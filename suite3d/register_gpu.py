@@ -19,7 +19,7 @@ def log_gpu_memory(mempool=None):
     n_blocks = mempool.n_free_blocks()
     total_pool_gb = mempool.total_bytes() / 1024**3
     used_pool_gb = mempool.used_bytes() / 1024**3
-
+    #TODO confirm if this is correct
     string = "GPU RAM: %d blocks allocated, %2.2f / %2.2f GB used" \
              % (n_blocks, used_pool_gb, total_pool_gb)
     return string
@@ -128,6 +128,7 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     refs_f_gpu = cp.asarray(refs_f)
     ymaxs = cp.zeros((nz, nt), dtype=cp.float32)
     xmaxs = cp.zeros((nz, nt), dtype=cp.float32)
+    cmaxs = cp.zeros((nz, nt), dtype=cp.float32)
     ncc = int(max_reg_xy * 2 + 1)
     phase_corr = cp.zeros((nt, ncc, ncc))
 
@@ -168,7 +169,7 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
                           mult_mask_gpu[zidx], add_mask_gpu[zidx])
         mov_gpu[zidx] = convolve_2d_gpu(mov_gpu[zidx], refs_f_gpu[zidx])
         unwrap_fft_2d(mov_gpu[zidx].real, max_reg_xy, out=phase_corr)
-        ymaxs[zidx], xmaxs[zidx] = get_max_cc_coord(phase_corr, max_reg_xy)
+        ymaxs[zidx], xmaxs[zidx], cmaxs[zidx] = get_max_cc_coord(phase_corr, max_reg_xy)
         reg_t += (time.time() - reg_tic)
         
         if shift:
@@ -194,8 +195,8 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     log_cb("Freeing all blocks", 3)
     log_cb(log_gpu_memory(mempool), 4)
     if shift:
-        return mov_shifted, ymaxs, xmaxs
-    return ymaxs, xmaxs
+        return mov_shifted, ymaxs, xmaxs, cmaxs
+    return ymaxs, xmaxs, cmaxs
 
 def rigid_2d_reg_cpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
                     rmins, rmaxs, crosstalk_coeff = None, shift=True):
@@ -203,6 +204,7 @@ def rigid_2d_reg_cpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     mov = n.asarray(mov_cpu, dtype=n.complex64)
     ymaxs = n.zeros((nz, nt), dtype=n.int16)
     xmaxs = n.zeros((nz, nt), dtype=n.int16)
+    cmaxs = n.zeros((nz, nt), dtype=n.float32) 
     ncc = max_reg_xy * 2 + 1
     phase_corr = n.zeros((nt, ncc, ncc))
 
@@ -216,7 +218,7 @@ def rigid_2d_reg_cpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
                           mult_mask[zidx], add_mask[zidx], cp=n)
         mov[zidx] = convolve_2d_cpu(mov[zidx], refs_f[zidx])
         unwrap_fft_2d(mov[zidx].real, max_reg_xy, out=phase_corr, cp=n)
-        ymaxs[zidx], xmaxs[zidx] = get_max_cc_coord(phase_corr, max_reg_xy, cp=n)
+        ymaxs[zidx], xmaxs[zidx], cmaxs[zidx] = get_max_cc_coord(phase_corr, max_reg_xy, cp=n)
         if shift:
             for frame_idx in range(nt):
                 mov_shifted[frame_idx, zidx] = shift_frame(mov_shifted[frame_idx, zidx],
@@ -227,13 +229,42 @@ def rigid_2d_reg_cpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         return mov_shifted, ymaxs, xmaxs
     return ymaxs, xmaxs
 
-def get_max_cc_coord(phase_corr, max_reg_xy, cp=cp):
+def get_max_cc_coord_old(phase_corr, max_reg_xy, cp=cp):
     nt, ncc, __ = phase_corr.shape
     phase_corr_flat = phase_corr.reshape(nt, ncc**2)
     argmaxs = cp.argmax(phase_corr_flat, axis=1)
     ymax = (argmaxs // ncc) - max_reg_xy
     xmax = (argmaxs %  ncc) - max_reg_xy
     return ymax, xmax
+
+def get_max_cc_coord(phase_corr, max_reg_xy, cp=cp):
+    """
+    This function finds where the highest correlation to find the value of the coreelation 
+    and the x/y shifts needed to maximise correlation 
+
+    Parameters
+    ----------
+    phase_corr : ndarray (nT, ncc, ncc)
+        The phase correlation image for each frame
+    max_reg_xy : int
+        The maximum size shift the function allows
+    cp : function class, optional
+        Does the function use GPU (cp) or CPU (n), by default cp
+
+    Returns
+    -------
+    ndarray x3
+        returns the values of ymax, xmax and cmax for each frame
+    """
+    nt, ncc, __ = phase_corr.shape
+    phase_corr_flat = phase_corr.reshape(nt, ncc**2)
+    # get locations of the maximum phase correlation
+    argmaxs = cp.argmax(phase_corr_flat, axis=1)
+    # get the value of the maximum phase correlation
+    cmax = cp.max(phase_corr_flat, axis = 1)
+    ymax = (argmaxs // ncc) - max_reg_xy
+    xmax = (argmaxs %  ncc) - max_reg_xy
+    return ymax, xmax, cmax
 
 def clip_and_mask_mov(mov, rmin, rmax, mult_mask=None, add_mask=None, cp=cp):
     if rmin is not None and rmax is not None: mov.real = cp.clip(mov.real, rmin, rmax, out=mov.real)
@@ -306,7 +337,8 @@ def convolve_2d_cpu(mov, ref_f):
     mov[:] = mkl_fft.ifft2(mov, axes=(1,2), overwrite_x=True)
     return mov
 
-
+#TODO make dependant on parameter not 15
+#TODO try numba to speed it up? (will have to do seperate cpu/gpu)
 def crosstalk_subtract(mov, crosstalk_coeff):
     nz, nt, ny, nx = mov.shape
     if nz <= 15: 
@@ -315,7 +347,7 @@ def crosstalk_subtract(mov, crosstalk_coeff):
         mov[i + 15] -= crosstalk_coeff * mov[i]
     return mov
 
-
+#TODO xpad/ypad should be integer ?
 def fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs):
     nz, nt, ny, nx = mov_gpu.shape
     n_stitches = len(new_xs) - 1
