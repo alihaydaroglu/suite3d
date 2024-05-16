@@ -1,4 +1,4 @@
-import napari
+
 import os
 import numpy as n
 from matplotlib import pyplot as plt
@@ -7,13 +7,17 @@ import argparse
 import sys
 import copy
 import functools
-import pyqtgraph as pg
-from PyQt5 import QtGui, QtCore, QtWidgets
-from PyQt5.QtCore import QSize
-from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox, QSizePolicy
-from PyQt5.QtGui import QKeySequence
 from warnings import warn
 
+try:
+    import napari
+    import pyqtgraph as pg
+    from PyQt5 import QtGui, QtCore, QtWidgets
+    from PyQt5.QtCore import QSize
+    from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox, QSizePolicy
+    from PyQt5.QtGui import QKeySequence
+except:
+    print("Problems importing napari or PyQT. No UI available")
 
 default_display_params = {
     'lam_max' : 0.3, # Voxels with cell values above lam_max will have alpha=1

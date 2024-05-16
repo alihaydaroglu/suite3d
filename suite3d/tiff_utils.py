@@ -357,7 +357,7 @@ def animate_frame(Frame, ax, FrameNo, flip=1, cmap='Greys_r', colorbar=False, al
         new_args['vmin'] = None; new_args['vmax'] = None
 
     #Add Title as text as artist animation is unique
-    title = ax.text(0.5, 1.01, f'FrameNo. {FrameNo}', horizontalalignment='center', verticalalignment='bottom', transform=ax.transAxes)
+    title = ax.text(0.5, 1.01, f'Frame {FrameNo}', horizontalalignment='center', verticalalignment='bottom', transform=ax.transAxes)
 
     im.extend([ax.imshow(flip*Frame,cmap=cmap, **new_args), title])
 

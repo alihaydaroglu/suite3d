@@ -756,147 +756,15 @@ class Job:
 
         return rois_dir_path
 
-    def patch_and_detect(self, corrmap_dir_tag='', do_patch_idxs=None, compute_npil_masks=False, ts=(), combined_name='combined'):
-        connector = '-' if len(corrmap_dir_tag) > 0 else ''
-        mov_sub = self.get_registered_movie(corrmap_dir_tag + connector + 'mov_sub', 'mov', axis=0, edge_crop=False)
-        vmap = self.load_iter_results(-1, dir_tag=corrmap_dir_tag + connector + 'iters')['vmap2'] ** 0.5
 
-        
-        patch_size_xy = self.params['patch_size_xy']
-        patch_overlap_xy = self.params['patch_overlap_xy']
-        nt,nz,ny,nx = mov_sub.shape
-
-        patches, grid_shape = svu.make_blocks((nz, ny,nx), (nz,) + patch_size_xy, (0,) + patch_overlap_xy)
-        patches_vmap, __ = svu.make_blocks((nz, ny,nx), (nz,) + patch_size_xy, (0,) + patch_overlap_xy,
-                                      nonoverlapping_mask=True)
-        n_patches = patches.shape[1]
-        patch_idxs = []
-
-        if do_patch_idxs is None: do_patch_idxs = range(n_patches)
-        for patch_idx in do_patch_idxs:
-            self.log("Detecting from patch: %d/%d" % (patch_idx, len(do_patch_idxs)))
-            patch_dir, patch_info, stats = self.detect_cells_from_patch(patch_idx, patches[:,patch_idx],
-                                                                patches_vmap[:,patch_idx], 
-                                                                        parent_dir=corrmap_dir_tag, compute_npil_masks=compute_npil_masks,
-                                                                ts = self.params.get('detection_time_crop', (None,None)))
-            patch_idxs.append(patch_idx)
-
-        combined_dir = self.combine_patches(patch_idxs, parent_dir_name = corrmap_dir_tag + connector + 'detection', combined_name=combined_name)
-        
-        return combined_dir
-    
     def compute_npil_masks(self, stats_dir, corrmap_dir_tag=''):
-        connector = '-' if len(corrmap_dir_tag) > 0 else ''
-        mov_sub = self.get_registered_movie(corrmap_dir_tag + connector + 'mov_sub', 'mov', axis=0)
-        nt,nz,ny,nx = mov_sub.shape
+        info = n.load(os.path.join(stats_dir, 'info.npy'), allow_pickle=True).item()
         stats = n.load(os.path.join(stats_dir, 'stats.npy'),allow_pickle=True)
+        nz, ny, nx = info['vmap'].shape
         n.save(os.path.join(stats_dir, 'stats_small.npy'), stats)
         stats = ext.compute_npil_masks_mp(stats, (nz,ny,nx), n_proc=self.params['n_proc_corr'])
         n.save(os.path.join(stats_dir, 'stats.npy'), stats)
         return stats_dir
-
-
-    def detect_cells_from_patch(self, patch_idx = 0, coords = None,vmap_coords = None,
-                                vmap=None, mov=None, compute_npil_masks=False,n_proc = 8, ts=(None, None),
-                                parent_dir = None, extra_tag = None):
-        # print('test')
-        self.save_params()
-        det_dir_tag = 'detection'
-        iter_dir_tag = 'iters'
-        mov_dir_tag = 'mov_sub'
-        patch_str = 'patch-%04d' % patch_idx
-        patch_dir_tag = patch_str
-        if parent_dir is not None:
-            dir_prefix = parent_dir
-            connector = '-' if len(parent_dir) > 0 else ''
-            if extra_tag is not None: dir_prefix = dir_prefix + connector + extra_tag
-            det_dir_tag = parent_dir + connector + det_dir_tag
-            iter_dir_tag = parent_dir + connector + iter_dir_tag
-            mov_dir_tag = parent_dir + connector + mov_dir_tag
-            patch_dir_tag = parent_dir + connector + patch_dir_tag
-        detection_dir = self.make_new_dir(det_dir_tag)
-        patch_dir = self.make_new_dir(patch_str, parent_dir_name= det_dir_tag, dir_tag = patch_dir_tag)
-        n.save(os.path.join(patch_dir, 'params.npy'), self.params)
-        stats_path = os.path.join(patch_dir, 'stats.npy')
-        info_path = os.path.join(patch_dir, 'info.npy')
-        zs, ys, xs = coords
-        if vmap_coords is None:
-            vmap_coords = coords
-        vzs, vys, vxs = vmap_coords
-        self.log("Running cell detection on patch %04d at %s, max %d iters" % (patch_idx, patch_dir, self.params['max_iter']))
-        self.log("Patch bounds are %s, %s, %s" % (str(zs), str(ys), str(xs)))
-        self.log("Cell center bounds are %s, %s, %s" % (str(vzs), str(vys), str(vxs)))
-        self.log("Time bounds are %s" % (str(ts)))
-
-        patch_info = {'zs' : zs, 'ys' : ys, 'xs' : xs, 'ts' : ts,
-                      'vzs' : vzs, 'vys' : vys, 'vxs' : vxs, 'all_params' : self.params}
-        if mov is None:
-            print(mov_dir_tag)
-            mov = self.get_registered_movie(mov_dir_tag, 'mov_sub',axis=0)
-            nt, nz,ny,nx = mov.shape
-            mov = mov[ts[0]:ts[1], zs[0]:zs[1], ys[0]:ys[1], xs[0]:xs[1]]
-        else:
-            __, nz, ny, nx = mov.shape
-
-        if self.params['detection_timebin'] > 1:
-            self.log("Binning movie with a factor of %.2f" % self.params['detection_timebin'])
-            mov = ext.binned_mean(mov, self.params['detection_timebin'])
-        try:
-            self.log("Loading %.2f GB movie to memory" % (mov.nbytes/1024**3))
-            mov = mov.compute()
-            self.log("Loaded")
-        except:
-            self.log("Not a dask array")
-
-        if vmap is None:
-            iter_results = self.load_iter_results(-1, dir_tag = iter_dir_tag)
-            if 'vmap' in iter_results:
-                vmap = iter_results['vmap']
-            else: 
-                vmap = iter_results['vmap2']**0.5
-            if 'mean_img' in iter_results.keys():
-                patch_info['mean_img'] = iter_results['mean_img'].astype(n.float32)
-            if 'max_img' in iter_results.keys():
-                patch_info['max_img'] = iter_results['max_img'].astype(n.float32)
-        if self.params['normalize_vmap']:
-            vmap = ui.normalize_planes(vmap)
-        
-        patch_info['vmap'] = vmap.copy().astype(n.float32)
-        patch_info['vmap_unmasked'] = vmap[zs[0]:zs[1], ys[0]:ys[1], xs[0]:xs[1]]
-        vmap_patch = n.zeros_like(mov[0])
-        dz = vzs[0] - zs[0]; dy = vys[0] - ys[0]; dx = vxs[0] - xs[0]
-        vmap_patch[dz:dz+(vzs[1]-vzs[0]),dy:dy+(vys[1]-vys[0]),dx:dx+(vxs[1]-vxs[0])] = \
-                            vmap[vzs[0]:vzs[1], vys[0]:vys[1], vxs[0]:vxs[1]]
-        vmap = vmap_patch
-
-        patch_info['vmap_patch'] = vmap.copy()
-        n.save(os.path.join(patch_dir, 'vmap_patch.npy'), vmap)
-        n.save(os.path.join(patch_dir, 'vmap_patch_unmasked.npy'),
-               patch_info['vmap_unmasked'])
-
-
-        n.save(info_path, patch_info)
-        self.log("Movie shape: %s" % str(mov.shape), 2)
-        self.log("Saving cell stats and info to %s" % patch_dir)
-        # print(zs, ys, xs)
-        if n_proc == 1:
-            stats = ext.detect_cells(mov, vmap, **self.params, log=self.log, 
-                             offset = (zs[0], ys[0], xs[0]), savepath=stats_path, patch_idx=patch_idx)
-        else:
-            stats = ext.detect_cells_mp(mov, vmap, **self.params, log=self.log,
-                                        offset=(zs[0], ys[0], xs[0]), savepath=stats_path, n_proc=n_proc, patch_idx=patch_idx)
-        if compute_npil_masks and len(stats) > 0:
-            self.log("Computing neuropil masks")
-            if n_proc == 1:
-                stats = ext.compute_npil_masks(stats, (nz,ny,nx))
-            else:
-                self.log("Starting MP", 1)
-                stats = ext.compute_npil_masks_mp(stats, (nz,ny,nx), n_proc=n_proc)
-                self.log("Ended MP", 1)
-        n.save(stats_path, stats)
-        patch_info['stats_path']  = stats_path
-        return patch_dir, patch_info, stats
-
 
     def load_segmentation_results(self, output_dir_path=None, output_dir_name='rois', to_load=None):
         '''
@@ -921,18 +789,42 @@ class Job:
             to_return[file] = data
         return to_return
     
-    def export_results(self, export_path, result_dir_name = 'rois', results_to_export=None):
+    def export_results(self, export_path, result_dir_name = 'rois', results_to_export=None, 
+                       export_frame_counts = True):
+        '''
+        Save the relevant outputs of suite3d in a specified directory for further processing.
+        Outputs will be saved in export_path/s3d-results-job_id
+
+        Args:
+            export_path (str): absolute path to the parent directory where results will be saved
+            result_dir_name (str, optional): name of the directory where results are currently saved. Defaults to 'rois'.
+            results_to_export (list, optional): list of files to export. Defaults to the important ones.
+            export_frame_counts (bool, optional): Whether to export the number of frames in each file. Defaults to True.
+        '''
         full_export_path = os.path.join(export_path, 's3d-results-%s' % self.job_id)
         os.makedirs(full_export_path, exist_ok=True)
         self.log("Created dir %s to export results" % full_export_path)
         if results_to_export is None:
-            results_to_export = ['stats_small.npy', 'info.npy', 'F.npy', 'spks.npy', 'Fneu.npy']
-        results = self.load_segmentation_results(result_dir_name)
+            results_to_export = ['stats_small.npy', 'info.npy', 'F.npy', 'spks.npy', 'Fneu.npy',
+                                 'iscell.npy']
+        results = self.load_segmentation_results(output_dir_name=result_dir_name, to_load=results_to_export)
+    
+        # save the parameters that were used for the s3d run
+        self.save_file(data=self.params, filename='s3d-params.npy', path=full_export_path)
+
+        if export_frame_counts:
+            # save the number of frames in each tiff file, and which directory they were in
+            frames = self.load_frame_counts()
+            self.save_file(data=frames, filename='frames.npy', path=full_export_path)
         for result in results.keys():
             data = results[result]
             # stats_small doesn't contain the neuropil coordinates,
             # which take up a lot of space and are kind of useless for further analysis
             if result == 'stats_small.npy': result = 'stats.npy'
+            if result == 'info.npy':
+                if 'all_params' not in data.keys():
+                    #TODO remove this!!!!! just for backwards compatibility
+                    data['all_params'] = self.params
             self.save_file(data=data, filename=result, path=full_export_path)
             self.log("Saved %s to %s" % (result, full_export_path), 2)
         
@@ -1047,7 +939,7 @@ class Job:
         return stats, info, iscell
 
     def combine_patches(self, patch_idxs, output_dir_path, info_use_idx = -1, save=True,
-                        extra_stats_keys = None, parent_dir_name = 'detection'):
+                        extra_stats_keys = None, parent_dir_name = 'detection', max_roi_per_patch=None):
 
         if save:
             assert output_dir_path is not None
@@ -1060,6 +952,12 @@ class Job:
 
         for patch_idx in patch_idxs:
             stats_patch, info_patch, iscell = self.load_patch_results(patch_idx, parent_dir_name)
+            if max_roi_per_patch is not None and len(stats_patch) > max_roi_per_patch:
+                self.log("Clipping patch %d because it has %d ROIs, max is %d" % \
+                            (patch_idx, len(stats_patch), max_roi_per_patch), 2)
+                stats_patch = stats_patch[:max_roi_per_patch]
+                iscell = iscell[:max_roi_per_patch]
+                
             for stat in stats_patch:
                 keep_stat =  {}
                 for key in keep_stats_keys:
@@ -1274,12 +1172,14 @@ class Job:
         return mov
 
     def load_frame_counts(self):
+        if 'frames.npy' not in os.listdir(self.dirs['job_dir']):
+            self.save_frame_counts()
         return n.load(os.path.join(self.dirs['job_dir'],'frames.npy'), allow_pickle=True).item()
 
 
-    def get_exp_frame_idxs(self,exp_idx):
+    def get_dir_frame_idxs(self,dir_idx):
         frames = self.load_frame_counts()
-        idxs = n.where(frames['jobids']==exp_idx)[0]
+        idxs = n.where(frames['dir_ids']==dir_idx)[0]
         st,en = idxs[0], idxs[-1]
         frame_start = frames['nframes'][:st].sum()
         frame_end = frames['nframes'][:en+1].sum()
@@ -1288,9 +1188,9 @@ class Job:
     def save_frame_counts(self):
         size_to_frames = {}
         nframes = []
-        jobids = []
+        dir_ids = []
         for tif in self.tifs:
-            jobids.append(int(tif.split(os.path.sep)[-2]))
+            dir_ids.append(int(tif.split(os.path.sep)[-2]))
             tifsize = int(os.path.getsize(tif))
             if tifsize in size_to_frames.keys():
                 nframes.append(size_to_frames[tifsize])
@@ -1302,13 +1202,13 @@ class Job:
                 self.log(tif +  ' is %d frames and %d bytes' % (nf, tifsize))
 
         nframes = n.array(nframes)
-        jobids = n.array(jobids)
+        dir_ids = n.array(dir_ids)
 
-        tosave = {'nframes' : nframes, 'jobids' : jobids}
+        tosave = {'nframes' : nframes, 'dir_ids' : dir_ids}
         self.frames = tosave
         n.save(os.path.join(self.dirs['job_dir'],'frames.npy'), tosave)
 
-        return nframes, jobids
+        return nframes, dir_ids
     
     def sweep_params(self, params_to_sweep,svd_info=None, mov=None, testing_dir_tag='sweep', 
                              n_test_iters = 1, all_combinations=True, do_vmap=True, svs=None,us=None,
@@ -1564,3 +1464,5 @@ class Job:
                                     iter_limit=iter_limit, iter_dir_tag=iter_dir_tag, mov_sub_dir_tag=mov_sub_dir_tag, summary=self.summary)
         
         return (vmap, mean_img, max_img), mov_sub_dir, self.dirs[iter_dir_tag]
+    def get_cwd(self):
+        print(os.getcwd())
