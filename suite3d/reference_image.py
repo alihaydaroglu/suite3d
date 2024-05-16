@@ -13,17 +13,16 @@ import cupyx.scipy.ndimage as cuimage
 from numba import vectorize, complex64
 from numpy import fft
 
-from . import lbmio, utils, ui
-from . import tiff_utils as tfu
-from . import file_utils as flu
+
 from . import register_gpu as reg
+from . import reg_3d as reg_3d # new 3d registration functions
 
 def default_log(string, val): 
     print(string)
 
 #Function which runs createion of reference image+ masks
-#TODO detrimmine how to give refernce GPU
 
+#There are function at the bottom of this page for controlling the 3D reg version of reference img creation.
 def compute_reference_and_masks(mov_fuse, reference_params, log_callback = default_log, rmins = None, rmaxs = None, use_GPU = True):
     """
     Runs the creation of the 3D reference image and creates masks for rigid and non0rigid registration
@@ -123,8 +122,15 @@ def compute_reference_and_masks(mov_fuse, reference_params, log_callback = defau
         rmin, rmax = n.int16(n.percentile(ref_image[z],1)), n.int16(n.percentile(ref_image[z],99))
         clipped_ref_img[z] = n.clip(ref_image[z], rmin, rmax) 
         plane_mins[z], plane_maxs[z] = rmin, rmax
+
+    #add useful info to reference params
     reference_params['plane_mins'] = plane_mins
     reference_params['plane_maxs'] = plane_maxs
+    reference_params['ymax'] = ymax
+    reference_params['xmax'] = xmax
+    reference_params['cmax'] = cmax
+    reference_params['used_frames'] = used_frames
+
     if reference_params.get('norm_frames', True): 
         all_refs_and_masks, reference_params = get_phasecorr_and_masks(clipped_ref_img, reference_params)
     else:
@@ -1014,3 +1020,164 @@ def phasecorr_reference(refImg0, maskSlope, smooth_sigma, yblock, xblock):
         cfRefImg1_n[:] *= gaussian_filter
 
     return maskMul1[:, np.newaxis, :, :], maskOffset1[:, np.newaxis, :, :], cfRefImg1[:, np.newaxis, :, :]
+
+# NEW functions for 3d regsitration
+def compute_reference_and_masks_3d(mov_cpu, reference_params, log_callback = default_log, rmins = None, rmaxs = None, use_GPU = True):
+    percent_contribute = reference_params['percent_contribute']
+    niter = reference_params['niter']
+    Sigma = reference_params['Sigma']
+    pc_size = reference_params['pc_size'] #NOTEadd to reference params, this is the 3d version of max_reg_xy
+    
+    nZ, nT, nY, nX = mov_cpu.shape
+
+    if use_GPU:
+        batch_size = reference_params['batch_size']
+
+    #need to do plane_shifts first in 3D case
+    tvecs = register_planes(mov_cpu.mean(axis=1), reference_params)
+
+    #correct bad tvec estimates
+    if reference_params.get('fix_shallow_plane_shift_estimates', True):
+        shallow_plane_thresh = reference_params.get('fix_shallow_plane_shift_esimate_threshold', 20)
+        peaks = n.abs(tvecs[:shallow_plane_thresh]).max(axis=0)
+        bad_planes = n.logical_or(n.abs(tvecs[shallow_plane_thresh:,0]) > peaks[0], n.abs(tvecs[shallow_plane_thresh:,1]) > peaks[1])
+        tvecs[shallow_plane_thresh:][bad_planes,:] =0
+        log_callback("Fixing %d plane alignment outliers" % bad_planes.sum(), 2)
+    
+    mov_cpu, xpad, ypad = pad_mov(mov_cpu, tvecs) # pad the movie to correct size
+    pad_sizes = [xpad, ypad]
+    xpad = int(xpad)
+    ypad = int(ypad)
+
+    mov_cpu = reg_3d.shift_mov_lbm_fast(mov_cpu, tvecs) # apply the lbm shift
+
+    if use_GPU:
+        ref_img, ymax, xmax, cmax, used_frames = \
+            get_referance_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rmins = rmins, rmaxs = rmaxs, batch_size = batch_size, pc_size = pc_size, sigma = Sigma)
+    else:
+        ref_img, ymax, xmax, cmax, used_frames = \
+            get_referance_img_cpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rmins = rmins, rmaxs = rmaxs,  pc_size = pc_size, sigma = Sigma)
+         
+    #Option to clip the ref_image per plane for below
+    plane_mins = np.zeros(nZ)
+    plane_maxs = np.zeros(nZ)
+    clipped_ref_img = np.zeros_like(ref_img)
+    for z in range(nZ):
+        rmin, rmax = n.int16(n.percentile(ref_img[z],1)), n.int16(n.percentile(ref_img[z],99))
+        clipped_ref_img[z] = n.clip(ref_img[z], rmin, rmax) 
+        plane_mins[z], plane_maxs[z] = rmin, rmax
+
+    #add useful info to reference params
+    reference_params['plane_mins'] = plane_mins
+    reference_params['plane_maxs'] = plane_maxs
+    reference_params['ymax'] = ymax
+    reference_params['xmax'] = xmax
+    reference_params['cmax'] = cmax
+    reference_params['used_frames'] = used_frames
+
+    if reference_params.get('norm_frames', True): 
+        all_refs_and_masks, reference_params = get_phasecorr_and_masks(clipped_ref_img, reference_params)
+    else:
+        all_refs_and_masks, reference_params = get_phasecorr_and_masks(ref_img, reference_params)
+    
+    return tvecs, ref_img, all_refs_and_masks, pad_sizes, reference_params
+
+def  get_referance_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rmins = None, rmaxs = None, batch_size = 20, pc_size = np.array((2, 20, 20)), sigma = [0, 1.5]):
+    mov_cropped = mov_cpu[:,:, ypad:-ypad, xpad:-xpad]
+
+    ref_img = init_ref_3d(mov_cropped)
+
+    mult_mask, add_mask = compute_masks3D(ref_img, sigma)
+
+    cmax = np.zeros((niter, mov_cropped.shape[1]))
+    ymax = np.zeros((niter, mov_cropped.shape[1]))
+    xmax = np.zeros((niter, mov_cropped.shape[1]))
+    used_frames = []
+
+    #start at 20 (no frames used for init_ref) + 10% of nt (so add some frame on the first iteration) and finish at percent_contribute * nt
+    n_frames = np.linspace(20 + mov_cropped.shape[1]*0.1, percent_contribute*mov_cropped.shape[1], niter, dtype=np.int16)
+
+    nt = mov_cropped.shape[1]
+
+    for iter in range(niter):
+        if iter != 0:
+            add_mask = compute_mask_offset(ref_img, mult_mask)
+
+        refs_f = reg_3d.mask_filter_fft_ref(ref_img, mult_mask, add_mask, smooth = 0.5)
+
+        #TODO add batch size as a param
+        phase_corr_shifted, int_shift, pc_peak_loc, __ = reg_3d.rigid_3d_ref_gpu(mov_cropped, mult_mask, add_mask, refs_f, pc_size, batch_size = 20, rmins = None, rmaxs = None, crosstalk_coeff = None)
+        pc_peak_loc = pc_peak_loc.astype(np.int32) 
+        int_shift = int_shift.astype(np.int32)
+
+        for t in range(nt):
+            cmax[iter, t] = phase_corr_shifted[t, pc_peak_loc[t,0], pc_peak_loc[t,1], pc_peak_loc[t,2]]
+            xmax[iter, t] = int_shift[t, 2]
+            ymax[iter, t] = int_shift[t, 1]
+        nmax = n_frames[iter]
+
+        isort = np.argsort(-cmax[iter,:])[1:nmax]
+        used_frames.append(isort)
+
+        if iter != (niter - 1): #for the last iteration dont need to remake the reference on the subset
+            shifted_img_iter = reg_3d.shift_mov_fast(mov_cropped[:,isort,:,:], int_shift[isort,:])
+            ref_img = shifted_img_iter.mean(axis = 1)
+            #recenter img
+            ref_img = reg_3d.shift_mov_fast(ref_img[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
+
+        default_log(f'Completed iter {iter+1} out of {niter}', 0)
+
+    #create the uncropped reference img, after all the iterations!
+    shifted_img = reg_3d.shift_mov_fast(mov_cpu[:,isort,:,:], int_shift[isort,:])
+    full_ref_im = shifted_img.mean(axis = 1)
+    full_ref_im = reg_3d.shift_mov_fast(full_ref_im[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
+
+    return full_ref_im, ymax, xmax, cmax, used_frames
+
+def  get_referance_img_cpu_3d(mov_cpu, percent_contribute, niter,xpad, ypad, rmins = None, rmaxs = None, pc_size = (2, 30, 30), sigma = [0, 1.5]):
+    mov_cropped = mov_cpu[:,:, ypad:-ypad, xpad:-xpad]
+    ref_img = init_ref_3d(mov_cropped)
+
+    mult_mask, add_mask = compute_masks3D(ref_img, sigma)
+
+    cmax = np.zeros((niter, mov_cropped.shape[1]))
+    ymax = np.zeros((niter, mov_cropped.shape[1]))
+    xmax = np.zeros((niter, mov_cropped.shape[1]))
+    used_frames = []
+
+    #start at 20 (no frames used for init_ref) + 10% of nt (so add some frame on the first iteration) and finish at percent_contribute * nt
+    n_frames = np.linspace(20 + mov_cropped.shape[1]*0.1, percent_contribute*mov_cropped.shape[1], niter, dtype=np.int16)
+
+    nt = mov_cropped.shape[1]
+
+    for iter in range(niter):
+        if iter != 0:
+            add_mask = compute_mask_offset(ref_img, mult_mask)
+
+        refs_f = reg_3d.mask_filter_fft_ref(ref_img, mult_mask, add_mask, smooth = 0.5)
+        
+        phase_corr_shifted, int_shift, pc_peak_loc, __ = reg_3d.rigid_3d_ref_cpu(mov_cropped, mult_mask, add_mask, refs_f, pc_size, rmins = None, rmaxs = None, crosstalk_coeff = None)
+        pc_peak_loc = pc_peak_loc.astype(np.int32) 
+        int_shift = int_shift.astype(np.int32)
+
+        for t in range(nt):
+            cmax[iter, t] = phase_corr_shifted[t, pc_peak_loc[t,0], pc_peak_loc[t,1], pc_peak_loc[t,2]]
+            xmax[iter, t] = int_shift[t, 2]
+            ymax[iter, t] = int_shift[t, 1]
+        nmax = n_frames[iter]
+
+        isort = np.argsort(-cmax[iter,:])[1:nmax]
+        used_frames.append(isort)
+
+        if iter != (niter - 1): #for the last iteration dont need to remake the reference on the subset
+            shifted_img_iter = reg_3d.shift_mov_fast(mov_cropped[:,isort,:,:], int_shift[isort,:])
+            ref_img = shifted_img_iter.mean(axis = 1)
+            #recenter img
+            ref_img = reg_3d.shift_mov_fast(ref_img[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
+
+    #create the uncropped reference img, after all the iterations!
+    shifted_img = reg_3d.shift_mov_fast(mov_cpu[:,isort,:,:], int_shift[isort,:])
+    full_ref_im = shifted_img.mean(axis = 1)
+    full_ref_im = reg_3d.shift_mov_fast(full_ref_im[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
+
+    return full_ref_im, ymax, xmax, cmax, used_frames

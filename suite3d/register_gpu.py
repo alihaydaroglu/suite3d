@@ -338,6 +338,7 @@ def convolve_2d_cpu(mov, ref_f):
     return mov
 
 #TODO make dependant on parameter not 15
+#TODO try numba to speed it up? (will have to do seperate cpu/gpu)
 def crosstalk_subtract(mov, crosstalk_coeff):
     nz, nt, ny, nx = mov.shape
     if nz <= 15: 
@@ -346,7 +347,7 @@ def crosstalk_subtract(mov, crosstalk_coeff):
         mov[i + 15] -= crosstalk_coeff * mov[i]
     return mov
 
-
+#TODO xpad/ypad should be integer ?
 def fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs):
     nz, nt, ny, nx = mov_gpu.shape
     n_stitches = len(new_xs) - 1

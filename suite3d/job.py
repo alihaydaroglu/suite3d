@@ -21,7 +21,7 @@ from suite2p.extraction import dcnv
 from . import init_pass
 from . import utils 
 from . import lbmio
-from .iter_step import register_dataset, fuse_and_save_reg_file, calculate_corrmap, calculate_corrmap_from_svd, register_dataset_gpu
+from .iter_step import register_dataset, fuse_and_save_reg_file, calculate_corrmap, calculate_corrmap_from_svd, register_dataset_gpu, register_dataset_gpu_3d
 
 from . import corrmap 
 from . import extension as ext
@@ -440,6 +440,15 @@ class Job:
         if tifs is None:
             tifs = self.tifs
         register_dataset_gpu(tifs, params, self.dirs, summary, self.log,
+                             max_gpu_batches=max_gpu_batches)
+        
+    def register_gpu_3d(self, tifs=None, max_gpu_batches=None):
+        params = self.params
+        summary = self.load_summary()
+        save_dir = self.make_new_dir('registered_fused_data')
+        if tifs is None:
+            tifs = self.tifs
+        register_dataset_gpu_3d(tifs, params, self.dirs, summary, self.log,
                              max_gpu_batches=max_gpu_batches)
         
 

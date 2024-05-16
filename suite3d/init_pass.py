@@ -235,33 +235,60 @@ def run_init_pass(job):
                         'smooth_sigma' : params.get('smooth_sigma_reference', 1.15), #spatial taper width
                         'niter' : params.get('n_reference_iterations', 8),
                         'max_reg_xy_reference' : params.get('max_reg_xy_reference', 50),
+                        'pc_size' : params.get('pc_size', (2, 20, 20)), #the max size examined in registration
                         'batch_size' : params.get('gpu_reference_batch_size', 20), #keep in gpu RAM
+                        '3d_reg' : params.get('3d_reg', True) # Default is true
                         }
     mov_fuse, new_xs, og_xs = ref.fuse_mov(init_mov, fuse_shift, xs)
+    
+    if reference_params['3d_reg']:
+        job.log("Using 3d registration")
+        tvecs, ref_image, all_refs_and_masks, pad_sizes, reference_params = \
+        ref.compute_reference_and_masks_3d(mov_fuse, reference_params, log_callback = job.log , use_GPU = params.get('use_GPU_registration', True))
 
-    tvecs, ref_image, ref_padded, all_refs_and_masks, pad_sizes, reference_params = \
-    ref.compute_reference_and_masks(mov_fuse, reference_params, log_callback = job.log , use_GPU = params.get('use_GPU_registration', True))
+        summary = {
+            'ref_img_3d' : ref_image, # ctalk-sub and padded and plane-shifted
+            'raw_img' : im3d_raw, # right from the tiff file
+            'img' : im3d, # crosstalk-subtracted
+            'crosstalk_coeff' : cross_coeff,
+            'plane_shifts' : tvecs,
+            'refs_and_masks' : all_refs_and_masks,
+            'reference_params' : reference_params,
+            'min_pix_vals' : min_pix_vals,
+            'fuse_shifts' : fuse_shifts,
+            'fuse_shift' : fuse_shift,
+            'fuse_ccs' : fuse_ccs,
+            'tiffile_xs' : xs,
+            'xpad': pad_sizes[0],
+            'ypad' : pad_sizes[1],
+            'new_xs' : new_xs,
+            'og_xs' : og_xs
+        }
+    else:
+        job.log("Using 2d registration")
+        tvecs, ref_image, ref_padded, all_refs_and_masks, pad_sizes, reference_params = \
+        ref.compute_reference_and_masks(mov_fuse, reference_params, log_callback = job.log , use_GPU = params.get('use_GPU_registration', True))
 
-    summary = {
-        'ref_img_3d' : ref_image, # ctalk-sub and padded and plane-shifted
-        'ref_img_3d_unaligned' : ref_padded, #ctalk-sub and padded
-        'raw_img' : im3d_raw, # right from the tiff file
-        'img' : im3d, # crosstalk-subtracted
-        'crosstalk_coeff' : cross_coeff,
-        'plane_shifts' : tvecs[0],
-        'plane_shifts_uncorrected' : tvecs[1],
-        'refs_and_masks' : all_refs_and_masks,
-        'reference_params' : reference_params,
-        'min_pix_vals' : min_pix_vals,
-        'fuse_shifts' : fuse_shifts,
-        'fuse_shift' : fuse_shift,
-        'fuse_ccs' : fuse_ccs,
-        'tiffile_xs' : xs,
-        'xpad': pad_sizes[0],
-        'ypad' : pad_sizes[1],
-        'new_xs' : new_xs,
-        'og_xs' : og_xs
-    }
+        summary = {
+            'ref_img_3d' : ref_image, # ctalk-sub and padded and plane-shifted
+            'ref_img_3d_unaligned' : ref_padded, #ctalk-sub and padded, 3d doesnt have unalligned reference img
+            'raw_img' : im3d_raw, # right from the tiff file
+            'img' : im3d, # crosstalk-subtracted
+            'crosstalk_coeff' : cross_coeff,
+            'plane_shifts' : tvecs[0],
+            'plane_shifts_uncorrected' : tvecs[1],
+            'refs_and_masks' : all_refs_and_masks,
+            'reference_params' : reference_params,
+            'min_pix_vals' : min_pix_vals,
+            'fuse_shifts' : fuse_shifts,
+            'fuse_shift' : fuse_shift,
+            'fuse_ccs' : fuse_ccs,
+            'tiffile_xs' : xs,
+            'xpad': pad_sizes[0],
+            'ypad' : pad_sizes[1],
+            'new_xs' : new_xs,
+            'og_xs' : og_xs
+        }
     summary_path = os.path.join(job.dirs['summary'], 'summary.npy')
     job.log("Saving summary to %s" % summary_path)
     n.save(summary_path, summary)
