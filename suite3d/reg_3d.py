@@ -952,3 +952,33 @@ def shift_mov_fast(mov, shifts, fill_value = 0):
         
     return shifted_mov
 
+#dev function for finding translation between two 3d images
+def register_2_images(img1, img2, pc_size):
+    """
+    Will use phase correlation registration to eastimate the shift between two different images.
+    The 2 images need to be the same size, one img can be padded e.g:
+        empty2 = np.zeros_like(img1)
+        nz, ny, nx = img2.shape
+        empty2[:, :ny, :nx] = ref_img_diff_ref
+    above only works if img 2 is smaller in both axis, need to pad both or pad and crop if one axis is bigger and the other is smaller
+        
+    Parameters
+    ----------
+    img1 : ndarray (nz, ny, nx)
+        The first img
+    img2 : ndarray (nz, ny, nx)
+        The second img
+    pc_size : ndarray 
+        (z_crop_size, y_crop_size, x_crop_size)
+    """
+    fft_img1 = scipy.fft.fftn(img1, workers = -1)
+    fft_img2 = scipy.fft.fftn(img2, workers = -1)
+
+    fft_img2_conj = np.conj(fft_img2)
+
+    fft_product = fft_img1 * fft_img2_conj / (np.abs(fft_img1 * fft_img2_conj))
+    phase_corr = np.abs(scipy.fft.ifftn(fft_product))
+
+    phase_corr_shifted, shift, pc_peak_loc, sub_pixel_shifts  = process_phase_corr_per_frame(phase_corr, pc_size)
+
+    return phase_corr_shifted, shift, pc_peak_loc, sub_pixel_shifts 

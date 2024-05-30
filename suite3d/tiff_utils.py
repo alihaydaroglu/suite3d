@@ -432,3 +432,43 @@ def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args =
     ani = animation.ArtistAnimation(fig, ims, interval = interval, repeat_delay = repeat_delay)   
 
     ani.save(SaveDir)
+
+def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, ncols = 5, **kwargs):
+    """
+    Uses show_tif to create a figure which shows all planes
+
+    Parameters
+    ----------
+    img : ndarray (nz, ny, nx)
+        A 3D image, will show each plane seperatley
+    figsize : tuple, optional
+        figsize, best if it is a multiple of (ncols, nrows), by default (8,6)
+    title : list, optional
+        A list of title for each image, by default None
+    ncols : int, optional
+        The number of collumns in the image, by default 5
+    """
+    nz = img.shape[0]
+    ncols = ncols
+    nrows = int(np.ceil(nz / ncols))
+
+    figsize = figsize #ideally multiple of rows and colloumns
+
+    fig, axs =  plt.subplots(nrows, ncols, figsize = (figsize), layout = 'constrained')
+
+    for row in range(nrows):
+        for col in range(ncols):
+            plane_no = row * ncols + col
+            if plane_no < nz: #catch empty planes
+                tfu.show_tif(ref_img[plane_no], ax=axs[row][col], **kwargs)
+                if title is None:
+                    axs[row][col].set_title(f'Plane {plane_no + 1}', fontsize = 'small')#Counting from 0
+                else:
+                    axs[row][col].set_title(title[plane_no])
+            else:
+                #hide axis for empty planes
+                axs[row][col].set_axis_off()
+
+    if suptitle is not None:
+        fig.suptitle(suptitle)
+    
