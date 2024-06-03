@@ -397,7 +397,9 @@ def load_and_stitch_tifs_notLBM(paths, planes, verbose=True, filt=None, concat=T
     '''
     if filt is not None:
         print("a filter was requested but it is not coded for load_and_stitch_tifs_noLBM")
-        
+    
+    tic = time.time()
+    
     mov_list = []
     for tif_path in paths:
         if verbose: log_cb("Loading %s" % tif_path, 2)
@@ -409,7 +411,7 @@ def load_and_stitch_tifs_notLBM(paths, planes, verbose=True, filt=None, concat=T
         t, py, px = tif_file.shape
         frames = t // len(planes)
         assert frames * len(planes) == t, "number of planes does not divide into number of tiff images"
-        tif_file = n.swap_axes(tif_file.reshape(frames, len(planes), py, px), 0, 1)
+        tif_file = n.swapaxes(tif_file.reshape(frames, len(planes), py, px), 0, 1)
     
         if debug: print(tif_file.shape)
         if debug: print("8, %.4f" % (time.time() - tic))
