@@ -450,7 +450,7 @@ def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, nco
     """
     nz = img.shape[0]
     ncols = ncols
-    nrows = int(np.ceil(nz / ncols))
+    nrows = int(n.ceil(nz / ncols))
 
     figsize = figsize #ideally multiple of rows and colloumns
 
@@ -460,7 +460,7 @@ def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, nco
         for col in range(ncols):
             plane_no = row * ncols + col
             if plane_no < nz: #catch empty planes
-                tfu.show_tif(ref_img[plane_no], ax=axs[row][col], **kwargs)
+                show_tif(img[plane_no], ax=axs[row][col], **kwargs)
                 if title is None:
                     axs[row][col].set_title(f'Plane {plane_no + 1}', fontsize = 'small')#Counting from 0
                 else:
@@ -471,4 +471,6 @@ def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, nco
 
     if suptitle is not None:
         fig.suptitle(suptitle)
+
+    plt.tight_layout()
     
