@@ -22,7 +22,7 @@ params = {
     # If you have less than 30 planes or you don't want to correct the channel mappings, set to False
     'convert_plane_ids_to_channel_ids' : False,
     'n_ch_tif' : 30, # number of planes in the recording
-
+    'lbm': True, # whether the data is from light-bead microscopy
 
     ### File I/O ### 
     # Notch filter to remove line noise.
