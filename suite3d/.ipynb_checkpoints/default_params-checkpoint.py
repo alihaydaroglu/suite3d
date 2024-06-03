@@ -4,32 +4,27 @@ import copy
 def get_default_params():
     return copy.deepcopy(params)
 
-def get_matching_default_params(param_names):
-    param_subset = {}
-    for key in param_names:
-        param_subset[key] = copy.copy(param_names[key])
-    return param_subset
 
 params = {
 
     ### Mandatory parameters
-    'fs' : 2.8, # volume rate
-    'tau': 1.3, # GCamp6s
-    'voxel_size_um' : (15, 2.5, 2.5), # size of a voxel in microns in z,y,x
+    'fs' : 2.8,
+    'tau': 1.3,
     # Planes to analyze. 0 is deepest, 30 is shallowest
     # (the ScanImage channel mappings are corrected)
     'planes': n.arange(0, 30),
     # If you have less than 30 planes or you don't want to correct the channel mappings, set to False
-    'convert_plane_ids_to_channel_ids' : False,
-    'n_ch_tif' : 30, # number of planes in the recording
-
+    'convert_plane_ids_to_channel_ids' : True,
+    'n_ch_tif' : 30, # number of channels in the recording
+    'lbm' : True, # whether the data is from light-bead microscopy
 
     ### File I/O ### 
     # Notch filter to remove line noise.
     # Should be a dictionary like:  {'f0' : 200, 'Q' : 1}
     # Where f0 is the frequency of the line noise, and Q is the quality factor
     'notch_filt' : None,
-    'fix_fastZ' : False, # if you messed up your ROI z-definitions in scanimage, this is useful
+    'num_colors' : 1, # if not lbm data, how many color channels were recorded by scanimage
+    'functional_color_channel' : 0, # if not lbm data, which color channel is the functional one
 
     ### Initialization Step ### 
 
@@ -46,9 +41,6 @@ params = {
     'enforce_positivity' : True,
     # fix the plane shifts for top few planes that might be outside the brain
     'fix_shallow_plane_shift_estimates' : True,
-    'fix_shallow_plane_shift_esimate_threshold' : 20,
-    # 'overwrite_plane_shifts: set as a float array of size n_planes x 2 with (y,x) shifts for each plane
-    'overwrite_plane_shifts':None,
 
     # Crosstalk subtraction from pairs of planes 15 apart
 
@@ -62,17 +54,13 @@ params = {
     'crosstalk_percentile' : 99.5, 
     # "smoothing" when estimating the crosstalk coefficient 
     'crosstalk_sigma' : 0.01,
-    # number of planes per cavity, so plane 0 will be subtracted from plane 0 + cavity_size
-    'cavity_size' : 15,
     # number of planes (starting from top) used to estimate crosstalk
     # shallower (quiet) planes, especially those outside the brain,
     # lead to better estimates of the crosstalk
     'crosstalk_n_planes' : 10,
 
     ### Registration ###
-    'use_GPU_registration' : True, #TODO intergrate with registration
-    # whether or not to fuse the mesoscope strips
-    'fuse_strips' : True, 
+
     # number of pixels to skip between strips - None will auto estimate
     'fuse_shift_override' : None, 
     # maximum rigid shift in pixels (includes plane-to-plane LBM shift, so make sure it's larger than that!)
@@ -83,28 +71,12 @@ params = {
     'nr_npad' :  3,
     'nr_subpixel' : 10,
     'nr_smooth_iters' : 2,
-    # 3d registration params
-    'pc_size' : n.asarray((2, 20, 20)), # ~ max_reg_zyx
-    '3d_reg'  : False, # Use the new 3d registration fucntions 
-
-    # reference image paramaters
-    'percent_contribute' : 0.9, 
-    # percentage of frames which contribute to the reference image
-    'block_size' : (128, 128),
-    # size of a non-rigid block
-    'sigma_reference' : (1.45, 0),
-    'smooth_sigma_reference' : 1.15,
-    'n_reference_iterations' : 8,
-    'max_reg_xy_reference' : 50,
-    # max value in x/y which a plane can be shifted for the reference
-    'gpu_reference_batch_size' : 20,
 
     # parameters from suite2p
     'nonrigid' : True,
     'smooth_sigma' : 1.15,
     'maxregshift' : 0.15,
     'reg_filter_pcorr' : 1,
-    'reg_norm_frames' : True, # clip frames during registration
 
     # At the end of initalization, register and save an example bin
     # Could be useful to check registration parameters
@@ -159,26 +131,20 @@ params = {
     # strength of normalization, 1.0 is standard. reduce below 1.0 (to ~0.8) if you see bright
     # blood vessels etc. in the correlation map
     'sdnorm_exp' : 1.0,
-    # crop the edges of each plane by this many pixels before computing the corr map
-    # this removes some registration-related artifacts
-    'edge_crop_npix' : 5,
 
-    # Type (gaussian, unif) and xy/z extents of neuropil filter in pixels
+    # Type (gaussian, unif) and xy/z extents of neuropil filter
     'npil_filt_type' : 'unif',
-    'npil_filt_xy_um' : 5.0,
-    'npil_filt_z_um' : 1.5,
-    # Type and xy/z extents of the cell detection filter in pixels
-    'cell_filt_type' : 'gaussian',
-    'cell_filt_xy_um' : 1.0,
-    'cell_filt_z_um' : 0.75,
+    'npil_filt_xy' : 5.0,
+    'npil_filt_z' : 1.5,
+    # Type and xy/z extents of the cell detection filter
+    'conv_filt_type' : 'gaussian',
+    'conv_filt_xy' : 1.0,
+    'conv_filt_z' : 0.75,
     # activity threshold before calculating correlation map
     'intensity_thresh' : 0.25,
     # Width of the temporal hpf
     # Should divide t_batch_size evenly
     'temporal_hpf' : 400,
-    # sometimes, the top and bottom planes have different scales
-    # than the center planes in the correlation map. Attempt to fix it
-    'fix_vmap_edge_planes' : False,
     
     # number of time points to process at each iteration
     # should be a multiple of temporal_hpf
@@ -187,9 +153,7 @@ params = {
     # for efficiency, should be t_batch_size / n_proc_corr
     'mproc_batchsize' : 25,
     # number of processors to use during correlation map calculation
-    'n_proc': 8,
-    'n_proc_corr' : 8,
-    'n_proc_detect' : 8,
+    'n_proc_corr': 8,
     # don't touch this
     'dtype': n.float32,
 
@@ -225,11 +189,6 @@ params = {
     # maximum number of pixels in a cell
     'max_pix' : 500,
 
-    # remove duplicate cells that are closer than dist_thresh and share more weighted pixels than lam_thresh
-    'detect_overlap_dist_thresh' : 5,
-    'detect_overlap_lam_thresh' : 0.5,
-
-
 
     # Deconvolution
     # coefficient to multiply neuropil activity by before subtracting from cell activity
@@ -249,3 +208,4 @@ params = {
     'date' : None,
 
 }
+

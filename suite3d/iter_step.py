@@ -524,7 +524,9 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
         log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
         loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif, fix_fastZ=fix_fastZ,
-                                                convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
+                                                convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb,
+                                                lbm=params.get('lbm', True), num_colors=params.get('num_colors', None), 
+                                                functional_color_channel=params.get('functional_color_channel', None))
         loaded_movs[0] = loaded_mov
         log_cb("[Thread] Thread for batch %d ready to join after %2.2f sec \n" % (batch_idx, time.time()-tic_thread), 5)
         log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
@@ -727,7 +729,9 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
         log_cb("   [Thread] Loading batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
         loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,fix_fastZ=fix_fastZ,
-                                                convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
+                                                convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb,
+                                                lbm=params.get('lbm', True), num_colors=params.get('num_colors', None), 
+                                                functional_color_channel=params.get('functional_color_channel', None))
         log_cb("   [Thread] Loaded batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
         loaded_movs[0] = loaded_mov

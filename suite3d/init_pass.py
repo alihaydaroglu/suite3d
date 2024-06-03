@@ -30,8 +30,10 @@ def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method='even'
 
     return sample_tifs
 
-def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plane_ids_to_channel_ids=True,fix_fastZ=False,log_cb = default_log):
-    full_mov = lbmio.load_and_stitch_tifs(init_tifs, planes = planes, convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, n_ch = n_ch_tif, filt=filter_params, concat=False, fix_fastZ=fix_fastZ, log_cb=log_cb)
+def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plane_ids_to_channel_ids=True, fix_fastZ=False, log_cb=default_log, lbm=True, num_colors=None, functional_color_channel=None):
+    full_mov = lbmio.load_and_stitch_tifs(init_tifs, planes = planes, convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids,
+                                          n_ch = n_ch_tif, filt=filter_params, concat=False, fix_fastZ=fix_fastZ, log_cb=log_cb,
+                                          lbm=lbm, num_colors=num_colors, functional_color_channel=functional_color_channel)
 
     mov_lens = [mov.shape[1] for mov in full_mov] #not needed anymore?
     full_mov = n.concatenate(full_mov, axis=1)
@@ -104,10 +106,20 @@ def run_init_pass(job):
     n_ch_tif = job.params.get('n_ch_tif', 30)
     job.log("Loading init tifs with %d channels" % n_ch_tif)
     init_mov = load_init_tifs(
-        init_tifs, params['planes'], params['notch_filt'], 
-        n_ch_tif = n_ch_tif, fix_fastZ=params.get('fix_fastZ', False),
+        init_tifs, 
+        params['planes'], 
+        params['notch_filt'], 
+        n_ch_tif = n_ch_tif, 
+        fix_fastZ=params.get('fix_fastZ', False),
         convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True),
-        log_cb = job.log)
+        log_cb = job.log,
+        lbm=params.get('lbm', True), 
+        num_colors=params.get('num_colors', None), 
+        functional_color_channel=params.get('functional_color_channel', None),
+    )
+    job.log("Loaded init tifs")
+
+
     nz, nt, ny, nx = init_mov.shape
     if params['init_n_frames'] is not None:
         if nt < params['init_n_frames']:
