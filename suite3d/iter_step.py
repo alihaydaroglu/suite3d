@@ -580,7 +580,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
                                     ref_2ds, max_reg_xy=max_rigid_shift,  min_pix_vals=min_pix_vals,
                                     rmins=rmins, rmaxs=rmaxs, crosstalk_coeff=crosstalk_coeff, shift=True,
                                     xpad=xpad, ypad=ypad, fuse_shift=fuse_shift, new_xs=new_xs, old_xs=old_xs,
-                                    fuse_and_pad = fuse_strips, log_cb = log_cb)
+                                    fuse_and_pad = True, log_cb = log_cb)
             
             mov_shifted_cpu = mov_shifted_gpu.get()
             log_cb("Completed rigid registration in %.2f sec" % (time.time() - tic_rigid), 3)
