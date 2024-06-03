@@ -30,6 +30,8 @@ params = {
     # Where f0 is the frequency of the line noise, and Q is the quality factor
     'notch_filt' : None,
     'fix_fastZ' : False, # if you messed up your ROI z-definitions in scanimage, this is useful
+    'num_colors' : 1, # if not lbm data, how many color channels were recorded by scanimage
+    'functional_color_channel' : 0, # if not lbm data, which color channel is the functional one
 
     ### Initialization Step ### 
 
