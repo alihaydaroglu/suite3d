@@ -433,7 +433,7 @@ def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args =
 
     ani.save(SaveDir)
 
-def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, ncols = 5, **kwargs):
+def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, ncols = 5, same_scale = False, vminmax_percentile = (0.5,99.5), **kwargs):
     """
     Uses show_tif to create a figure which shows all planes
 
@@ -447,6 +447,10 @@ def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, nco
         A list of title for each image, by default None
     ncols : int, optional
         The number of collumns in the image, by default 5
+    same_scale : bool, optional
+        If True enforce all images to have the same colour scale, by default False
+    vminvmax_percentile : tuple, optional
+        Same as in show_tiff, however isused in getting the same scale if same_scale = True, by default (0.5, 99.5)
     """
     nz = img.shape[0]
     ncols = ncols
@@ -456,11 +460,27 @@ def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, nco
 
     fig, axs =  plt.subplots(nrows, ncols, figsize = (figsize), layout = 'constrained')
 
+    #make all the images have the same color scale
+    if same_scale:
+        for z in range(nz):
+            if z ==0:
+                non_nan = ~n.isnan(img[z])
+                vmin = n.percentile(img[z][non_nan], vminmax_percentile[0])
+                vmax = n.percentile(img[z][non_nan], vminmax_percentile[1])
+            else:
+                non_nan = ~n.isnan(img[z])
+                vmin = min(vmin, n.percentile(img[z][non_nan], vminmax_percentile[0]))
+                vmax = max(vmax, n.percentile(img[z][non_nan], vminmax_percentile[1]))
+
+
     for row in range(nrows):
         for col in range(ncols):
             plane_no = row * ncols + col
             if plane_no < nz: #catch empty planes
-                show_tif(img[plane_no], ax=axs[row][col], **kwargs)
+                if same_scale:
+                    show_tif(img[plane_no], ax=axs[row][col], vminmax = (vmin, vmax), **kwargs)
+                else:
+                    show_tif(img[plane_no], ax=axs[row][col], vminmax_percentile = vminmax_percentile, **kwargs)
                 if title is None:
                     axs[row][col].set_title(f'Plane {plane_no + 1}', fontsize = 'small')#Counting from 0
                 else:
@@ -471,6 +491,4 @@ def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, nco
 
     if suptitle is not None:
         fig.suptitle(suptitle)
-
-    plt.tight_layout()
     
