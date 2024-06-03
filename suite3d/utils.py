@@ -26,7 +26,7 @@ except:
     print("Install gitpython for dev benchmarking to work")
 
 
-def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
+def pad_and_fuse(mov, plane_shifts, fuse_shift, xs, fuse_shift_offset=0):
     nz, nt, nyo, nxo = mov.shape
     n_stitches = len(xs) - 1
     n_xpix_lost_for_fusing = n_stitches * fuse_shift
@@ -45,7 +45,7 @@ def pad_and_fuse(mov, plane_shifts, fuse_shift, xs):
 
     mov_pad = n.zeros((nz,nt,nyn,nxn), n.float32)
 
-    lshift = fuse_shift // 2
+    lshift = fuse_shift // 2 - fuse_shift_offset
     rshift = fuse_shift - lshift
     xn0 = 0
     og_xs = []
@@ -165,7 +165,8 @@ def sum_log_lik_one_line(m, x, y, b = 0, sigma_0 = 10,  c = 1e-10, m_penalty=0):
 def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,     
                             verbose=True, estimate_gamma=True, estimate_from_last_n_planes=None,
                             n_proc = 1, show_plots=True, save_plots = None, force_positive=True,
-                            m_penalty = 0, bounds=None, fit_above_percentile=0, fig_scale=3):
+                            m_penalty = 0, bounds=None, fit_above_percentile=0, fig_scale=3,
+                            n_per_cavity=None):
     plt.style.use('seaborn')
     m_opts = [] 
     m_firsts = []
@@ -173,14 +174,16 @@ def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,
     m_opt_liks = []
     m_first_liks = []
     im3d = im3d.copy()
+    if n_per_cavity is None:
+        n_per_cavity = im3d.shape[0]//2
     if force_positive:
         im3d = im3d - im3d.min(axis=(1,2),keepdims=True)
 
     ms = n.linspace(0,1,101)
-    assert im3d.shape[0] == 30
+    assert im3d.shape[0] == n_per_cavity*2
 
     if estimate_from_last_n_planes is None:
-        estimate_from_last_n_planes = 15
+        estimate_from_last_n_planes = n_per_cavity
 
     if save_plots is not None:
         plot_dir = os.path.join(save_plots, 'crosstalk_plots')
@@ -197,10 +200,10 @@ def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,
     if n_rows == 1: axs = [axs]
     
 
-    for idx, i in enumerate(range(15 - estimate_from_last_n_planes, 15)):
+    for idx, i in enumerate(range(n_per_cavity - estimate_from_last_n_planes, n_per_cavity)):
         # print("Plot for plane %d" % i)
         X = im3d[i].flatten()
-        Y = im3d[i+15].flatten()
+        Y = im3d[i+n_per_cavity].flatten()
         fit_thresh = n.percentile(X, fit_above_percentile)
         # print(fit_thresh)
         idxs = X > n.percentile(X, fit_above_percentile)
@@ -224,7 +227,7 @@ def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,
         m_first_liks.append(liks[pks[0]])
 
         if verbose:
-            print("Plane %d and %d, m_opt: %.2f and m_first: %.2f" % (i, i+15, m_opt, m_first))
+            print("Plane %d and %d, m_opt: %.2f and m_first: %.2f" % (i, i+n_per_cavity, m_opt, m_first))
         
     
         if bounds is None: 
@@ -245,16 +248,18 @@ def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,
         axsins2.set_xticks([m_opt])
         axsins2.set_yticks([])
         ax.set_xlabel("Plane %d" % i)
-        ax.set_ylabel("Plane %d" % (i+15))
+        ax.set_ylabel("Plane %d" % (i+n_per_cavity))
 
     plt.tight_layout()
     # print('showing')
     # if show_plots: plt.show()
     # print("showed")
-    print("Saving figure to %s" % plot_dir)
     if save_plots is not None:
+        print("Saving figure to %s" % plot_dir)
         f.savefig(os.path.join(plot_dir, 'plane_fits.png'), dpi=200)
-    print("saved")
+        print("saved")
+    else:
+        plt.show()
     plt.close()
     print("Close figure")
 
