@@ -183,6 +183,7 @@ def run_init_pass(job):
         fuse_shift = 0
         fuse_shifts = None
         fuse_ccs = None
+        xs = None
     # return
 
 
@@ -200,7 +201,17 @@ def run_init_pass(job):
                         'batch_size' : params.get('gpu_reference_batch_size', 20), #keep in gpu RAM
                         '3d_reg' : params.get('3d_reg', True) # Default is true
                         }
-    mov_fuse, new_xs, og_xs = ref.fuse_mov(init_mov, fuse_shift, xs)
+    
+    if job.params.get('fuse_strips',True):
+        mov_fuse, new_xs, og_xs = ref.fuse_mov(init_mov, fuse_shift, xs)
+
+    else:
+        # x pixels are already in the right place because no strips were used
+        mov_fuse = init_mov
+
+        # TODO: insert the correct values for x pixels here (ignoring for non-lbm pipeline because no fusing is required)
+        new_xs = None
+        og_xs = None
     
     if reference_params['3d_reg']:
         job.log("Using 3d registration")
