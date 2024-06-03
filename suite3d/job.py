@@ -296,7 +296,7 @@ class Job:
         for k,v in self.dirs.items():
             self.dirs[k] = os.path.join(new_root, v[root_len:])
         self.save_dirs()
-        self.save_dirs('old_dirs_%d' % n.random.randint(1,1e9), old_dirs)
+        self.save_dirs('old_dirs', old_dirs)
 
 
     # def make_new_dir(self, dir_name, parent_dir_name = None, exist_ok=True, dir_tag = None):

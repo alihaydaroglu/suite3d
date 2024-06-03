@@ -17,7 +17,7 @@ lbm_plane_to_ch = n.array([1,5,6,7,8,9,2,10,11,12,13,14,15,16,17,3,18,19,20,21,2
 lbm_ch_to_plane = n.array(n.argsort(lbm_plane_to_ch))
 
 def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, filt=None, concat=True, n_ch=30, fix_fastZ=False,
-                         convert_plane_ids_to_channel_ids = True, log_cb=default_log, debug=False, use_roi_idxs=None):
+                         convert_plane_ids_to_channel_ids = False, log_cb=default_log, debug=False, use_roi_idxs=None):
     '''
     Load tifs into memory
 
@@ -49,8 +49,7 @@ def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, fi
     mov_list = []
     for tif_path in paths:
         if verbose: log_cb("Loading %s" % tif_path, 2)
-        im, px, py = load_and_stitch_full_tif_mp(tif_path, channels=channels, verbose=False, filt=filt, n_ch = n_ch, n_proc=n_proc,
-                                                 debug=debug,use_roi_idxs=use_roi_idxs,fix_fastZ=fix_fastZ, **mp_args)
+        im, px, py = load_and_stitch_full_tif_mp(tif_path, channels=channels, verbose=False, filt=filt, n_ch = n_ch, n_proc=n_proc,debug=debug,use_roi_idxs=use_roi_idxs,fix_fastZ=fix_fastZ, **mp_args)
         mov_list.append(im)
     if concat:
         mov = n.concatenate(mov_list,axis=1)

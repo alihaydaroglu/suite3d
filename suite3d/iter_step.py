@@ -920,7 +920,7 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
     #mask_mul, mask_offset, ref_2ds = n.stack([r[:3] for r in refs_and_masks],axis=1)
 
     #Current hack to get cropped ref + maks
-    sigma = reference_params['Sigma']
+    sigma = reference_params['sigma']
     ref_img = ref_img_3d[:, int(ypad):int(-ypad), int(xpad): int(-xpad)]
     mask_mul, mask_offset = ref.compute_masks3D(ref_img, sigma)
     ref_2ds = reg_3d.mask_filter_fft_ref(ref_img, mask_mul, mask_offset, smooth = 0.5)
