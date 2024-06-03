@@ -31,10 +31,9 @@ class JobInterface(param.Parameterized):
             self.newjob_file_selector,
             self.newjob_button)
 
-        self.job_tabs = pn.Accordion(("Load job", self.loadjob_widgets),
-                                ("Create job", self.newjob_widgets))
+        self.job_tabs = pn.Accordion( ("Create job", self.newjob_widgets))
         
-        self.job_widget = pn.Column(self.jobdir_selector, self.job_tabs,
+        self.job_widget = pn.Column(self.jobdir_selector, self.loadjob_widgets, self.job_tabs,
                                     width=width, height=height,name='Create or load job',)
         self.job = None
         self.job_data = {}
@@ -71,9 +70,9 @@ class JobInterface(param.Parameterized):
         self.job = job
         self.job_data['jobdir'] = jobdir
         self.job_data['jobid'] = jobid
-        self.job_data['vmap'] = n.load(jobdir / 'corrmap' / 'vmap.npy', allow_pickle=True)
-        self.job_data['mean_img'] = n.load(jobdir / 'corrmap' / 'mean_img.npy', allow_pickle=True)
-        self.job_data['max_img'] = n.load(jobdir / 'corrmap' / 'max_img.npy', allow_pickle=True)
+        # self.job_data['vmap'] = n.load(jobdir / 'corrmap' / 'vmap.npy', allow_pickle=True)
+        # self.job_data['mean_img'] = n.load(jobdir / 'corrmap' / 'mean_img.npy', allow_pickle=True)
+        # self.job_data['max_img'] = n.load(jobdir / 'corrmap' / 'max_img.npy', allow_pickle=True)
         self.job_data['summary'] = n.load(jobdir / 'summary' / 'summary.npy', allow_pickle=True).item()
         self.job_loaded = True
         print("Loaded job:", self.job_loaded)
