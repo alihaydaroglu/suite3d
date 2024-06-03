@@ -62,6 +62,8 @@ params = {
     'crosstalk_percentile' : 99.5, 
     # "smoothing" when estimating the crosstalk coefficient 
     'crosstalk_sigma' : 0.01,
+    # number of planes per cavity, so plane 0 will be subtracted from plane 0 + cavity_size
+    'cavity_size' : 15,
     # number of planes (starting from top) used to estimate crosstalk
     # shallower (quiet) planes, especially those outside the brain,
     # lead to better estimates of the crosstalk
@@ -159,7 +161,7 @@ params = {
     'sdnorm_exp' : 1.0,
     # crop the edges of each plane by this many pixels before computing the corr map
     # this removes some registration-related artifacts
-    'edge_crop_pix' : 5,
+    'edge_crop_npix' : 5,
 
     # Type (gaussian, unif) and xy/z extents of neuropil filter in pixels
     'npil_filt_type' : 'unif',
