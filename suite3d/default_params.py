@@ -77,6 +77,8 @@ params = {
     'fuse_shift_override' : None, 
     # maximum rigid shift in pixels (includes plane-to-plane LBM shift, so make sure it's larger than that!)
     'max_rigid_shift_pix' : 100,
+    # whether or not to align each z plane in x/y
+    'plane_to_plane_alignment': True,
     # number of frames per batch in gpu registration
     'gpu_reg_batchsize' : 10,
     'max_shift_nr' : 3,
