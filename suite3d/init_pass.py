@@ -199,14 +199,15 @@ def run_init_pass(job):
                         'max_reg_xy_reference' : params.get('max_reg_xy_reference', 50),
                         'pc_size' : params.get('pc_size', (2, 20, 20)), #the max size examined in registration
                         'batch_size' : params.get('gpu_reference_batch_size', 20), #keep in gpu RAM
-                        '3d_reg' : params.get('3d_reg', True) # Default is true
+                        '3d_reg' : params.get('3d_reg', True), # Default is true
+                        'plane_to_plane_alignment': params.get('plane_to_plane_alignment', True), # align z planes in x/y
                         }
     if job.params.get('fuse_strips', True):
         mov_fuse, new_xs, og_xs = ref.fuse_mov(init_mov, fuse_shift, xs)
     else:
         mov_fuse = init_mov
-        new_xs = [0]
-        og_xs = [0]
+        new_xs = [[0, mov_fuse.shape[3]]]
+        og_xs = [[0, mov_fuse.shape[3]]]
     
     if reference_params['3d_reg']:
         job.log("Using 3d registration")
