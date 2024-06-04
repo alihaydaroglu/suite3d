@@ -200,7 +200,7 @@ def run_init_pass(job):
                         'pc_size' : params.get('pc_size', (2, 20, 20)), #the max size examined in registration
                         'batch_size' : params.get('gpu_reference_batch_size', 20), #keep in gpu RAM
                         '3d_reg' : params.get('3d_reg', True), # Default is true
-                        'plane_to_plane_alignment': params.get('plane_to_plane_alignment', True), # align z planes in x/y
+                        'plane_to_plane_alignment': params.get('plane_to_plane_alignment', True), # whether to align planes to each other
                         }
     if job.params.get('fuse_strips', True):
         mov_fuse, new_xs, og_xs = ref.fuse_mov(init_mov, fuse_shift, xs)
