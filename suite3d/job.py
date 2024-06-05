@@ -1309,18 +1309,18 @@ class Job:
         return sweep_summary
     
     def vis_vmap_sweep(self,summary):
-        nz,ny,nx = summary['vmaps'][0].shape
+        nz,ny,nx = summary['results'][0]['corrmap'].shape
         param_dict = summary['param_sweep_dict']
         param_names = summary['param_names']
         combinations = summary['combinations']
-        vmaps = summary['vmaps']
+        vmaps = [r['corrmap'] for r in summary['results']]
         n_val_per_param = [len(param_dict[k]) for k in param_names]
         vmap_sweep = n.zeros(tuple(n_val_per_param) + (nz,ny,nx))
         print(n_val_per_param)
         print(vmap_sweep.shape)
         n_params = len(param_names)
         for cidx, combination in enumerate(combinations):
-            param_idxs = [n.where(param_dict[param_names[pidx]] == combination[pidx])[0][0] \
+            param_idxs = [n.where(n.array(param_dict[param_names[pidx]]) == combination[pidx])[0][0] \
                                 for pidx in range(n_params)]
             vmap_sweep[tuple(param_idxs)] = vmaps[cidx]
         v = ui.napari.Viewer()
