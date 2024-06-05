@@ -410,6 +410,14 @@ def load_and_stitch_tifs_notLBM(paths, planes, verbose=True, filt=None, concat=T
             tif_file = n.take(tif_file, functional_color_channel, axis=1)
         t, py, px = tif_file.shape
         frames = t // len(planes)
+        if frames * len(planes) != t:
+            if verbose:
+                extra_planes = t % len(planes)
+                log_cb("Standard 2P Warning: number of planes does not divide into number of tiff images, dropping %d frames" % extra_planes)
+
+            tif_file = tif_file[:frames * len(planes)]
+            t = frames * len(planes)
+            
         assert frames * len(planes) == t, "number of planes does not divide into number of tiff images"
         tif_file = n.swapaxes(tif_file.reshape(frames, len(planes), py, px), 0, 1)
     
