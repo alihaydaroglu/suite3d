@@ -397,7 +397,7 @@ def compute_masks3D(refImg, sigma):
     ----------
     refImg: ndarray (nz, ny, nx)
         The referenace image used for registration
-    sigma: list of floats [sig, sigz]
+    sigma: tuple [sig, sigz]
         value of sigma for thex/y direction and z direction
 
     Returns
@@ -1161,7 +1161,8 @@ def  get_reference_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rm
         used_frames.append(isort)
 
         if iter_idx != (niter - 1): #for the last iteration dont need to remake the reference on the subset
-            shifted_img_iter = reg_3d.shift_mov_fast(mov_cropped[:,isort,:,:], int_shift[isort,:])
+            #NOTE should there be a -sign here
+            shifted_img_iter = reg_3d.shift_mov_fast(mov_cropped[:,isort,:,:], - int_shift[isort,:])
             ref_img = shifted_img_iter.mean(axis = 1)
             #recenter img
             ref_img = reg_3d.shift_mov_fast(ref_img[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
@@ -1212,7 +1213,8 @@ def  get_reference_img_cpu_3d(mov_cpu, percent_contribute, niter,xpad, ypad, rmi
         used_frames.append(isort)
 
         if iter != (niter - 1): #for the last iteration dont need to remake the reference on the subset
-            shifted_img_iter = reg_3d.shift_mov_fast(mov_cropped[:,isort,:,:], int_shift[isort,:])
+            #NOTE Check if thisshould be -
+            shifted_img_iter = reg_3d.shift_mov_fast(mov_cropped[:,isort,:,:], - int_shift[isort,:])
             ref_img = shifted_img_iter.mean(axis = 1)
             #recenter img
             ref_img = reg_3d.shift_mov_fast(ref_img[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()

@@ -84,7 +84,7 @@ params = {
     'nr_subpixel' : 10,
     'nr_smooth_iters' : 2,
     # 3d registration params
-    'pc_size' : n.asarray((2, 20, 20)), # ~ max_reg_zyx
+    'pc_size' : n.asarray((2, 40, 40)), # ~ max_reg_zyx
     '3d_reg'  : False, # Use the new 3d registration fucntions 
 
     # reference image paramaters
