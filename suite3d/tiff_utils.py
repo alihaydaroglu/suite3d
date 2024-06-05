@@ -119,7 +119,8 @@ def get_meso_rois(tif_path, max_roi_width_pix=145, find_common_z=True):
     warned = False
 
     all_zs = [roi['zs'] for roi in si_rois]
-    if find_common_z:
+    # print(all_zs)
+    if find_common_z and type(all_zs[0]) is not int:
         common_z = list(set(all_zs[0]).intersection(*map(set,all_zs[1:])))[0]
     else:
         common_z = 0
