@@ -5,6 +5,7 @@ except:
 import datetime
 import os
 import copy
+import time
 import sys
 import numpy as n
 import itertools
@@ -524,7 +525,7 @@ class Job:
         param_vals_list = []
         # for each parameter that is sweeped, collect its possible values
         for k in params_to_sweep.keys():
-            assert k in self.params.keys()
+            assert k in self.params.keys(), "%s not in params" % k
             param_names.append(k)
             n_per_param.append(len(params_to_sweep[k]))
             param_vals_list.append(params_to_sweep[k])
@@ -979,11 +980,12 @@ class Job:
             if info_use_idx is not None and patch_idx == patch_idxs[info_use_idx]: info = info_patch
         iscell = n.concatenate(iscells)
 
-        self.log("Deduplicating cells", 2)
+        self.log("Deduplicating %d cells" % len(stats), 2)
+        tic = time.time()
         stats, duplicate_cells = ext.prune_overlapping_cells(stats, self.params.get('detect_overlap_dist_thresh',5), 
                                     self.params.get('detect_overlap_lam_thresh', 0.5))
         iscell = iscell[~duplicate_cells]
-        self.log("Removed %d duplicate cells" % duplicate_cells.sum(), 2)
+        self.log("Removed %d duplicate cells in %.2fs" % (duplicate_cells.sum(), time.time() - tic), 2)
 
         # stats = n.concatenate(stats)
         self.log("Combined %d patches, %d cells" % (len(patch_idxs), len(stats)))

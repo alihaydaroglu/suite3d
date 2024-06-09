@@ -174,9 +174,6 @@ def run_init_pass(job):
     # return
 
 
-    summary_mov_path = os.path.join(job.dirs['summary'], 'init_mov.npy')
-    n.save(summary_mov_path, init_mov)
-    job.log("Saved init mov to %s" % summary_mov_path)
 
     reference_params = {'percent_contribute' : params.get('percent_contribute', 0.9), 
                         'block_size' : params.get('block_size', [128, 128]),
@@ -197,8 +194,12 @@ def run_init_pass(job):
     
     if reference_params['3d_reg']:
         job.log("Using 3d registration")
-        tvecs, ref_image, all_refs_and_masks, pad_sizes, reference_params, reference_info = \
+        tvecs, ref_image, all_refs_and_masks, pad_sizes, reference_params, reference_info, shifted_mov = \
         ref.compute_reference_and_masks_3d(mov_fuse, reference_params, log_cb = job.log , use_GPU = params.get('use_GPU_registration', True))
+        
+        summary_mov_path = os.path.join(job.dirs['summary'], 'init_mov.npy')
+        n.save(summary_mov_path, shifted_mov)
+        job.log("Saved init mov to %s" % summary_mov_path)
 
         summary = {
             'ref_img_3d' : ref_image, # ctalk-sub and padded and plane-shifted
@@ -217,7 +218,9 @@ def run_init_pass(job):
             'xpad': pad_sizes[0],
             'ypad' : pad_sizes[1],
             'new_xs' : new_xs,
-            'og_xs' : og_xs
+            'og_xs' : og_xs,
+            'init_mov_path' : summary_mov_path,
+            'init_tifs' : init_tifs
         }
     else:
         job.log("Using 2d registration")
@@ -242,7 +245,8 @@ def run_init_pass(job):
             'xpad': pad_sizes[0],
             'ypad' : pad_sizes[1],
             'new_xs' : new_xs,
-            'og_xs' : og_xs
+            'og_xs' : og_xs,
+            'init_tifs' : init_tifs
         }
     summary_path = os.path.join(job.dirs['summary'], 'summary.npy')
     job.log("Saving summary to %s" % summary_path)

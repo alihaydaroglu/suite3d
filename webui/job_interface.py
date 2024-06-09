@@ -50,7 +50,7 @@ class JobInterface(param.Parameterized):
         print(dir_string)
         print("Updating")
         if os.path.isdir(dir_string):
-            self.job_selector.options = os.listdir(dir_string)
+            self.job_selector.options = sorted(os.listdir(dir_string))
             self.jobdir_selector.name = 'Suite3D Dir (valid)'
         else:
             self.jobdir_selector.name = 'Suite3D Dir (invalid)'

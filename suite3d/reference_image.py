@@ -1053,11 +1053,14 @@ def compute_reference_and_masks_3d(mov_cpu, reference_params, log_cb = default_l
     ypad = int(ypad)
 
     log_cb("Applying plane alignment shifts", 1)
+    print(mov_cpu.shape)
+    print(tvecs.shape)
+    print(tvecs)
     mov_cpu = reg_3d.shift_mov_lbm_fast(mov_cpu, tvecs) # apply the lbm shift
 
     if use_GPU:
         log_cb("Launching 3D GPU reference image calculation", 1)
-        ref_img, zmax, ymax, xmax, cmax, used_frames, subpix_shifts = \
+        ref_img, zmax, ymax, xmax, cmax, used_frames, subpix_shifts, shifted_mov = \
             get_reference_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rmins = rmins, rmaxs = rmaxs, batch_size = batch_size, pc_size = pc_size, sigma = sigma, log_cb=log_cb)
     else:
         log_cb("Launching 3D CPU reference image calculation", 1)
@@ -1065,6 +1068,7 @@ def compute_reference_and_masks_3d(mov_cpu, reference_params, log_cb = default_l
             get_reference_img_cpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rmins = rmins, rmaxs = rmaxs,  pc_size = pc_size, sigma = sigma)
         zmax = None
         subpix_shifts = None # TODO transfer changes Ali made to use_GPU option to to CPU version
+        shifted_mov = None # TODO also return the shifted version of mov_cpu in this version, like the GPU version
         
     #Option to clip the ref_image per plane for below
     plane_mins = np.zeros(nz)
@@ -1101,7 +1105,7 @@ def compute_reference_and_masks_3d(mov_cpu, reference_params, log_cb = default_l
     else:
         all_refs_and_masks, reference_params = get_phasecorr_and_masks(ref_img, reference_params)
     
-    return tvecs, ref_img, all_refs_and_masks, pad_sizes, reference_params, reference_info
+    return tvecs, ref_img, all_refs_and_masks, pad_sizes, reference_params, reference_info, shifted_mov
 
 def  get_reference_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rmins = None, rmaxs = None, batch_size = 20, pc_size = (2, 20, 20), sigma = (0, 1.5), log_cb = default_log):
     log_cb("Launched")
@@ -1144,7 +1148,7 @@ def  get_reference_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rm
             add_mask = compute_mask_offset(ref_img, mult_mask)
 
         refs_f = reg_3d.mask_filter_fft_ref(ref_img, mult_mask, add_mask, smooth = 0.5)
-
+        
         phase_corr_shifted, int_shift, pc_peak_loc, subpix_shift = reg_3d.rigid_3d_ref_gpu(mov_cropped, mult_mask, add_mask, refs_f, pc_size, batch_size = batch_size, rmins = None, rmaxs = None, crosstalk_coeff = None)
         pc_peak_loc = pc_peak_loc.astype(np.int32) 
         int_shift = int_shift.astype(np.int32)
@@ -1167,14 +1171,18 @@ def  get_reference_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rm
             ref_img = reg_3d.shift_mov_fast(ref_img[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
         toc = time.time() - tic
         tic = time.time()
-        log_cb(f'Completed iter {iter_idx+1} out of {niter} in {toc: .2f}s', 2)
+        log_cb(f'Completed iter {iter_idx+1} out of {niter} in {toc: .2f}s using {len(isort): 03d}/{nt} frames', 2)
 
     #create the uncropped reference img, after all the iterations!
     shifted_img = reg_3d.shift_mov_fast(mov_cpu[:,isort,:,:], int_shift[isort,:])
     full_ref_im = shifted_img.mean(axis = 1)
     full_ref_im = reg_3d.shift_mov_fast(full_ref_im[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
 
-    return full_ref_im, zmax, ymax, xmax, cmax, used_frames, subpix_shifts
+    # create the full shifted mov
+    # TODO SAM: I DONT KNOW IF THESE SHIFTS ARE RIGHT - CAN YOU DOUBLE CHECK? THANKS - ALI
+    shifted_mov = reg_3d.shift_mov_fast(mov_cpu, int_shift - int_shift.mean(axis=0)[np.newaxis,:].astype(np.int32))
+
+    return full_ref_im, zmax, ymax, xmax, cmax, used_frames, subpix_shifts, shifted_mov
 
 def  get_reference_img_cpu_3d(mov_cpu, percent_contribute, niter,xpad, ypad, rmins = None, rmaxs = None, pc_size = (2, 30, 30), sigma = [0, 1.5]):
     mov_cropped = mov_cpu[:,:, ypad:-ypad, xpad:-xpad]
