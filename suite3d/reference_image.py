@@ -1149,7 +1149,7 @@ def  get_reference_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rm
 
         refs_f = reg_3d.mask_filter_fft_ref(ref_img, mult_mask, add_mask, smooth = 0.5)
         
-        phase_corr_shifted, int_shift, pc_peak_loc, subpix_shift = reg_3d.rigid_3d_ref_gpu(mov_cropped, mult_mask, add_mask, refs_f, pc_size, batch_size = batch_size, rmins = None, rmaxs = None, crosstalk_coeff = None)
+        phase_corr_shifted, int_shift, pc_peak_loc, subpix_shift, __ = reg_3d.rigid_3d_ref_gpu(mov_cropped, mult_mask, add_mask, refs_f, pc_size, batch_size = batch_size, rmins = None, rmaxs = None, crosstalk_coeff = None)
         pc_peak_loc = pc_peak_loc.astype(np.int32) 
         int_shift = int_shift.astype(np.int32)
 

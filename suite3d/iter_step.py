@@ -1023,7 +1023,7 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
 
         time_pre_reg = time.time()
         #log time it takes
-        phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts = \
+        phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts, mov_cpu = \
             reg_3d.rigid_3d_ref_gpu(mov_cpu, mask_mul, mask_offset, ref_2ds, pc_size, batch_size = gpu_reg_batchsize, #TODO make xpad/ypad automatically integers
                                     rmins = rmins, rmaxs = rmaxs, crosstalk_coeff = crosstalk_coeff,  shift_reg = False, xpad = int(xpad), ypad = int(ypad),
                                     fuse_shift = fuse_shift, new_xs = new_xs, old_xs = old_xs, plane_shifts = plane_shifts, process_mov = True)

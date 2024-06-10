@@ -554,6 +554,7 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
     int_shift = np.zeros((nt, 3), dtype = np.int32)
     pc_peak_loc = np.zeros((nt, 3), dtype = np.int32)
     sub_pixel_shifts = np.zeros((nt, 3))
+    mov_cpu_processed = None
 
     if shift_reg == True:
         mov_shifted = np.zeros_like(mov_cpu)
@@ -574,6 +575,10 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
         
         if crosstalk_coeff is not None: 
             mov_gpu = reg.crosstalk_subtract(mov_gpu, crosstalk_coeff)
+        if mov_cpu_processed is None:
+            # allocate CPU array for fused & padded movie ("processed")
+            mov_cpu_processed = n.zeros((mov_gpu.shape[0], nt, mov_gpu.shape[2], mov_gpu.shape[3]), n.float32)
+        mov_cpu_processed[:,t1:t2] = mov_gpu.get()
         if np.logical_or(np.all(rmins != None), np.all(rmaxs != None)):
             mov_gpu = clip_mov_gpu(mov_gpu, rmins, rmaxs)
 
@@ -595,7 +600,7 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
     if shift_reg == True:
         return phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts, mov_shifted
     else:  
-        return phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts
+        return phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts, mov_cpu_processed
     
 def rigid_3d_ref_gpu_dev(mov_cpu, mult_mask, add_mask, refs_f, pc_size, cropy, cropx, batch_size = 20, rmins = None, rmaxs = None, crosstalk_coeff = None, shift_reg = False):
     """
