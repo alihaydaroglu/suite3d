@@ -1181,7 +1181,8 @@ def  get_reference_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rm
 
     # create the full shifted mov
     # TODO SAM: I DONT KNOW IF THESE SHIFTS ARE RIGHT - CAN YOU DOUBLE CHECK? THANKS - ALI
-    shifted_mov = reg_3d.shift_mov_fast(mov_cpu, int_shift - int_shift.mean(axis=0)[np.newaxis,:].astype(np.int32))
+    # Use the same correction shifts as the referebce image as keep the shifted_mov alligned to the reference img!
+    shifted_mov = reg_3d.shift_mov_fast(mov_cpu, int_shift - int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32))
 
     return full_ref_im, zmax, ymax, xmax, cmax, used_frames, subpix_shifts, shifted_mov
 
