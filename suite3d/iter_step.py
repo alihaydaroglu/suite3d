@@ -1033,7 +1033,7 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
         time_shift = time.time()
         #shift entire abtch on cpu at once
         #log this info
-        mov_shifted = reg_3d.shift_mov_fast(mov_cpu, int_shift)
+        mov_shifted = reg_3d.shift_mov_fast(mov_cpu, -int_shift)
         log_cb(f"Shifted the mov in: {time.time() - time_shift}s")
 
         #NOTE changed this so gets int_shifts + sub_pixel shifts etc

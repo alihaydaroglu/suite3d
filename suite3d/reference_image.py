@@ -1169,21 +1169,25 @@ def  get_reference_img_gpu_3d(mov_cpu, percent_contribute, niter, xpad, ypad, rm
             shifted_img_iter = reg_3d.shift_mov_fast(mov_cropped[:,isort,:,:], - int_shift[isort,:])
             ref_img = shifted_img_iter.mean(axis = 1)
             #recenter img
-            ref_img = reg_3d.shift_mov_fast(ref_img[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
+            ref_img = reg_3d.shift_mov_fast(ref_img[:,np.newaxis,:,:], int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
         toc = time.time() - tic
         tic = time.time()
         log_cb(f'Completed iter {iter_idx+1} out of {niter} in {toc: .2f}s using {len(isort): 03d}/{nt} frames', 2)
 
-    #create the uncropped reference img, after all the iterations!
-    shifted_img = reg_3d.shift_mov_fast(mov_cpu[:,isort,:,:], int_shift[isort,:])
-    full_ref_im = shifted_img.mean(axis = 1)
-    full_ref_im = reg_3d.shift_mov_fast(full_ref_im[:,np.newaxis,:,:], -int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
+    # #create the uncropped reference img, after all the iterations!
+    # shifted_img = reg_3d.shift_mov_fast(mov_cpu[:,isort,:,:].copy(), -int_shift[isort,:])
+    # full_ref_im = shifted_img.mean(axis = 1)
+    # full_ref_im = reg_3d.shift_mov_fast(full_ref_im[:,np.newaxis,:,:], int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32)).squeeze()
 
-    # create the full shifted mov
-    # TODO SAM: I DONT KNOW IF THESE SHIFTS ARE RIGHT - CAN YOU DOUBLE CHECK? THANKS - ALI
-    # Use the same correction shifts as the referebce image as keep the shifted_mov alligned to the reference img!
-    shifted_mov = reg_3d.shift_mov_fast(mov_cpu, int_shift - int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32))
+    # # create the full shifted mov
+    # # TODO SAM: I DONT KNOW IF THESE SHIFTS ARE RIGHT - CAN YOU DOUBLE CHECK? THANKS - ALI
+    # # Use the same correction shifts as the reference image as keep the shifted_mov alligned to the reference img!
+    # shifted_mov = reg_3d.shift_mov_fast(mov_cpu, int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32) - int_shift)
 
+    #do shift once, use only frames in the reference image to re-center
+    shifted_mov = reg_3d.shift_mov_fast(mov_cpu, int_shift[isort,:].mean(axis=0)[np.newaxis,:].astype(np.int32) - int_shift)
+    full_ref_im = shifted_mov[:,isort,:,:].mean(axis = 1)
+    print(f'Used {isort.shape[0]} frames to make the reference image')
     return full_ref_im, zmax, ymax, xmax, cmax, used_frames, subpix_shifts, shifted_mov
 
 def  get_reference_img_cpu_3d(mov_cpu, percent_contribute, niter,xpad, ypad, rmins = None, rmaxs = None, pc_size = (2, 30, 30), sigma = [0, 1.5]):
