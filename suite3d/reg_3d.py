@@ -485,15 +485,13 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
         t2 = int(np.min((nt, (b+1)*batch_size))) #end time point of batch
 
         if process_mov:
-            mov_gpu = cp.asarray(mov_cpu[:, t1:t2,:,:])
-            if crosstalk_coeff is not None: 
-                mov_gpu = reg.crosstalk_subtract(mov_gpu, crosstalk_coeff)                
+            mov_gpu = cp.asarray(mov_cpu[:, t1:t2,:,:])             
             if mov_cpu_processed is None:
                 # allocate CPU array for fused & padded movie ("processed")
                 # Use refs_f shape as it is definetlyfused already!
                 mov_cpu_processed = n.zeros((refs_f.shape[0], nt, refs_f.shape[2], refs_f.shape[3]), n.float32)
 
-            mov_gpu, mov_cpu_processed[:, t1:t2] = process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs)
+            mov_gpu, mov_cpu_processed[:, t1:t2] = process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs, crosstalk_coeff = crosstalk_coeff)
         else:
             mov_gpu = cp.asarray(mov_cpu[:, t1:t2,:,:])
             if crosstalk_coeff is not None: 
@@ -635,13 +633,16 @@ def apply_mask4D_gpu(data, mask_mul, mask_offset):
         data[:, t,:,:] = data[:,t,:,:] * mask_mul + mask_offset
     return data
 
-def process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs):
+def process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs, crosstalk_coeff = None):
     #fuse and pad the movie
                                                         #TODO solve the xpad ypad integer vs array conflict
     mov_gpu = fuse_and_pad_gpu(mov_gpu, fuse_shift, np.array(ypad), np.array(xpad), new_xs, old_xs)
     mov_gpu = mov_gpu.real 
     #apply the lbm shifts
     mov_gpu = shift_mov_lbm_gpu(mov_gpu, plane_shifts)
+    #subtract crosstalk between cavities if given
+    if crosstalk_coeff is not None: 
+        mov_gpu = reg.crosstalk_subtract(mov_gpu, crosstalk_coeff)   
     #get the processed movie on the cpu
     mov_cpu_processed_tmp = mov_gpu.get()
     #crop the movie so only full z-planes count
