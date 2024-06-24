@@ -330,7 +330,7 @@ def make_blocks(img_shape, block_shape, overlaps=(0, 36, 36), nonoverlapping_mas
         min_grid = make_blocks(img_shape, block_shape, (0, 0, 0))[
             0].shape[1:-1]
         n_min_blocks = n.product(min_grid)
-        print("%d blocks with overlap (%d without, %.2fx increase)" % (n_blocks,n_min_blocks, n_blocks/n_min_blocks))
+        # print("%d blocks with overlap (%d without, %.2fx increase)" % (n_blocks,n_min_blocks, n_blocks/n_min_blocks))
 
 
     blocks = n.stack([z_blocks, y_blocks, x_blocks])

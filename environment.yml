@@ -19,6 +19,7 @@ dependencies:
   - nb_conda_kernels
   - scikit-learn
   - mrcfile
+  - panel
   - mkl_fft
   - dask-image
   - pip: 

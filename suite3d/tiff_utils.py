@@ -13,6 +13,7 @@ from itertools import product
 from suite2p.io import lbm as lbmio
 import json
 from matplotlib import pyplot as plt
+import matplotlib.animation as animation
 
 def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize=(8,6), dpi=150, alpha=None, return_fig=True,
              ticks=False, ax = None, px_py=None, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
@@ -108,7 +109,7 @@ def get_tif_paths(dir_path, regex_filter=None, sort=True):
     if sort: tif_paths = sorted(tif_paths) #list(n.sort(tif_paths))
     return (tif_paths)
 
-def get_meso_rois(tif_path, max_roi_width_pix=145):
+def get_meso_rois(tif_path, max_roi_width_pix=145, find_common_z=True):
     tf = tifffile.TiffFile(tif_path)
     artists_json = tf.pages[0].tags["Artist"].value
 
@@ -116,11 +117,19 @@ def get_meso_rois(tif_path, max_roi_width_pix=145):
 
     rois = []
     warned = False
+
+    all_zs = [roi['zs'] for roi in si_rois]
+    # print(all_zs)
+    if find_common_z and type(all_zs[0]) is not int:
+        common_z = list(set(all_zs[0]).intersection(*map(set,all_zs[1:])))[0]
+    else:
+        common_z = 0
+
     for roi in si_rois:
         if type(roi['scanfields']) != list:
             scanfield = roi['scanfields']
         else: 
-            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==0)[0][0]]
+            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==common_z)[0][0]]
 
     #     print(scanfield)
         roi_dict = {}
@@ -165,6 +174,14 @@ def get_scan_rate(tif_path):
     for line in tif_info:
         if line.startswith('SI.hRoiManager.scanFrameRate'):
             return float(line.split(' ')[-1])
+        
+def get_fastZ(tif_path):
+    tf = tifffile.TiffFile(tif_path)
+    tif_info = (tf.pages[0].tags['Software'].value).split('\n')
+    for line in tif_info:
+        if line.startswith('SI.hFastZ.position'):
+            return float(line.split(' ')[-1])
+    return None
 
 
 def npy_to_dask(files, name='', axis=1):
@@ -308,3 +325,171 @@ def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
     with mrcfile.new(fpath, overwrite=True) as mrc:
         mrc.set_data(data.astype(dtype))
         mrc.voxel_size = voxel_size
+
+
+def animate_frame(Frame, ax, FrameNo, flip=1, cmap='Greys_r', colorbar=False, alpha=None, other_args = {},
+             ticks=False, px_py=None, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
+             norm=None, interpolation='nearest', ax_off=False):
+    
+    """
+    Used to animate a single frame of animate_gif
+    """
+    im = []
+    new_args = {}
+    new_args.update(other_args)
+
+    if facecolor is not None:
+        ax.set_facecolor(facecolor)
+    ax.grid(False)
+    new_args['interpolation'] = interpolation
+    if vminmax_percentile is not None and vminmax is None:
+        non_nan = ~n.isnan(Frame)
+        new_args['vmin'] = n.percentile(Frame[non_nan], vminmax_percentile[0])
+        new_args['vmax'] = n.percentile(Frame[non_nan], vminmax_percentile[1])
+    if vminmax is not None:
+        new_args['vmin'] = vminmax[0]
+        new_args['vmax'] = vminmax[1]
+    if px_py is not None:
+        new_args['aspect'] = px_py[1]/px_py[0]
+    if alpha is not None:
+        new_args['alpha'] = alpha.copy()
+    if norm is not None:
+        new_args['norm'] = norm
+        new_args['vmin'] = None; new_args['vmax'] = None
+
+    #Add Title as text as artist animation is unique
+    title = ax.text(0.5, 1.01, f'Frame {FrameNo}', horizontalalignment='center', verticalalignment='bottom', transform=ax.transAxes)
+
+    im.extend([ax.imshow(flip*Frame,cmap=cmap, **new_args), title])
+
+
+    if colorbar: plt.colorbar()
+    if not ticks:
+        ax.set_xticks([]); ax.set_yticks([]);
+    if xticks is not None:
+        ax.set_xticks(range(len(xticks)), xticks)
+    if yticks is not None:
+        ax.set_yticks(range(len(yticks)), yticks)
+    if ax_off:
+        ax.axis('off')
+
+    return im
+
+
+def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args = {}, figsize=(8,6), dpi=150, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None,
+                  **kwargs):
+    """
+    This function requires a 3D image e.g (nz, ny, nx) and will return an animated gif.
+
+    Parameters
+    ----------
+    Im3D : ndarray
+        A 3D array, which will be animated over the first axis (0)
+    SaveDir : path
+        Path to the save directory should end in .gif
+    interval : int, optional
+        The time delay between frames in ms, by default 500
+    repeat_delay : int, optional
+        The time delay between repeats of the gif, by default 5000
+    other_args : dict, optional
+        Optional arguments for the call of show_tif for each plane, by default {}
+    figsize : tuple, optional
+        figure size, by default (8,6)
+    dpi : int, optional
+        dpi , by default 150
+    exact_pixels : bool, optional
+        If true adapt figure size to show the exact pixels, by default False
+    vminmax_percentile : tuple, optional
+        Threshold to clip movie, by default (0.5,99.5)
+    vminmax : tuple, optional
+        Values to clip the movie, by default None
+    """
+
+    Mov = Im3D.copy()
+    nFrames, ny, nx = Mov.shape
+    if exact_pixels:
+        figsize = (nx / dpi, ny / dpi)
+    
+    new_args = {}
+    new_args.update(other_args)
+
+    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+
+
+    vminmaxFrame = [0 , 0]
+    if vminmax_percentile is not None and vminmax is None:
+        non_nan = ~n.isnan(Mov)
+        vminmaxFrame[0] = n.percentile(Mov[non_nan], vminmax_percentile[0])
+        vminmaxFrame[1] = n.percentile(Mov[non_nan], vminmax_percentile[1])
+    if vminmax is not None:
+        vminmaxFrame[0] = vminmax[0]
+        vminmaxFrame[1] = vminmax[1]
+
+    ims = []
+    for i in range(nFrames):
+        im = animate_frame(Mov[i], ax, i, vminmax = vminmaxFrame,  **kwargs)
+        ims.append(im)
+
+    ani = animation.ArtistAnimation(fig, ims, interval = interval, repeat_delay = repeat_delay)   
+
+    ani.save(SaveDir)
+
+def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, ncols = 5, same_scale = False, vminmax_percentile = (0.5,99.5), **kwargs):
+    """
+    Uses show_tif to create a figure which shows all planes
+
+    Parameters
+    ----------
+    img : ndarray (nz, ny, nx)
+        A 3D image, will show each plane seperatley
+    figsize : tuple, optional
+        figsize, best if it is a multiple of (ncols, nrows), by default (8,6)
+    title : list, optional
+        A list of title for each image, by default None
+    ncols : int, optional
+        The number of collumns in the image, by default 5
+    same_scale : bool, optional
+        If True enforce all images to have the same colour scale, by default False
+    vminvmax_percentile : tuple, optional
+        Same as in show_tiff, however isused in getting the same scale if same_scale = True, by default (0.5, 99.5)
+    """
+    nz = img.shape[0]
+    ncols = ncols
+    nrows = int(n.ceil(nz / ncols))
+
+    figsize = figsize #ideally multiple of rows and colloumns
+
+    fig, axs =  plt.subplots(nrows, ncols, figsize = (figsize), layout = 'constrained')
+
+    #make all the images have the same color scale
+    if same_scale:
+        for z in range(nz):
+            if z ==0:
+                non_nan = ~n.isnan(img[z])
+                vmin = n.percentile(img[z][non_nan], vminmax_percentile[0])
+                vmax = n.percentile(img[z][non_nan], vminmax_percentile[1])
+            else:
+                non_nan = ~n.isnan(img[z])
+                vmin = min(vmin, n.percentile(img[z][non_nan], vminmax_percentile[0]))
+                vmax = max(vmax, n.percentile(img[z][non_nan], vminmax_percentile[1]))
+
+
+    for row in range(nrows):
+        for col in range(ncols):
+            plane_no = row * ncols + col
+            if plane_no < nz: #catch empty planes
+                if same_scale:
+                    show_tif(img[plane_no], ax=axs[row][col], vminmax = (vmin, vmax), **kwargs)
+                else:
+                    show_tif(img[plane_no], ax=axs[row][col], vminmax_percentile = vminmax_percentile, **kwargs)
+                if title is None:
+                    axs[row][col].set_title(f'Plane {plane_no + 1}', fontsize = 'small')#Counting from 0
+                else:
+                    axs[row][col].set_title(title[plane_no])
+            else:
+                #hide axis for empty planes
+                axs[row][col].set_axis_off()
+
+    if suptitle is not None:
+        fig.suptitle(suptitle)
+    
