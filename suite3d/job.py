@@ -768,7 +768,7 @@ class Job:
         return rois_dir_path
 
 
-    def compute_npil_masks(self, stats_dir, corrmap_dir_tag=''):
+    def compute_npil_masks(self, stats_dir):
         info = n.load(os.path.join(stats_dir, 'info.npy'), allow_pickle=True).item()
         stats = n.load(os.path.join(stats_dir, 'stats.npy'),allow_pickle=True)
         nz, ny, nx = info['vmap'].shape
@@ -870,7 +870,7 @@ class Job:
                 mov = self.get_registered_movie('registered_fused_data','fused', edge_crop=False)
             else:
                 mov = self.get_registered_movie('registered_fused_data','fused',axis=0, edge_crop=False)
-        if crop:
+        if crop and self.params['svd_crop'] is not None:
             cz, cy, cx = self.params['svd_crop']
             self.log("Cropping with bounds: %s" % (str(self.params['svd_crop'])))
             if mov_shape_tfirst:
@@ -1204,7 +1204,7 @@ class Job:
         nframes = []
         dir_ids = []
         for tif in self.tifs:
-            dir_ids.append(int(tif.split(os.path.sep)[-2]))
+            dir_ids.append((tif.split(os.path.sep)[-2]))
             tifsize = int(os.path.getsize(tif))
             if tifsize in size_to_frames.keys():
                 nframes.append(size_to_frames[tifsize])
@@ -1422,23 +1422,25 @@ class Job:
         #nyb, nxb = summary['all_ops'][0]['nblocks'] #old method
         nz = len(self.params['planes'])
 
-        rigid_xs = []
-        rigid_ys = []
-        nonrigid_xs = []
-        nonrigid_ys = []
+        
+        first_file = n.load(offset_files[0], allow_pickle=True).item()
+        keys = first_file.keys()
+        results = {}
+        for key in keys:
+            results[key] = []
+
         for i in range(n_offset_files):
             offset = n.load(offset_files[i], allow_pickle=True).item()
-            rigid_xs.append(offset['xmaxs_rr'])
-            rigid_ys.append(offset['ymaxs_rr'])
-            nonrigid_xs.append(offset['xmaxs_nr'].reshape(-1,nz, nyb, nxb))
-            nonrigid_ys.append(offset['ymaxs_nr'].reshape(-1,nz, nyb, nxb))
+            # print(i)
+            for key in keys:
+                results[key].append(offset[key])
+            # print(offset.keys())
+            # rigid_xs.append(offset['xmaxs_rr'])
+            # rigid_ys.append(offset['ymaxs_rr'])
+            # nonrigid_xs.append(offset['xmaxs_nr'].reshape(-1,nz, nyb, nxb))
+            # nonrigid_ys.append(offset['ymaxs_nr'].reshape(-1,nz, nyb, nxb))
 
-        rigid_xs = n.concatenate(rigid_xs, axis=0)
-        rigid_ys = n.concatenate(rigid_ys, axis=0)
-        nonrigid_xs = n.concatenate(nonrigid_xs, axis=0)
-        nonrigid_ys = n.concatenate(nonrigid_ys, axis=0)
-
-        return rigid_xs, rigid_ys, nonrigid_xs, nonrigid_ys
+        return results
     
 
     def get_plane_shifts(self):

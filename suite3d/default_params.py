@@ -67,7 +67,7 @@ params = {
     # number of planes (starting from top) used to estimate crosstalk
     # shallower (quiet) planes, especially those outside the brain,
     # lead to better estimates of the crosstalk
-    'crosstalk_n_planes' : 10,
+    'crosstalk_n_planes' : 2,
 
     ### Registration ###
     'use_GPU_registration' : True, #TODO intergrate with registration
@@ -85,7 +85,7 @@ params = {
     'nr_smooth_iters' : 2,
     # 3d registration params
     'pc_size' : n.asarray((2, 40, 40)), # ~ max_reg_zyx
-    '3d_reg'  : False, # Use the new 3d registration fucntions 
+    '3d_reg'  : True, # Use the new 3d registration fucntions 
 
     # reference image paramaters
     'percent_contribute' : 0.9, 
@@ -161,21 +161,21 @@ params = {
     'sdnorm_exp' : 1.0,
     # crop the edges of each plane by this many pixels before computing the corr map
     # this removes some registration-related artifacts
-    'edge_crop_npix' : 5,
+    'edge_crop_npix' : 7,
 
     # Type (gaussian, unif) and xy/z extents of neuropil filter in pixels
     'npil_filt_type' : 'unif',
-    'npil_filt_xy_um' : 5.0,
-    'npil_filt_z_um' : 1.5,
+    'npil_filt_xy_um' : 70.0,
+    'npil_filt_z_um' : 15.0,
     # Type and xy/z extents of the cell detection filter in pixels
-    'cell_filt_type' : 'gaussian',
-    'cell_filt_xy_um' : 1.0,
-    'cell_filt_z_um' : 0.75,
+    'cell_filt_type' : 'unif',
+    'cell_filt_xy_um' : 10,
+    'cell_filt_z_um' : 15,
     # activity threshold before calculating correlation map
-    'intensity_thresh' : 0.25,
+    'intensity_thresh' : 0.1,
     # Width of the temporal hpf
     # Should divide t_batch_size evenly
-    'temporal_hpf' : 400,
+    'temporal_hpf' : 200,
     # sometimes, the top and bottom planes have different scales
     # than the center planes in the correlation map. Attempt to fix it
     'fix_vmap_edge_planes' : False,
@@ -187,22 +187,24 @@ params = {
     # for efficiency, should be t_batch_size / n_proc_corr
     'mproc_batchsize' : 25,
     # number of processors to use during correlation map calculation
-    'n_proc': 8,
-    'n_proc_corr' : 8,
-    'n_proc_detect' : 8,
+    'n_proc': 16,
+    'n_proc_corr' : 16,
+    'n_proc_detect' : 16,
     # don't touch this
     'dtype': n.float32,
 
     ### Cell detection ###
+    # threshold above which cell peaks in correlation map are detected
+    'peak_thresh' : 2.0,
     
     # Size and overlap of cell detection patches
     'patch_size_xy' : (120,120),
     'patch_overlap_xy' : (25,25),
     # only consider timepoints with values above this threshold for detection
-    'activity_thresh' : 4.0,
+    'activity_thresh' : 20.0,
     # only consider timepoints above this percentile for detection. minimum thresh
     # between this and activity_thresh is used
-    'percentile' : 99.0,
+    'percentile' : 99.5,
     # threshold to include a cell in an ROI. Lower to have larger ROIs
     'extend_thresh' : 0.2,
 

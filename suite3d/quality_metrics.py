@@ -45,6 +45,31 @@ def shot_noise_pct(fs, frate_hz):
 
     return noise_level
 
+def choose_top_pix(vol, pct = 98):
+    nz, ny, nx = vol.shape
+    pcts = n.array([n.percentile(vol[i].flatten(), pct)  for i in range(nz)])
+    n_top_pix = int((100-pct) * ny * nx / 100 - 2)
+    top_pix = n.array([vol[i] >= pcts[i] for i in range(nz)])
+    return top_pix
 
-def compute_metrics_for_movie(mov, time_axis=1):
-    vol = mov.mean(axis=time_axis)
+def compute_metrics_for_movie(mov, frate_hz, top_pix=None):
+    nz, nt, ny, nx = mov.shape
+    vol = mov.mean(axis=1)
+    metrics = volume_quality(vol)
+    if top_pix is None:
+        top_pix = choose_top_pix(vol)
+
+    noises = []
+    npix = (top_pix.sum(axis=(1,2))).min()
+    # print(npix)
+    for i in range(nz):
+        noises.append(shot_noise_pct(mov[i][:,top_pix[i]][:,:npix].reshape(nt,-1).T, frate_hz))
+        # print(noises[-1].shape)
+    noise_levels = n.array(noises)
+
+    metrics['noise_levels'] = noise_levels
+
+    return vol, metrics
+
+    
+    

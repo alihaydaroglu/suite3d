@@ -17,7 +17,7 @@ from webui.job_interface import JobInterface
 
 
 class InitPanel(param.Parameterized):
-    def __init__(self, max_height = 800):
+    def __init__(self, max_height = None):
         super().__init__()
 
         self.layout = pn.GridSpec(name='Initial Pass', sizing_mode = 'scale_both', max_height=max_height)

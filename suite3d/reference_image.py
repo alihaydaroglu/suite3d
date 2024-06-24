@@ -1053,9 +1053,9 @@ def compute_reference_and_masks_3d(mov_cpu, reference_params, log_cb = default_l
     ypad = int(ypad)
 
     log_cb("Applying plane alignment shifts", 1)
-    print(mov_cpu.shape)
-    print(tvecs.shape)
-    print(tvecs)
+    # print(mov_cpu.shape)
+    # print(tvecs.shape)
+    # print(tvecs)
     mov_cpu = reg_3d.shift_mov_lbm_fast(mov_cpu, tvecs) # apply the lbm shift
 
     if use_GPU:

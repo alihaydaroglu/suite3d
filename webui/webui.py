@@ -22,6 +22,8 @@ sys.path.insert(0,'.')
 from webui.volume_vis import VolumeWidget
 from webui.job_interface import JobInterface
 from webui.init_pass_panel import InitPanel
+from webui.corrmap_panel import CorrmapPanel
+from webui.registration_panel import RegistrationPanel
 
 
 pn.extension(design="native")
@@ -31,14 +33,18 @@ job_interface = JobInterface(width=None, height=None)
 job_widget_vis_button = job_interface.job_widget.controls(['visible'])[1]
 job_widget_vis_button.name = 'Show create/load job widget'
 
-init_panel = InitPanel()
+init_panel = InitPanel(max_height=800)
+reg_panel = RegistrationPanel(max_height=800)
+corrmap_panel = CorrmapPanel(max_height=800)
 
 
-ui = pn.Accordion(job_interface.job_widget, init_panel.layout)#, volume_vis_panel)
+ui = pn.Tabs(job_interface.job_widget, init_panel.layout, reg_panel.layout, corrmap_panel.layout)#, volume_vis_panel)
 
 def job_load_callback(value):
     if value:
         init_panel.load_job(job_interface)
+        reg_panel.load_job(job_interface)
+        corrmap_panel.load_job(job_interface)
 
 pn.bind(job_load_callback, job_interface.param.job_loaded, watch=True)
 

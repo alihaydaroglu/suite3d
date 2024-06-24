@@ -31,10 +31,10 @@ class JobInterface(param.Parameterized):
             self.newjob_file_selector,
             self.newjob_button)
 
-        self.job_tabs = pn.Accordion( ("Create job", self.newjob_widgets))
+        # self.job_tabs = pn.Accordion( ("Create job", self.newjob_widgets))
         
-        self.job_widget = pn.Column(self.jobdir_selector, self.loadjob_widgets, self.job_tabs,
-                                    width=width, height=height,name='Create or load job',)
+        self.job_widget = pn.Column(self.jobdir_selector, self.loadjob_widgets,
+                                    width=width, height=height,name='Load job',)
         self.job = None
         self.job_data = {}
 

@@ -180,7 +180,8 @@ def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,
         im3d = im3d - im3d.min(axis=(1,2),keepdims=True)
 
     ms = n.linspace(0,1,101)
-    assert im3d.shape[0] == n_per_cavity*2
+    nz, ny, nx = im3d.shape
+    # assert im3d.shape[0] == n_per_cavity*2
 
     if estimate_from_last_n_planes is None:
         estimate_from_last_n_planes = n_per_cavity
@@ -196,14 +197,14 @@ def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,
 
     # print(n_plots, n_rows, n_cols)
     # print(estimate_from_last_n_planes)
-    f,axs = plt.subplots(n_rows, n_cols, figsize=(n_cols*fig_scale, n_rows*fig_scale))
-    if n_rows == 1: axs = [axs]
+    # f,axs = plt.subplots(n_rows, n_cols, figsize=(n_cols*fig_scale, n_rows*fig_scale))
+    # if n_rows == 1: axs = [axs]
     
 
-    for idx, i in enumerate(range(n_per_cavity - estimate_from_last_n_planes, n_per_cavity)):
+    for i in range(estimate_from_last_n_planes):
         # print("Plot for plane %d" % i)
-        X = im3d[i].flatten()
-        Y = im3d[i+n_per_cavity].flatten()
+        Y = im3d[nz - i - 1].flatten()
+        X = im3d[nz - i - 1 - n_per_cavity].flatten()
         fit_thresh = n.percentile(X, fit_above_percentile)
         # print(fit_thresh)
         idxs = X > n.percentile(X, fit_above_percentile)
@@ -232,36 +233,36 @@ def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,
     
         if bounds is None: 
             bounds = (0, n.percentile(X,99.95))
-        bins = [n.arange(*bounds,1),n.arange(*bounds,1)]
-        col_id = idx % n_cols
-        row_id = idx // n_cols
-        # print(i,idx, col_id, row_id)
-        ax = axs[row_id][col_id]
-        ax.set_aspect('equal')
-        ax.plot(bins[0], m_opt * bins[0], alpha=0.5, linestyle='--')
-        ax.plot(bins[0], m_first * bins[0], alpha=0.5, linestyle='--')
-        ax.hist2d(X, Y, bins = bins, norm=colors.LogNorm())
-        axsins2 = inset_axes(ax, width="30%", height="40%", loc='upper right')
-        axsins2.grid(False)
-        axsins2.plot(ms, liks, label='Min: %.2f, 1st: %.2f' % (m_opt, m_first))
-        # axsins2.set_xlabel("m")
-        axsins2.set_xticks([m_opt])
-        axsins2.set_yticks([])
-        ax.set_xlabel("Plane %d" % i)
-        ax.set_ylabel("Plane %d" % (i+n_per_cavity))
+    #     bins = [n.arange(*bounds,1),n.arange(*bounds,1)]
+    #     col_id = idx % n_cols
+    #     row_id = idx // n_cols
+    #     # print(i,idx, col_id, row_id)
+    #     ax = axs[row_id][col_id]
+    #     ax.set_aspect('equal')
+    #     ax.plot(bins[0], m_opt * bins[0], alpha=0.5, linestyle='--')
+    #     ax.plot(bins[0], m_first * bins[0], alpha=0.5, linestyle='--')
+    #     ax.hist2d(X, Y, bins = bins, norm=colors.LogNorm())
+    #     axsins2 = inset_axes(ax, width="30%", height="40%", loc='upper right')
+    #     axsins2.grid(False)
+    #     axsins2.plot(ms, liks, label='Min: %.2f, 1st: %.2f' % (m_opt, m_first))
+    #     # axsins2.set_xlabel("m")
+    #     axsins2.set_xticks([m_opt])
+    #     axsins2.set_yticks([])
+    #     ax.set_xlabel("Plane %d" % i)
+    #     ax.set_ylabel("Plane %d" % (i+n_per_cavity))
 
-    plt.tight_layout()
+    # plt.tight_layout()
     # print('showing')
     # if show_plots: plt.show()
-    # print("showed")
-    if save_plots is not None:
-        print("Saving figure to %s" % plot_dir)
-        f.savefig(os.path.join(plot_dir, 'plane_fits.png'), dpi=200)
-        print("saved")
-    else:
-        plt.show()
-    plt.close()
-    print("Close figure")
+    # # print("showed")
+    # if save_plots is not None:
+    #     print("Saving figure to %s" % plot_dir)
+    #     f.savefig(os.path.join(plot_dir, 'plane_fits.png'), dpi=200)
+    #     print("saved")
+    # else:
+    #     plt.show()
+    # plt.close()
+    # print("Close figure")
 
     # return
     m_opts = n.array(m_opts)
