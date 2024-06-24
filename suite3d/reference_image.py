@@ -80,38 +80,42 @@ def compute_reference_and_masks(mov_fuse, reference_params, log_cb = default_log
         ref_image, ymax, xmax, cmax, used_frames = \
             get_reference_img_cpu(mov_fuse, percent_contribute, niter, rmins = rmins, rmaxs = rmaxs,  max_reg_xy = max_reg_xy, sigma = sigma)
     
-    #allign the reference image
-    uncorrected_tvecs = align_planes(ref_image, reference_params)
-    #correct bad tvec estimates
-    if reference_params.get('fix_shallow_plane_shift_estimates', True):
-        shallow_plane_thresh = reference_params.get('fix_shallow_plane_shift_esimate_threshold', 20)
-        peaks = n.abs(uncorrected_tvecs[:shallow_plane_thresh]).max(axis=0)
-        bad_planes = n.logical_or(n.abs(uncorrected_tvecs[shallow_plane_thresh:,0]) > peaks[0], n.abs(uncorrected_tvecs[shallow_plane_thresh:,1]) > peaks[1])
-        uncorrected_tvecs[shallow_plane_thresh:][bad_planes,:] =0
-        if bad_planes.sum() > 0:
-            log_cb("Fixing %d plane alignment outliers" % bad_planes.sum(), 2)
+    if reference_params.get('plane_to_plane_alignment', True):
+        #allign the reference image
+        uncorrected_tvecs = align_planes(ref_image, reference_params)
+        #correct bad tvec estimates
+        if reference_params.get('fix_shallow_plane_shift_estimates', True):
+            shallow_plane_thresh = reference_params.get('fix_shallow_plane_shift_esimate_threshold', 20)
+            peaks = n.abs(uncorrected_tvecs[:shallow_plane_thresh]).max(axis=0)
+            bad_planes = n.logical_or(n.abs(uncorrected_tvecs[shallow_plane_thresh:,0]) > peaks[0], n.abs(uncorrected_tvecs[shallow_plane_thresh:,1]) > peaks[1])
+            uncorrected_tvecs[shallow_plane_thresh:][bad_planes,:] =0
+            if bad_planes.sum() > 0:
+                log_cb("Fixing %d plane alignment outliers" % bad_planes.sum(), 2)
 
 
-    #Find the mean shift for the used frames
-    xshift = np.zeros(nz)
-    yshift = np.zeros(nz)
-    for i in range(niter):
-        for z in range(nz):
-            xshift[z] += xmax[i,z, np.asarray(used_frames[i])[z]].mean(axis=0)
-            yshift[z] += ymax[i,z, np.asarray(used_frames[i])[z]].mean(axis=0)
+        #Find the mean shift for the used frames
+        xshift = np.zeros(nz)
+        yshift = np.zeros(nz)
+        for i in range(niter):
+            for z in range(nz):
+                xshift[z] += xmax[i,z, np.asarray(used_frames[i])[z]].mean(axis=0)
+                yshift[z] += ymax[i,z, np.asarray(used_frames[i])[z]].mean(axis=0)
 
-    #allign from raw data
-    corrected_tvecs_x = uncorrected_tvecs[:,1] + xshift - xshift[0]
-    corrected_tvecs_y = uncorrected_tvecs[:,0] - yshift + yshift[0] #Make the tvecs start at 0!
-    corrected_tvecs = np.stack((corrected_tvecs_y, corrected_tvecs_x), axis = 1)
-    corrected_tvecs = np.round(corrected_tvecs)
-    # pad the movie byusing the maximum of either tvecs
-    stack_tmp = np.stack((corrected_tvecs, uncorrected_tvecs))
-    max_tvecs = np.max(np.abs(stack_tmp), axis = 0)
-    max_tvecs *= np.sign(corrected_tvecs) #may want to change this, the point is to return correct sign after abs
+        #allign from raw data
+        corrected_tvecs_x = uncorrected_tvecs[:,1] + xshift - xshift[0]
+        corrected_tvecs_y = uncorrected_tvecs[:,0] - yshift + yshift[0] #Make the tvecs start at 0!
+        corrected_tvecs = np.stack((corrected_tvecs_y, corrected_tvecs_x), axis = 1)
+        corrected_tvecs = np.round(corrected_tvecs)
+        # pad the movie byusing the maximum of either tvecs
+        stack_tmp = np.stack((corrected_tvecs, uncorrected_tvecs))
+        max_tvecs = np.max(np.abs(stack_tmp), axis = 0)
+        max_tvecs *= np.sign(corrected_tvecs) #may want to change this, the point is to return correct sign after abs
 
-    ref_padded, xpad, ypad = pad_mov3D(ref_image, max_tvecs)
-    pad_sizes = [xpad, ypad]
+        ref_padded, xpad, ypad = pad_mov3D(ref_image, max_tvecs)
+        pad_sizes = [xpad, ypad]
+        
+    else:
+        uncorrected_tvecs = np.zeros((nz, 2))
 
     ref_image = apply_plane_shifts3D(ref_padded, uncorrected_tvecs)
 
