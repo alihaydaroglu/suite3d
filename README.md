@@ -36,4 +36,4 @@ conda install -c conda-forge matplotlib
 There is a Dockerfile in this repo that successfully builds (`docker build - < Dockerfile`). I don't know anything about Docker, but I would love to have this successfully run in a container. If you manage to get that working let me know! Ideally, this would also include some sort of X host to run napari (https://napari.org/stable/howtos/docker.html#base-napari-image), presumably there is a way to merge the napari-xpra docker image into this one to make that work. 
 
 ## Sample Data
-Here's 3 sample tiff files file to test the code on. These are used in Full-Demo-GPU. If you can't access the dropbox let me know: https://www.dropbox.com/sh/g5r85jdkhtedumz/AABqPHG5J63-JlrI4erd2107a?dl=0
+Demo data can be found here: https://liveuclac-my.sharepoint.com/:f:/g/personal/ucqfhay_ucl_ac_uk/EqCoF5CmM1hFvkaj2aPPpcMByfP2j_dzRT8u84S6VT1vKQ?e=EhAgH5 - the password is the name of this repository, all lowercase. You will also find a "results" directory here that should be similar to the exported results if you run this on your computer - you can download this to test the UI component only.
