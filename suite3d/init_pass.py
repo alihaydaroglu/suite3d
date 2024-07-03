@@ -2,8 +2,6 @@ import os
 import numpy as n
 import copy
 
-import matplotlib.pyplot as plt
-from suite2p.registration import register
 from . import utils
 from . import lbmio
 from . import reference_image as ref
@@ -12,7 +10,6 @@ def default_log(string, val):
     print(string)
 
 def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method='even', seed=2358):
-
     init_file_pool = []
     if init_file_pool_lims is not None:
         for limits in init_file_pool_lims:
@@ -39,57 +36,6 @@ def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plan
     full_mov = n.concatenate(full_mov, axis=1)
 
     return full_mov
-
-#TODO delete outdated if new reference function are used instead
-def prep_registration(full_mov, reg_ops, log_cb=default_log, filter_pcorr=0, force_plane_shifts=None):
-    nz, nt, ny, nx = full_mov.shape
-    ref_img_3d = []
-    log_cb("Computing reference images")
-    for i in range(nz):
-        ref_img = register.compute_reference(reg_ops, full_mov[i])
-        ref_img_3d.append(ref_img)
-        log_cb("  Computed reference for plane %d" % i,2)
-    ref_img_3d = n.array(ref_img_3d)
-
-    ref_img_3d_unaligned = n.copy(ref_img_3d)
-    if force_plane_shifts is None:
-        tvecs = n.concatenate([[[0,0]], utils.get_shifts_3d(ref_img_3d, filter_pcorr=filter_pcorr)])
-    else: tvecs = force_plane_shifts
-    log_cb("Tvecs: %s" % str(tvecs), 5)
-
-    ref_img_3d_aligned = utils.register_movie(ref_img_3d[:,n.newaxis], tvecs=tvecs)[:,0]
-
-    all_ref_and_masks = []
-    all_ops = []
-    for plane_idx in range(nz):
-        ref_img = ref_img_3d_aligned[plane_idx].copy()
-        plane_ops = copy.deepcopy(reg_ops)
-        if plane_ops.get('norm_frames',False):
-            plane_ops['rmin'], plane_ops['rmax'] = n.int16(n.percentile(ref_img,1)), n.int16(n.percentile(ref_img,99))
-            ref_img = n.clip(ref_img, plane_ops['rmin'], plane_ops['rmax'])    
-        ref_and_masks = register.compute_reference_masks(ref_img, plane_ops)
-        all_ref_and_masks.append(ref_and_masks)
-        all_ops.append(plane_ops)
-
-    return tvecs, ref_img_3d_aligned, all_ops, all_ref_and_masks, ref_img_3d_unaligned
-
-#Is this the old version, which uses suite 2p? 
-def register_sample_movie(full_mov, all_ops, all_refs, in_place=True, log_cb=default_log):
-    nz = full_mov.shape[0]
-    if not in_place:
-        full_mov = full_mov.copy()
-    log_cb("Registering sample movie")
-    all_offsets = []
-    for plane_idx in range(nz):
-        ref_and_masks = all_refs[plane_idx]
-        plane_ops = all_ops[plane_idx]
-        log_cb("  Registering plane %d" % plane_idx)
-        full_mov[plane_idx], ym, xm, cm, ym1, xm1, cm1 = \
-            register.register_frames(ref_and_masks, full_mov[plane_idx], ops=plane_ops)
-        all_offsets.append((ym, xm, cm, ym1, xm1, cm1))
-
-    return full_mov, all_offsets
-
 
 def run_init_pass(job):
     tifs = job.tifs
