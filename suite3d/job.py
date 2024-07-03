@@ -524,7 +524,7 @@ class Job:
         param_vals_list = []
         # for each parameter that is sweeped, collect its possible values
         for k in params_to_sweep.keys():
-            assert k in self.params.keys(), "Parameter %s not in self.params" % k
+            assert k in self.params.keys(), ""
             param_names.append(k)
             n_per_param.append(len(params_to_sweep[k]))
             param_vals_list.append(params_to_sweep[k])
