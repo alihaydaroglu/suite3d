@@ -61,4 +61,9 @@ class IO:
         A collection of functions that are used to support the main functions of this class.
         These functions are meant to be called by the main functions, and should not be called
         directly by the user.
+
+        Examples:
+        load_and_stitch_full_tif_mp
+        stitch_rois_fast
+        etc...
         """
