@@ -17,6 +17,7 @@ from . import utils
 from . import register_gpu as reg_gpu
 from . import reg_3d as reg_3d
 from . import reference_image as ref
+from . import quality_metrics as qm
 
 import traceback
 import gc
@@ -908,6 +909,11 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
     yblocks, xblocks = reference_params['yblock'], reference_params['xblock']
     nblocks = reference_params['nblocks'] 
     pc_size = params.get('pc_size', (2, 20, 20))
+    frate_hz = params.get('fs', 4)
+
+    # choose the top 2% of pix in each plane to run
+    # quality metrics on
+    top_pix = qm.choose_top_pix(ref_img_3d)
 
     # from old code
     # all_ops            = summary['all_ops']
@@ -1027,7 +1033,7 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
 
         time_pre_reg = time.time()
         #log time it takes
-        phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts = \
+        phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts, mov_cpu = \
             reg_3d.rigid_3d_ref_gpu(mov_cpu, mask_mul, mask_offset, ref_2ds, pc_size, batch_size = gpu_reg_batchsize, #TODO make xpad/ypad automatically integers
                                     rmins = rmins, rmaxs = rmaxs, crosstalk_coeff = crosstalk_coeff,  shift_reg = False, xpad = int(xpad), ypad = int(ypad),
                                     fuse_shift = fuse_shift, new_xs = new_xs, old_xs = old_xs, plane_shifts = plane_shifts, process_mov = True)
@@ -1037,7 +1043,7 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
         time_shift = time.time()
         #shift entire abtch on cpu at once
         #log this info
-        mov_shifted = reg_3d.shift_mov_fast(mov_cpu, int_shift)
+        mov_shifted = reg_3d.shift_mov_fast(mov_cpu, -int_shift)
         log_cb(f"Shifted the mov in: {time.time() - time_shift}s")
 
         #NOTE changed this so gets int_shifts + sub_pixel shifts etc
@@ -1064,6 +1070,20 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
             log_cb("Saving fused, registered file of shape %s to %s" % (str(mov_save.shape), reg_data_path), 2)
             n.save(reg_data_path, mov_save)
             log_cb("Saved in %.2f sec" % (time.time() - save_t), 3)
+
+            
+            metrics_path = os.path.join(job_reg_data_dir, 'reg_metrics_%04d.npy' % file_idx)
+            mean_img_path = os.path.join(job_reg_data_dir, 'mean_img_%04d.npy' % file_idx)
+            log_cb("Computing quality metrics and saving", 2)
+
+            mean_img, metrics = qm.compute_metrics_for_movie(mov_save, frate_hz, top_pix=top_pix)
+            n.save(mean_img_path, mean_img)
+            n.save(metrics_path, metrics)
+
+
+
+            
+
             file_idx += 1
         n.save(offset_path, all_offsets)
         

@@ -31,17 +31,17 @@ class JobInterface(param.Parameterized):
             self.newjob_file_selector,
             self.newjob_button)
 
-        self.job_tabs = pn.Accordion( ("Create job", self.newjob_widgets))
+        # self.job_tabs = pn.Accordion( ("Create job", self.newjob_widgets))
         
-        self.job_widget = pn.Column(self.jobdir_selector, self.loadjob_widgets, self.job_tabs,
-                                    width=width, height=height,name='Create or load job',)
+        self.job_widget = pn.Column(self.jobdir_selector, self.loadjob_widgets,
+                                    width=width, height=height,name='Load job',)
         self.job = None
         self.job_data = {}
 
         self.bind_load_widgets()
         
     def bind_load_widgets(self):
-        pn.bind(self.update_load_job_selector, self=self, dir_string=self.jobdir_selector, watch=True)
+        pn.bind(self.update_load_job_selector, dir_string=self.jobdir_selector, watch=True)
         self.update_load_job_selector(self.jobdir_selector.value)
 
         self.load_job_button.on_click(self.load_job)
@@ -50,7 +50,7 @@ class JobInterface(param.Parameterized):
         print(dir_string)
         print("Updating")
         if os.path.isdir(dir_string):
-            self.job_selector.options = os.listdir(dir_string)
+            self.job_selector.options = sorted(os.listdir(dir_string))
             self.jobdir_selector.name = 'Suite3D Dir (valid)'
         else:
             self.jobdir_selector.name = 'Suite3D Dir (invalid)'

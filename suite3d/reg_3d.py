@@ -216,86 +216,6 @@ def process_phase_corr_per_frame(phase_corr, pc_size):
     sub_pixel_shifts = [z_sub_pixel, y_sub_pixel, x_sub_pixel]
     return phase_corr_shifted, shift, pc_peak_loc, sub_pixel_shifts  
 
-def process_phase_corr_gpu(phase_corr, pc_size):
-    """
-    Analysise the phase correlation to return useful information, a re-aranged phase_corr, peak location and 
-    integer + sub pixel shifts.
-    This function is used for the gpu where registration is done in batches.
-
-    Parameters
-    ----------
-    phase_corr : ndarray (nz, ny, nx)
-        The full phase correlation for a frame
-    pc_size : ndarray (nz_pc, ny_pc, nx_pc)
-        This determines the size of the re-aranged phase correlation array and the maximum size of shifts allowed
-
-    Returns
-    -------
-    phase_corr_shifted : ndarray (2*nz_pc +1, 2*ny_pc + 1, 2*nx_pc + 1)
-        The phase correlation cropped and shifted so the peak is central
-    shift : ndarray (3,)
-        The integer shift to maximise phase correlation
-    pc_peak_lock : ndarray (3,)
-        The index of the maximum value of the shift phase correlation array
-    sub_pixel_shifts : ndarray (3,)
-        The sub pixel shift estiamted from the phase correlation
-
-    """
-    max_pc_size = pc_size*2 + 1
-    nt, nz, ny, nx = phase_corr.shape
-    phase_corr_shifted = cp.zeros((nt, int(max_pc_size[0]), int(max_pc_size[1]), int(max_pc_size[2])), dtype = cp.float64)
-
-
-    #want z planes 0,1,2 to go to 2,3,4
-    #want z planes 14,13 to go to 1,0 
-    #so the new z plane -2 is the shift!
-    # asfor x/y 0-50 goes to 50-101
-    # and the last 50 go to 0-50
-
-    #have z+/- x+/- y+/-
-    #add z+ x+ y+
-    phase_corr_shifted[:, pc_size[0]:, pc_size[1]:, pc_size[2]:] = phase_corr[:, :pc_size[0]+1, :pc_size[1]+1, :pc_size[2]+1]
-    #add z+ x- y+
-    phase_corr_shifted[:, pc_size[0]:, pc_size[1]:, :pc_size[2]] = phase_corr[:, :pc_size[0]+1, :pc_size[1]+1, nx - pc_size[2]:]
-    #add z+ x+ y-
-    phase_corr_shifted[:, pc_size[0]:, :pc_size[1], pc_size[2]:] = phase_corr[:, :pc_size[0]+1, ny - pc_size[1]:, :pc_size[2]+1]
-    #add z+ x- y-
-    phase_corr_shifted[:, pc_size[0]:, :pc_size[1], :pc_size[2]] = phase_corr[:, :pc_size[0]+1, ny - pc_size[1]:, nx - pc_size[2]:]
-
-    #add z- x+ y+
-    phase_corr_shifted[:, :pc_size[0], pc_size[1]:, pc_size[2]:] = phase_corr[:, nz - pc_size[0]:, :pc_size[1]+1, :pc_size[2]+1]
-    #add z- x- y+
-    phase_corr_shifted[:, :pc_size[0], pc_size[1]:, :pc_size[2]] = phase_corr[:, nz - pc_size[0]:, :pc_size[1]+1, nx - pc_size[2]:]
-    #add z- x+ y-
-    phase_corr_shifted[:, :pc_size[0], :pc_size[1], pc_size[2]:] = phase_corr[:, nz - pc_size[0]:, ny - pc_size[1]:, :pc_size[2]+1]
-    #add z- x- y-
-    phase_corr_shifted[:, :pc_size[0], :pc_size[1], :pc_size[2]] = phase_corr[:, nz - pc_size[0]:, ny - pc_size[1]:, nx - pc_size[2]:]
-
-    #SWITCHING back to cpu here 
-    phase_corr_shifted = cp.asnumpy(phase_corr_shifted)
-    pc_size = cp.asnumpy(pc_size)
-
-    shift = np.zeros((nt, 3))
-    pc_peak_loc = np.zeros((nt, 3), dtype = np.int16)
-    shape = phase_corr_shifted[0].shape
-    for t in range(nt):
-        mx = np.argmax(phase_corr_shifted[t])
-        pc_peak_loc[t,:] = np.unravel_index(mx, shape)# cp.asarray(cp.unravel_index(mx, shape))
-        shift[t,:] = pc_peak_loc[t,:] - pc_size
-    
-    z_sub_pixel = cp.zeros(nt)
-    y_sub_pixel = cp.zeros(nt)
-    x_sub_pixel = cp.zeros(nt)
-    for t in range(nt):
-        z_sub_pixel[t] = est_sub_pixel_shift(phase_corr_shifted[t, :, pc_peak_loc[t, 1], pc_peak_loc[t, 2]])
-        x_sub_pixel[t] = est_sub_pixel_shift(phase_corr_shifted[t, pc_peak_loc[t, 0], :, pc_peak_loc[t, 2]])
-        y_sub_pixel[t] = est_sub_pixel_shift(phase_corr_shifted[t, pc_peak_loc[t, 0], pc_peak_loc[t, 1], :])
-
-    #Somehow the result of np.vstack is a cp.ndarray so need to do cp.asnumpy, this is true try tofind out why?
-    sub_pixel_shifts = cp.asnumpy(np.vstack([z_sub_pixel, y_sub_pixel, x_sub_pixel]).T)
-
-    return phase_corr_shifted, shift, pc_peak_loc, sub_pixel_shifts
-
 #TODOmove/integrate into reference.py
 def gaussian_fft3D(sig, nZ, nY, nX):
     """
@@ -518,8 +438,8 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
 
     Parameters
     ----------
-    mov_cpu : ndarray (nz, nt, ny, nx)
-        The un-registered movie
+    mov_cpu : ndarray (nz, nt, ny*, nx*)
+        The un-registered movie, * may be un-fused
     mult_mask : ndarray ( nz, ny, nx)
         The pre-calculated multiplcation mask
     add_mask : ndarray (nz, ny, nx)
@@ -547,17 +467,17 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
         The sub pixel shift estiamted from the phase correlation
     """
     mempool = cp.get_default_memory_pool()
-    nz, nt, ny, nx = mov_cpu.shape
+    __, nt, __, __ = mov_cpu.shape
     max_pc_size = pc_size*2 + 1
 
     phase_corr_shifted = np.zeros((nt, max_pc_size[0], max_pc_size[1], max_pc_size[2]))
     int_shift = np.zeros((nt, 3), dtype = np.int32)
     pc_peak_loc = np.zeros((nt, 3), dtype = np.int32)
     sub_pixel_shifts = np.zeros((nt, 3))
+    mov_cpu_processed = None
 
     if shift_reg == True:
         mov_shifted = np.zeros_like(mov_cpu)
-    
     total_batches = int(np.ceil(nt / batch_size))
     for b in range(total_batches):
         mempool.free_all_blocks()
@@ -565,15 +485,21 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
         t2 = int(np.min((nt, (b+1)*batch_size))) #end time point of batch
 
         if process_mov:
-            mov_gpu = cp.asarray(mov_cpu[:, t1:t2,:,:])
-            mov_gpu = process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs)
+            mov_gpu = cp.asarray(mov_cpu[:, t1:t2,:,:])             
+            mov_gpu, mov_cpu_processed_tmp = process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs, crosstalk_coeff = crosstalk_coeff)
+            #ov_cpu_processed needs to be fused & padded but NOT spatially subseted!
+            if mov_cpu_processed is None:
+                # allocate CPU array for fused & padded movie ("processed")
+                mov_cpu_processed = n.zeros((mov_cpu_processed_tmp.shape[0], nt, mov_cpu_processed_tmp.shape[2], mov_cpu_processed_tmp.shape[3]), n.float32)
+            mov_cpu_processed[:, t1:t2] = mov_cpu_processed_tmp
         else:
             mov_gpu = cp.asarray(mov_cpu[:, t1:t2,:,:])
+            if crosstalk_coeff is not None: 
+                mov_gpu = reg.crosstalk_subtract(mov_gpu, crosstalk_coeff)
         mult_mask = cp.asarray(mult_mask)
         add_mask = cp.asarray(add_mask)
         
-        if crosstalk_coeff is not None: 
-            mov_gpu = reg.crosstalk_subtract(mov_gpu, crosstalk_coeff)
+
         if np.logical_or(np.all(rmins != None), np.all(rmaxs != None)):
             mov_gpu = clip_mov_gpu(mov_gpu, rmins, rmaxs)
 
@@ -595,7 +521,7 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
     if shift_reg == True:
         return phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts, mov_shifted
     else:  
-        return phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts
+        return phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts, mov_cpu_processed
     
 def rigid_3d_ref_gpu_dev(mov_cpu, mult_mask, add_mask, refs_f, pc_size, cropy, cropx, batch_size = 20, rmins = None, rmaxs = None, crosstalk_coeff = None, shift_reg = False):
     """
@@ -707,16 +633,21 @@ def apply_mask4D_gpu(data, mask_mul, mask_offset):
         data[:, t,:,:] = data[:,t,:,:] * mask_mul + mask_offset
     return data
 
-def process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs):
+def process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs, crosstalk_coeff = None): 
     #fuse and pad the movie
                                                         #TODO solve the xpad ypad integer vs array conflict
     mov_gpu = fuse_and_pad_gpu(mov_gpu, fuse_shift, np.array(ypad), np.array(xpad), new_xs, old_xs)
     mov_gpu = mov_gpu.real 
+    #subtract crosstalk between cavities if given, BEFORE plane shifts
+    if crosstalk_coeff is not None: 
+        mov_gpu = reg.crosstalk_subtract(mov_gpu, crosstalk_coeff)  
     #apply the lbm shifts
     mov_gpu = shift_mov_lbm_gpu(mov_gpu, plane_shifts)
+    #get the processed movie on the cpu
+    mov_cpu_processed_tmp = mov_gpu.get()
     #crop the movie so only full z-planes count
     mov_gpu = mov_gpu[:,:, ypad:-ypad, xpad:-xpad]
-    return mov_gpu
+    return mov_gpu, mov_cpu_processed_tmp
 
 #TODO changed from register_gpu, 1. pads became int
 #2 added the shift to x-axis so the blanck space is on the left side

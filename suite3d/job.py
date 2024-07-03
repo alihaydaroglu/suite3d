@@ -5,6 +5,7 @@ except:
 import datetime
 import os
 import copy
+import time
 import sys
 import numpy as n
 import itertools
@@ -524,7 +525,7 @@ class Job:
         param_vals_list = []
         # for each parameter that is sweeped, collect its possible values
         for k in params_to_sweep.keys():
-            assert k in self.params.keys(), ""
+            assert k in self.params.keys(), "%s not in params" % k
             param_names.append(k)
             n_per_param.append(len(params_to_sweep[k]))
             param_vals_list.append(params_to_sweep[k])
@@ -767,7 +768,7 @@ class Job:
         return rois_dir_path
 
 
-    def compute_npil_masks(self, stats_dir, corrmap_dir_tag=''):
+    def compute_npil_masks(self, stats_dir):
         info = n.load(os.path.join(stats_dir, 'info.npy'), allow_pickle=True).item()
         stats = n.load(os.path.join(stats_dir, 'stats.npy'),allow_pickle=True)
         nz, ny, nx = info['vmap'].shape
@@ -869,7 +870,7 @@ class Job:
                 mov = self.get_registered_movie('registered_fused_data','fused', edge_crop=False)
             else:
                 mov = self.get_registered_movie('registered_fused_data','fused',axis=0, edge_crop=False)
-        if crop:
+        if crop and self.params['svd_crop'] is not None:
             cz, cy, cx = self.params['svd_crop']
             self.log("Cropping with bounds: %s" % (str(self.params['svd_crop'])))
             if mov_shape_tfirst:
@@ -979,11 +980,12 @@ class Job:
             if info_use_idx is not None and patch_idx == patch_idxs[info_use_idx]: info = info_patch
         iscell = n.concatenate(iscells)
 
-        self.log("Deduplicating cells", 2)
+        self.log("Deduplicating %d cells" % len(stats), 2)
+        tic = time.time()
         stats, duplicate_cells = ext.prune_overlapping_cells(stats, self.params.get('detect_overlap_dist_thresh',5), 
                                     self.params.get('detect_overlap_lam_thresh', 0.5))
         iscell = iscell[~duplicate_cells]
-        self.log("Removed %d duplicate cells" % duplicate_cells.sum(), 2)
+        self.log("Removed %d duplicate cells in %.2fs" % (duplicate_cells.sum(), time.time() - tic), 2)
 
         # stats = n.concatenate(stats)
         self.log("Combined %d patches, %d cells" % (len(patch_idxs), len(stats)))
@@ -1202,7 +1204,7 @@ class Job:
         nframes = []
         dir_ids = []
         for tif in self.tifs:
-            dir_ids.append(int(tif.split(os.path.sep)[-2]))
+            dir_ids.append((tif.split(os.path.sep)[-2]))
             tifsize = int(os.path.getsize(tif))
             if tifsize in size_to_frames.keys():
                 nframes.append(size_to_frames[tifsize])
@@ -1420,23 +1422,25 @@ class Job:
         #nyb, nxb = summary['all_ops'][0]['nblocks'] #old method
         nz = len(self.params['planes'])
 
-        rigid_xs = []
-        rigid_ys = []
-        nonrigid_xs = []
-        nonrigid_ys = []
+        
+        first_file = n.load(offset_files[0], allow_pickle=True).item()
+        keys = first_file.keys()
+        results = {}
+        for key in keys:
+            results[key] = []
+
         for i in range(n_offset_files):
             offset = n.load(offset_files[i], allow_pickle=True).item()
-            rigid_xs.append(offset['xmaxs_rr'])
-            rigid_ys.append(offset['ymaxs_rr'])
-            nonrigid_xs.append(offset['xmaxs_nr'].reshape(-1,nz, nyb, nxb))
-            nonrigid_ys.append(offset['ymaxs_nr'].reshape(-1,nz, nyb, nxb))
+            # print(i)
+            for key in keys:
+                results[key].append(offset[key])
+            # print(offset.keys())
+            # rigid_xs.append(offset['xmaxs_rr'])
+            # rigid_ys.append(offset['ymaxs_rr'])
+            # nonrigid_xs.append(offset['xmaxs_nr'].reshape(-1,nz, nyb, nxb))
+            # nonrigid_ys.append(offset['ymaxs_nr'].reshape(-1,nz, nyb, nxb))
 
-        rigid_xs = n.concatenate(rigid_xs, axis=0)
-        rigid_ys = n.concatenate(rigid_ys, axis=0)
-        nonrigid_xs = n.concatenate(nonrigid_xs, axis=0)
-        nonrigid_ys = n.concatenate(nonrigid_ys, axis=0)
-
-        return rigid_xs, rigid_ys, nonrigid_xs, nonrigid_ys
+        return results
     
 
     def get_plane_shifts(self):

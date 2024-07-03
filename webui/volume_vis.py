@@ -13,12 +13,14 @@ class VolumeWidget(param.Parameterized):
     nz = param.Integer(6)
     ny = param.Integer(500)
     nx = param.Integer(500)
-    def __init__(self, title, size=(600,600), volume=None):
+    def __init__(self, title, size=(600,600), volume=None, slider_text='Choose z-plane',
+                 add_to_widget=()):
         super().__init__()
         self.title = title
         self.size = size
         self.vmin = None
         self.vmax = None
+        self.slider_text = slider_text
 
         self.zidx = min(self.nz // 2,5)
         if volume is None:
@@ -27,6 +29,7 @@ class VolumeWidget(param.Parameterized):
         self.setup_figure()
         self.add_sliders()
         self.widget = column(self.plot, self.sliders['zidx'], self.sliders['image_range'],
+                             *add_to_widget,
                              name=self.title, sizing_mode = 'scale_both')
 
 
@@ -52,7 +55,7 @@ class VolumeWidget(param.Parameterized):
                                         end=self.volume.max() + 1e-5,
                                         step=0.01,
                                         value=(self.vmin, self.vmax),),
-            'zidx' : Slider(title='Choose z-plane', start = 0, end = self.nz-1, step = 1,
+            'zidx' : Slider(title=self.slider_text, start = 0, end = self.nz-1, step = 1,
                              value = min(self.nz,5))
         }
 
