@@ -703,10 +703,8 @@ def get_matching_params(param_names, params):
         matching_params[param_name] = params[param_name]
     return matching_params
 
-def default_log(string, level=None, *args, **kwargs): 
+def default_log(string, level=0, *args, **kwargs): 
     print(("   " * level) + string)
-
-
 
 def make_batch_paths(parent_dir, n_batches=1, prefix='batch', suffix='', dirs=True):
     '''

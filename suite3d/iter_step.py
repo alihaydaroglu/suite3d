@@ -18,6 +18,7 @@ from . import register_gpu as reg_gpu
 from . import reg_3d as reg_3d
 from . import reference_image as ref
 from . import quality_metrics as qm
+from .utils import default_log
 
 import traceback
 import gc
@@ -28,8 +29,6 @@ try:
 except:
     print("CUPY not installed! ")
 
-def default_log(string, *args, **kwargs): 
-    print(string)
 
 
 def init_batches(tifs, batch_size, max_tifs_to_analyze=None):

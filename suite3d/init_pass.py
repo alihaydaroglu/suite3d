@@ -1,13 +1,11 @@
 import os
 import numpy as n
-import copy
 
 from . import utils
 from . import lbmio
 from . import reference_image as ref
+from .utils import default_log
 
-def default_log(string, val): 
-    print(string)
 
 def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method='even', seed=2358):
     init_file_pool = []
@@ -31,8 +29,6 @@ def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plan
     full_mov = lbmio.load_and_stitch_tifs(init_tifs, planes = planes, convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids,
                                           n_ch = n_ch_tif, filt=filter_params, concat=False, fix_fastZ=fix_fastZ, log_cb=log_cb,
                                           lbm=lbm, num_colors=num_colors, functional_color_channel=functional_color_channel)
-
-    mov_lens = [mov.shape[1] for mov in full_mov] #not needed anymore?
     full_mov = n.concatenate(full_mov, axis=1)
 
     return full_mov
