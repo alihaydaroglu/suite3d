@@ -1,12 +1,18 @@
-
-
 from os.path import join
 from os.path import exists
-import os
 
-import numpy as n
 from . import tiff_utils as tfu
+from .utils import deprecated
 
+@deprecated(reason="Refactor: use suite3d.io.tiff_utils.get_si_params instead.")
+def get_si_params(tif_path):
+    si_params = {}
+    si_params['rois'] = tfu.get_meso_rois(tif_path)
+    si_params['vol_rate'] = tfu.get_vol_rate(tif_path)
+    si_params['line_freq'] = 2 * tfu.get_tif_tag(tif_path,'SI.hScan2D.scannerFrequency', number=True)
+    return si_params
+
+@deprecated(reason="Refactor: now in suite3d.io.deprecated_file_utils.py.")
 def find_exp(subjects_dir, subject, date, expnum, verbose=False, get_si_params=True):
     
     si_params = {}
@@ -30,14 +36,8 @@ def find_exp(subjects_dir, subject, date, expnum, verbose=False, get_si_params=T
         si_params['line_freq'] = 2 * tfu.get_tif_tag(tif_paths[0],'SI.hScan2D.scannerFrequency', number=True)
         
     return tif_paths, si_params, exp_str
-def get_si_params(tif_path):
-    si_params = {}
-    si_params['rois'] = tfu.get_meso_rois(tif_path)
-    si_params['vol_rate'] = tfu.get_vol_rate(tif_path)
-    si_params['line_freq'] = 2 * tfu.get_tif_tag(tif_path,'SI.hScan2D.scannerFrequency', number=True)
-    return si_params
 
-
+@deprecated(reason="Refactor: use the one in suite3d.io.deprecated_file_utils.py instead.")
 def find_expt_file(expt_info,file, dirs = None, verbose = False):
     
     subject, expt_date, expt_num = expt_info
