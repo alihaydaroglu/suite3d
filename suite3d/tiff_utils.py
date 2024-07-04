@@ -16,6 +16,7 @@ from matplotlib import pyplot as plt
 import matplotlib.animation as animation
 from .utils import deprecated
 
+@deprecated("Refactor: use the one in suite3d.io.tiff_utils instead.")
 def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize=(8,6), dpi=150, alpha=None, return_fig=True,
              ticks=False, ax = None, px_py=None, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
              norm=None, cbar=False, cbar_loc='left', cbar_fontcolor = 'k', cbar_ori='vertical', cbar_title='', interpolation='nearest', ax_off=False, cax_kwargs={'frameon':False}):
@@ -85,6 +86,7 @@ def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize
 
     if return_fig: return f, ax, axim
 
+@deprecated("Refactor: use the one in suite3d.io.tiff_utils instead.")
 def get_tif_paths(dir_path, regex_filter=None, sort=True):
     '''
     Get a list of absolute paths for all tif files in this directory
@@ -110,6 +112,7 @@ def get_tif_paths(dir_path, regex_filter=None, sort=True):
     if sort: tif_paths = sorted(tif_paths) #list(n.sort(tif_paths))
     return (tif_paths)
 
+@deprecated("Refactor: use the one in suite3d.io.lbmio instead.")
 def get_meso_rois(tif_path, max_roi_width_pix=145, find_common_z=True):
     tf = tifffile.TiffFile(tif_path)
     artists_json = tf.pages[0].tags["Artist"].value
@@ -149,6 +152,7 @@ def get_meso_rois(tif_path, max_roi_width_pix=145, find_common_z=True):
     roi_pixs = n.array([r['pixXY'] for r in rois])
     return rois
 
+@deprecated("Refactor: use the one in suite3d.io.tiff_utils instead.")
 def get_tif_tag(tif_path, tag_name=None, number=True):
     tf = tifffile.TiffFile(tif_path)
     tags = tf.pages[0].tags['Software'].value.split('\n')
@@ -161,6 +165,7 @@ def get_tif_tag(tif_path, tag_name=None, number=True):
             return tag
 
 
+@deprecated("Refactor: use the one in suite3d.io.tiff_utils instead.")
 def get_vol_rate(tif_path):
     tf = tifffile.TiffFile(tif_path)
     tags = tf.pages[0].tags['Software'].value.split('\n')
@@ -169,6 +174,7 @@ def get_vol_rate(tif_path):
             return float(re.findall("\d+\.\d+", tag)[0])
 
 
+@deprecated("Refactor: use the one in suite3d.io.tiff_utils instead.")
 def get_scan_rate(tif_path):
     tf = tifffile.TiffFile(tif_path)
     tif_info = (tf.pages[0].tags['Software'].value).split('\n')
@@ -176,6 +182,7 @@ def get_scan_rate(tif_path):
         if line.startswith('SI.hRoiManager.scanFrameRate'):
             return float(line.split(' ')[-1])
         
+@deprecated("Refactor: use the one in suite3d.io.tiff_utils instead.")
 def get_fastZ(tif_path):
     tf = tifffile.TiffFile(tif_path)
     tif_info = (tf.pages[0].tags['Software'].value).split('\n')
@@ -185,6 +192,7 @@ def get_fastZ(tif_path):
     return None
 
 
+@deprecated("Refactor: use the one in suite3d.utils instead.")
 def npy_to_dask(files, name='', axis=1):
     sample_mov = n.load(files[0], mmap_mode='r')
     file_ts = ([n.load(f, mmap_mode='r').shape[axis] for f in files])
@@ -306,6 +314,7 @@ def separate_planes_and_save(save_path, tif_paths, channels,
         tif_idx += int(n_blocks)
 
 
+@deprecated("Only used in separate_planes_and_save, which is also deprecated")
 def save_plane_worker(filepath, mov):
     debug = True
     tic = time.time()
@@ -320,6 +329,7 @@ def save_plane_worker(filepath, mov):
     return toc - tic
 
 
+@deprecated("Only used in old demos")
 def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
     os.makedirs(dir, exist_ok=True)
     fpath = os.path.join(dir, fname)
@@ -328,6 +338,7 @@ def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
         mrc.voxel_size = voxel_size
 
 
+@deprecated("Only called in animate_gif, which is also deprecated")
 def animate_frame(Frame, ax, FrameNo, flip=1, cmap='Greys_r', colorbar=False, alpha=None, other_args = {},
              ticks=False, px_py=None, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
              norm=None, interpolation='nearest', ax_off=False):
@@ -377,6 +388,7 @@ def animate_frame(Frame, ax, FrameNo, flip=1, cmap='Greys_r', colorbar=False, al
     return im
 
 
+@deprecated("Not used anywhere")
 def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args = {}, figsize=(8,6), dpi=150, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None,
                   **kwargs):
     """
@@ -435,6 +447,7 @@ def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args =
 
     ani.save(SaveDir)
 
+@deprecated("Not used anywhere (moved to suite3d.io.deprecated_tiff_utils.py)")
 def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, ncols = 5, same_scale = False, vminmax_percentile = (0.5,99.5), **kwargs):
     """
     Uses show_tif to create a figure which shows all planes
