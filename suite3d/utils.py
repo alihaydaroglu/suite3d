@@ -19,11 +19,44 @@ from skimage.measure import moments
 from suite2p.registration.nonrigid import make_blocks
 from datetime import datetime
 import pickle
+from functools import wraps
+from warnings import warn
 
 try: 
     from git import Repo
 except:
     print("Install gitpython for dev benchmarking to work")
+
+
+def todo(message, stacklevel=1):
+    """
+    A function to call that prints warning-like messages wherever work needs to be done on a function. 
+
+    Args:
+        message (str): The message to print.
+        stacklevel (int, optional): The stacklevel to pass to the warning function. Defaults to 1.
+    """
+    warn(message, stacklevel=stacklevel)
+
+def deprecated(reason=None):
+    """
+    A decorator to mark functions as deprecated as we refactor the code. It's kind of overkill, but 
+    it's nice because then we can just search for "deprecated" in the library to find any functions
+    that need to be updated or removed. 
+    
+    Args:
+        reason (Optional[str]) : A string explaining why the function is deprecated and/or what to use instead.
+    """
+    def decorator(func):
+        message = f"Function {func.__name__} is deprecated."
+        if reason:
+            message += f" {reason}"
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            warn(message, category=DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def pad_and_fuse(mov, plane_shifts, fuse_shift, xs, fuse_shift_offset=0):

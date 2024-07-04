@@ -14,6 +14,7 @@ from suite2p.io import lbm as lbmio
 import json
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
+from .utils import deprecated
 
 def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize=(8,6), dpi=150, alpha=None, return_fig=True,
              ticks=False, ax = None, px_py=None, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
@@ -207,7 +208,7 @@ def npy_to_dask(files, name='', axis=1):
 
 
 
-
+@deprecated("Not used anywhere, and it doesn't include the planes argument in the call to load_and_stitch_tifs")
 def separate_planes_and_save(save_path, tif_paths, channels,
                              ram_fraction=0.5, ram_cap_bytes=None,
                              max_out_file_size_gb=3.0, tifs_per_file=None,
