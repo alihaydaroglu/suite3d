@@ -79,8 +79,6 @@ def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, fi
     return mov
 
 
-# def load_and_stitch_full_tif()
-
 def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 30,
                                 translations=None, filt = None, debug=False, get_roi_start_pix=False,
                                 use_roi_idxs=None, fix_fastZ=False):
@@ -393,7 +391,6 @@ def load_and_stitch_tifs_notLBM(paths, planes, verbose=True, filt=None, concat=T
         functional_color_channel (int, optional): index of functional color channel. Defaults to 0. 
 
     Returns:
-        _type_: _description_
     '''
     if filt is not None:
         print("a filter was requested but it is not coded for load_and_stitch_tifs_noLBM")
