@@ -338,8 +338,7 @@ class Job:
         else:
             os.makedirs(job_dir, exist_ok=True)
 
-        self.log("Loading job directory for %s in %s" %
-                    (job_id, root_dir), 0)
+        self.log("Loading job directory for %s in %s" % (job_id, root_dir), 0)
         if 'dirs.npy' in os.listdir(job_dir):   
             self.log("Loading dirs ")
             self.dirs = n.load(os.path.join(job_dir, 'dirs.npy'),allow_pickle=True).item()
@@ -350,17 +349,12 @@ class Job:
             self.dirs['job_dir'] = self.job_dir
 
         for dir_name in ['registered_fused_data', 'summary', 'iters']:
-            dir_key = dir_name
-            if dir_key not in self.dirs.keys():
+            if dir_name not in self.dirs.keys() or not os.path.isdir(self.dirs[dir_name]):
                 new_dir = os.path.join(job_dir, dir_name) 
                 if not os.path.isdir(new_dir):
                     os.makedirs(new_dir, exist_ok=True)
                     self.log("Created dir %s" % new_dir,2)
-                # else:
-                    # 
-                    # self.log("Found dir %s" % new_dir,2)
-                self.dirs[dir_key] = new_dir
-                
+                self.dirs[dir_name] = new_dir
             else:
                 self.log("Found dir %s" % dir_name,2)
         n.save(os.path.join(job_dir, 'dirs.npy'), self.dirs)
