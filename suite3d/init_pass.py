@@ -41,7 +41,7 @@ def run_init_pass(job):
     job.log("Saving summary to %s" % summary_path,0)
     if not os.path.isdir(job.dirs['summary']):
         job.log("Summary dir does not exist!!")
-        assert False
+        raise ValueError("Summary dir does not exist!!")
 
     init_tifs = choose_init_tifs(tifs, params['n_init_files'], params['init_file_pool'], 
                                        params['init_file_sample_method'])
