@@ -21,12 +21,14 @@ from datetime import datetime
 import pickle
 from functools import wraps
 from warnings import warn
+from multiprocessing import cpu_count
 
 try: 
     from git import Repo
 except:
     print("Install gitpython for dev benchmarking to work")
 
+suite3d_developer_mode = os.environ.get("SUITE3D_DEVELOPER", "").lower() == "true"
 
 def todo(message, stacklevel=1):
     """
@@ -36,7 +38,8 @@ def todo(message, stacklevel=1):
         message (str): The message to print.
         stacklevel (int, optional): The stacklevel to pass to the warning function. Defaults to 1.
     """
-    warn(message, stacklevel=stacklevel)
+    if suite3d_developer_mode:
+        warn(message, stacklevel=stacklevel)
 
 def deprecated(reason=None):
     """
@@ -45,7 +48,7 @@ def deprecated(reason=None):
     that need to be updated or removed. 
     
     Args:
-        reason (Optional[str]) : A string explaining why the function is deprecated and/or what to use instead.
+        reason (Optional[str]) : An explanation for why the function is deprecated and/or what to use instead.
     """
     def decorator(func):
         message = f"Function {func.__name__} is deprecated."
@@ -58,6 +61,40 @@ def deprecated(reason=None):
         return wrapper
     return decorator
 
+def deprecated_inputs(*explanation):
+    """
+    A decorator to mark functions with deprecated inputs as we refactor the code. Like the above decorator,
+    we can search for "deprecated_inputs" in the library to find any functions that need their inputs to be
+    reviewed and checked. 
+
+    Args:
+        *explanation (str): One or more strings providing explanations for which inputs are deprecated.
+                            At least one explanation must be provided.
+    """
+    assert len(explanation) > 0, "You must provide an explanation for the deprecated inputs."
+    def decorator(func):
+        message = f"Function {func.__name__} is using deprecated inputs."
+        for exp in explanation:
+            message += "\nDeprecated_inputs: " + exp
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if suite3d_developer_mode:
+                warn(message, category=DeprecationWarning, stacklevel=2)
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+def set_num_processors(n_procs):
+    """
+    A function to set the number of processors to use for parallel processing. The argument
+    is the requested number of processors, and this function makes sure that the number is
+    greater than or equal to 1 and less than or equal to the number of processors in the 
+    computer minus 1 (as reported by multiprocessing.cpu_count()).
+
+    Args:
+        n_procs (int): The number of processors to use for parallel processing.
+    """
+    return max(min(n_procs, cpu_count()-1), 1)
 
 def pad_and_fuse(mov, plane_shifts, fuse_shift, xs, fuse_shift_offset=0):
     nz, nt, nyo, nxo = mov.shape
@@ -164,6 +201,7 @@ def make_blocks_3d(nz, ny, nx, block_shape, z_overlap=True):
     
     return zbls, ybls, xbls, grid_shape
 
+@deprecated("Only used in register_movie(), which is deprecated.")
 def get_shifts_3d(im3d, n_procs = 12, filter_pcorr=0):
     sims = []
     i = 0
@@ -180,6 +218,7 @@ def get_shifts_3d(im3d, n_procs = 12, filter_pcorr=0):
     tvecs_cum = n.cumsum(tvecs,axis=0)
     return tvecs_cum
 
+@deprecated("Only used in register_movie(), which is deprecated.")
 def get_shifts_3d_worker(idx, im3d,filter_pcorr):
     return imreg.similarity(im3d[idx], im3d[idx+1], filter_pcorr=filter_pcorr)
     
@@ -329,6 +368,7 @@ def calculate_crosstalk_coeff(im3d, exclude_below=1, sigma=0.01, peak_width=1,
     return m_opts, m_firsts, best_m
 
 
+@deprecated("Only used in register_movie(), which is deprecated.")
 def shift_movie_plane(plane_id, sh_mem_name, tvec, shape, dtype, verbose=True):
     sh_mem = shared_memory.SharedMemory(sh_mem_name)
     mov3d = n.ndarray(shape, dtype, buffer=sh_mem.buf)
@@ -341,6 +381,8 @@ def shift_movie_plane(plane_id, sh_mem_name, tvec, shape, dtype, verbose=True):
         mov3d[plane_id][i] = imreg.transform_img(mov3d[plane_id][i], tvec=tvec)
     sh_mem.close()
 
+
+@deprecated("Not used anywhere in package.")
 def register_movie(mov3d, tvecs = None, save_path = None, n_shift_proc=10):
     
     if tvecs is None:

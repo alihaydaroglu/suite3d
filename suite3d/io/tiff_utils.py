@@ -20,6 +20,7 @@ def get_si_params(tif_path):
             line_freq: Line frequency.
     """
     todo("Refactor get_meso_rois to combine with the one in lbmio!")
+    todo("Consider integrating in the central s3dio class.")
     si_params = {}
     si_params['rois'] = get_meso_rois(tif_path)
     si_params['vol_rate'] = get_vol_rate(tif_path)
