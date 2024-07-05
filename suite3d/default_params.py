@@ -1,5 +1,6 @@
 import numpy as n
 import copy
+from .utils import set_num_processors
 
 def get_default_params():
     return copy.deepcopy(params)
@@ -34,7 +35,6 @@ params = {
     'functional_color_channel' : 0, # if not lbm data, which color channel is the functional one
 
     ### Initialization Step ### 
-
     # number of files to use for the initialization step
     # Usually the equivalent of ~1 minute is enough
     'n_init_files' : 1,
@@ -190,10 +190,11 @@ params = {
     # less important batchsize parameter for internal computations
     # for efficiency, should be t_batch_size / n_proc_corr
     'mproc_batchsize' : 25,
+
     # number of processors to use during correlation map calculation
-    'n_proc': 16,
-    'n_proc_corr' : 16,
-    'n_proc_detect' : 16,
+    'n_proc': set_num_processors(16),
+    'n_proc_corr' : set_num_processors(16),
+    'n_proc_detect' : set_num_processors(16),
     # don't touch this
     'dtype': n.float32,
 
