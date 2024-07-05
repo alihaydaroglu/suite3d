@@ -11,13 +11,14 @@ import json
 import psutil
 from . import tiff_utils as tfu
 import tracemalloc
-from .utils import default_log
+from .utils import default_log, deprecated_inputs
 
     
 lbm_plane_to_ch = n.array([1,5,6,7,8,9,2,10,11,12,13,14,15,16,17,3,18,19,20,21,22,23,4,24,25,26,27,28,29,30])-1
 lbm_ch_to_plane = n.array(n.argsort(lbm_plane_to_ch))
  
-def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, filt=None, concat=True, n_ch=30, fix_fastZ=False, 
+@deprecated_inputs("use_roi_idxs is probably not needed. See stitch_rois_fast for explanation.")
+def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, filt=None, concat=True, n_ch=30, fix_fastZ=False, use_roi_idxs=None,
                          convert_plane_ids_to_channel_ids = True, log_cb=default_log, debug=False, lbm=True, num_colors=1, functional_color_channel=0):
     '''
     Load tifs into memory
@@ -79,7 +80,11 @@ def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, fi
     return mov
 
 
-def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 30,
+@deprecated_inputs(
+    "use_roi_idxs is probably not needed. See stitch_rois_fast for explanation."
+    "Translation is never set to anything except None or zeros, so it's effectively ignored."
+)
+def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True, n_ch = 30,
                                 translations=None, filt = None, debug=False, get_roi_start_pix=False,
                                 use_roi_idxs=None, fix_fastZ=False):
     tic = time.time()
@@ -152,6 +157,11 @@ def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 3
 
     return im_full, px, py
 
+
+@deprecated_inputs(
+        "use_roi_idxs is probably not needed. See stitch_rois_fast for explanation."
+        "Translation is never set to anything except None or zeros, so it's effectively ignored."
+)
 def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params, sh_out_name, sh_out_params, translation=None, 
                                     filt=None,use_roi_idxs=None):
     debug=False
@@ -264,9 +274,13 @@ def split_rois_from_tif(im, rois, ch_id = 0, return_coords=False):
     return split_ims
 
 
+@deprecated_inputs(
+        "use_roi_idxs is processed here, but it's set to None everywhere in the suite3d package, so is effectively ignored."
+        "mean_img is passed to stitch_rois_fast_helper, but if True it causes an error due to not being implemented."
+        "Translation is never set to anything except None or zeros, so it's effectively ignored."
+)
 def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_start_pix=False, use_roi_idxs=None):
     tic = time.time()
-
 
     if use_roi_idxs is not None:
         ims = [ims[i] for i in use_roi_idxs]
@@ -342,6 +356,7 @@ def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_star
     
     
 # @numba.jit(nopython=True)
+@deprecated_inputs("mean_img causes a no-implementation error if set to True.")
 def stitch_rois_fast_helper(full_image, ims, roi_start_pix_x, roi_start_pix_y, sizes_pix, mean_img):
     n_rois = len(ims)
     # place each ROI into full image
