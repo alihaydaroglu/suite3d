@@ -2,8 +2,7 @@ import tifffile
 import numpy as n
 import time
 from ..utils import todo, deprecated_inputs
-from .lbmio import load_and_stitch_full_tif_mp, convert_lbm_plane_to_channel
-from .filtering import get_filter
+from .lbmio import load_and_stitch_full_tif_mp, convert_lbm_plane_to_channel, get_roi_start_pix
 
 class s3dio:
     """
@@ -69,9 +68,10 @@ class s3dio:
         # example use of _update_prms to get the parameters to use for this call
         params = self._update_prms(**parameters)
         _dataloader = self._get_dataloader(params)
-        mov_list = _dataloader(paths, verbose=verbose, debug=debug, **params)
+        mov_list = _dataloader(paths, params, verbose=verbose, debug=debug)
 
         # concatenate movies across time to make a single movie
+        print()
         mov = n.concatenate(mov_list, axis=1)
 
         if verbose:
@@ -103,19 +103,17 @@ class s3dio:
         Args:
             paths (list): list of absolute paths to tiff files
             params (dict): parameters for loading the tiffs (inherited from self.job.params in the caller)
-            filt (tuple, optional): parameters of spatiotemporal filter. Defaults to None.
-            log_cb (func, optional): Callback function for logging. Defaults to self.job.log.
             verbose (bool, optional): Verbosity. Defaults to True.
             debug (bool, optional): Debugging mode. Defaults to False.
             
         Returns:
             mov (ndarray): the loaded tiff data with shape (planes, frames, y-pixels, x-pixels)
         """
-        todo("Still need to implement a filtering method!")
+        todo("The lbm loader filters across the slow y-axis (?), should we do something similar here?")
         todo("Performance may be improved by using multithreaded operations.")
 
         if any([p < 0 or p > params["n_ch_tif"] for p in params["planes"]]):
-            raise ValueError(f"Planes must be in range 0-{params['n_ch_tif']}, but it's set to: {params["planes"]}")
+            raise ValueError(f"Planes must be in range 0-{params['n_ch_tif']}, but it's set to: {params['planes']}")
 
         tic = time.time()
 
@@ -131,7 +129,7 @@ class s3dio:
                 if len(tif_file.shape) != 4:
                     raise ValueError(f"tiff file is {tif_file.ndim}D instead of 4D, expecting (frames, colors, y-pixels, x-pixels)")
                 if tif_file.shape[1] != params["num_colors"]:
-                    raise ValueError(f"tiffs have {tif_file.shape[1]} color channels, expecting {params["num_colors"]}")
+                    raise ValueError(f"tiffs have {tif_file.shape[1]} color channels, expecting {params['num_colors']}")
 
                 # in general, imaging is only done with one functional color channel, so we take that one and ignore the others
                 # if anyone is using multiple functional color channels, they need to modify the code themselves or raise an 
@@ -165,13 +163,13 @@ class s3dio:
         return mov_list
     
     @deprecated_inputs("mp_args is never set to anything except an empty dictionary")
-    def _load_lbm_tifs(self, paths, params, mp_args={}, verbose=True, debug=False):
+    def _load_lbm_tifs(self, paths, params, verbose=True, debug=False):
         """
         Load tifs that are in the standard lbm imaging format.
 
         Args:
             paths (list): list of absolute paths to tiff files
-            mp_args (dict, optional): args to pass to worker. Defaults to {}. (deprecated)
+            params (dict): parameters for loading the tiffs (inherited from self.job.params in the caller)
             verbose (bool, optional): Verbosity. Defaults to True.
             debug (bool, optional): Debugging mode. Defaults to False.
             
@@ -193,54 +191,39 @@ class s3dio:
             if verbose: 
                 self.job.log("Loading %s" % tif_path, 2)
 
+            todo("Removed the **mp_args argument from load_and_stitch_full_tif_mp, should we add it back?")
             im = load_and_stitch_full_tif_mp(
                 tif_path,
                 channels,
                 n_ch_tif,
-                filt=get_filter(params['notch_filt']),
+                filt=params['notch_filt'],
                 fix_fastZ=params.get('fix_fastZ', False),
                 n_proc=params.get('n_proc'),
                 verbose=verbose,
                 debug=debug,
-                **mp_args
-            )[0]
-            
+            )
+                        
             mov_list.append(im)
         
         return mov_list
-        
-    def load_accessory_data(self, *args, **kwargs):
+    
+    def load_roi_start_pix(self, **parameters):
+        params = self._update_prms(**parameters)
+        if params["lbm"]:
+            return self._load_roi_start_pix_lbm(params)
+        else:
+            return n.array([0]), n.array([0])
+    
+    def _load_roi_start_pix_lbm(self, params):
         """
-        Sometimes information related to IO needs to be loaded that is pulled from extra
-        outputs of the ``lbmio.load_and_stitch_tifs()`` function. This function (and maybe
-        a few others) is/are meant to be called in place of those for efficient processing
-        and clear responsibility.
+        Get the starting y/x pixels for each ROI in the full image. This is required for stitching ROIs into a full image.
 
-        For example, ``init_pass.run_init_pass()`` calls the following line:
-        __, xs = lbmio.load_and_stitch_full_tif_mp(..., get_roi_start_pix=True, ...)
-
-        Which is used to retrieve just "xs"=the starting offsets for each imaging ROI.
-
-        This can be replaced with a new "load accesory data" function that is called
-        for this purpose -- depending on preference we can either have it run processing
-        again or potentially cache certain results that are known to be needed during an
-        initial call to ``load_tifs()``.
-
-
-        NOTE: xs (the second output of the above mentioned function is the only thing
-        ever used by callers of load_and_stitch_full_tif_mp -- except for it's primary
-        calls in load_and_stitch_tifs()!)
+        Args:
+            ims: list of numpy arrays, each of shape (nt, ny, nx) where nt is the number of frames, and ny, nx are the pixel dimensions.
+            rois: list of dictionaries, each containing the keys 'center' and 'sizeXY' which are the center and size of the ROI in SI units.
         """
-
-    def all_supporting_functions(self, *args, **kwargs):
-        """
-        A collection of functions that are used to support the main functions of this class.
-        These functions are meant to be called by the main functions, and should not be called
-        directly by the user.
-
-        Examples:
-        load_and_stitch_full_tif_mp
-        stitch_rois_fast
-        etc...
-        """
-
+        todo("Check if this assumption is correct, that the roi_start_pix values don't depend on which tif we use.")
+        # we only ever need one of the tifs for this (and it shouldn't matter which one)
+        tif_path = self.job.tifs[0]
+        roi_start_pix_y, roi_start_pix_x = get_roi_start_pix(tif_path, params)
+        return roi_start_pix_y, roi_start_pix_x
