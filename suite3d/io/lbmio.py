@@ -117,7 +117,7 @@ def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params
     tiffile = n.ndarray(shape=sh_arr_params[0], dtype=sh_arr_params[1], buffer=sh_mem.buf)
 
     if filt is not None:
-        b, a = filt
+        b, a = _get_filter(filt)
         line_mov = tiffile[:,ch_id].mean(axis=-1)
         line_mov_filt = signal.filtfilt(b,a, line_mov)
         line_mov_diff = line_mov - line_mov_filt
@@ -131,7 +131,7 @@ def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params
     
     prep_time = time.time()
     if debug: print(" %d Loaded in %.2f" % (ch_id, prep_time-tic))
-    ims = _split_rois_from_tif(tiffile, rois, ch_id=ch_id, return_coords=False)
+    ims = _split_rois_from_tif(tiffile, rois, ch_id=ch_id)
     split_time = time.time()
     if debug: print(" %d Split in %.2f" % (ch_id, split_time-prep_time))
     outputs[idx] = _stitch_rois_fast(ims, rois, translation=translation)
@@ -213,7 +213,25 @@ def _split_rois_from_tif(im, rois, ch_id=0):
     return split_ims
 
 
-def get_roi_start_pix(ims, rois, return_full=False):
+def get_roi_start_pix(tif_path, params):
+    """
+    Get the starting y/x pixels for each ROI in the full image. This is required for stitching ROIs into a full image.
+    
+    This function is called from outside the standard load_data pipeline for registration and other uses. It depends on 
+    _get_roi_start_pix, which actually does the work of calculating the starting pixel positions for each ROI.
+
+    Args:
+        tif_path: path to the tiff file to compute starting ROIs on
+        params: dictionary of parameters, including fix_fastZ, which is a boolean indicating whether to fix the fastZ plane to the first plane.
+                should be from job.params!
+    """
+    tiffile = tifffile.imread(tif_path)
+    rois = get_meso_rois(tif_path, fix_fastZ=params.get("fix_fastZ", False))
+    ims_sample = _split_rois_from_tif(tiffile[:2], rois, ch_id=0)
+    roi_start_pix_y, roi_start_pix_x = _get_roi_start_pix(ims_sample, rois, return_full=False)
+    return roi_start_pix_y, roi_start_pix_x
+
+def _get_roi_start_pix(ims, rois, return_full=False):
     """
     Get the starting y/x pixels for each ROI in the full image. This is required for stitching ROIs into a full image.
 
@@ -277,7 +295,7 @@ def get_roi_start_pix(ims, rois, return_full=False):
 
 @deprecated_inputs("Translation is never set to anything except None or zeros, so it's effectively ignored.")
 def _stitch_rois_fast(ims, rois, translation=None):
-    roi_positions = get_roi_start_pix(ims, rois, return_full=True)
+    roi_positions = _get_roi_start_pix(ims, rois, return_full=True)
 
     roi_start_pix_x = roi_positions["roi_start_pix_x"]
     roi_start_pix_y = roi_positions["roi_start_pix_y"]
@@ -315,3 +333,9 @@ def convert_lbm_channel_to_plane(channels):
     """lbm planes are ordered in a non-contiguous fashion. This function converts the channel numbers to plane numbers."""
     lbm_ch_to_plane = n.array(n.argsort(_get_lbm_plane_to_channel()))
     return lbm_ch_to_plane[n.array(channels)]
+
+def _get_filter(filt_params):
+    """use scipy to get b, a parameters for a notch filter."""
+    if filt_params is not None:
+        return signal.iirnotch(filt_params['f0'],filt_params['Q'], filt_params['line_freq'] )
+    return None
