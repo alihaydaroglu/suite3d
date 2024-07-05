@@ -426,7 +426,7 @@ class Job:
         # n.save(os.path.join(self.dirs['registered_fused_data'], 'summary.npy'), summary)
         if tifs is None:
             tifs = self.tifs
-        register_dataset(tifs, params, self.dirs, summary, self.log, start_batch_idx = start_batch_idx)
+        register_dataset(self, tifs, params, self.dirs, summary, self.log, start_batch_idx = start_batch_idx)
 
     def register_gpu(self, tifs=None, max_gpu_batches=None):
         params = self.params
@@ -434,7 +434,7 @@ class Job:
         save_dir = self.make_new_dir('registered_fused_data')
         if tifs is None:
             tifs = self.tifs
-        register_dataset_gpu(tifs, params, self.dirs, summary, self.log,
+        register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log,
                              max_gpu_batches=max_gpu_batches)
         
     def register_gpu_3d(self, tifs=None, max_gpu_batches=None):
@@ -443,7 +443,7 @@ class Job:
         save_dir = self.make_new_dir('registered_fused_data')
         if tifs is None:
             tifs = self.tifs
-        register_dataset_gpu_3d(tifs, params, self.dirs, summary, self.log,
+        register_dataset_gpu_3d(self, tifs, params, self.dirs, summary, self.log,
                              max_gpu_batches=max_gpu_batches)
         
 
