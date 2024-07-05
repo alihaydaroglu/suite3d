@@ -30,16 +30,15 @@ except:
 
 suite3d_developer_mode = os.environ.get("SUITE3D_DEVELOPER", "").lower() == "true"
 
-def todo(message, stacklevel=1):
+def todo(message):
     """
     A function to call that prints warning-like messages wherever work needs to be done on a function. 
 
     Args:
         message (str): The message to print.
-        stacklevel (int, optional): The stacklevel to pass to the warning function. Defaults to 1.
     """
     if suite3d_developer_mode:
-        warn(message, stacklevel=stacklevel)
+        warn(message, stacklevel=2)
 
 def deprecated(reason=None):
     """
@@ -56,7 +55,7 @@ def deprecated(reason=None):
             message += f" {reason}"
         @wraps(func)
         def wrapper(*args, **kwargs):
-            warn(message, category=DeprecationWarning, stacklevel=2)
+            warn(message, category=DeprecationWarning, stacklevel=3)
             return func(*args, **kwargs)
         return wrapper
     return decorator
@@ -79,7 +78,7 @@ def deprecated_inputs(*explanation):
         @wraps(func)
         def wrapper(*args, **kwargs):
             if suite3d_developer_mode:
-                warn(message, category=DeprecationWarning, stacklevel=2)
+                warn(message, category=DeprecationWarning, stacklevel=3)
             return func(*args, **kwargs)
         return wrapper
     return decorator
