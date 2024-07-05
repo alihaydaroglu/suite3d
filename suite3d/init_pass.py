@@ -4,7 +4,9 @@ import numpy as n
 from . import utils
 from . import lbmio
 from . import reference_image as ref
-from .utils import default_log
+from .utils import default_log, todo, deprecated
+
+from .io import s3dio
 
 
 def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method='even', seed=2358):
@@ -25,17 +27,19 @@ def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method='even'
 
     return sample_tifs
 
+@deprecated("Using s3dio.load_data instead")
 def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plane_ids_to_channel_ids=True, fix_fastZ=False, log_cb=default_log, lbm=True, num_colors=None, functional_color_channel=None):
     full_mov = lbmio.load_and_stitch_tifs(init_tifs, planes = planes, convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids,
                                           n_ch = n_ch_tif, filt=filter_params, concat=False, fix_fastZ=fix_fastZ, log_cb=log_cb,
                                           lbm=lbm, num_colors=num_colors, functional_color_channel=functional_color_channel)
     full_mov = n.concatenate(full_mov, axis=1)
-
     return full_mov
 
 def run_init_pass(job):
     tifs = job.tifs
     params = job.params
+
+    jobio = s3dio(job)
 
     summary_path = os.path.join(job.dirs['summary'], 'summary.npy')
     job.log("Saving summary to %s" % summary_path,0)
@@ -47,21 +51,11 @@ def run_init_pass(job):
                                        params['init_file_sample_method'])
     n_ch_tif = job.params.get('n_ch_tif', 30)
     job.log("Loading init tifs with %d channels" % n_ch_tif)
-    init_mov = load_init_tifs(
-        init_tifs, 
-        params['planes'], 
-        params['notch_filt'], 
-        n_ch_tif = n_ch_tif, 
-        fix_fastZ=params.get('fix_fastZ', False),
-        convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True),
-        log_cb = job.log,
-        lbm=params.get('lbm', True), 
-        num_colors=params.get('num_colors', None), 
-        functional_color_channel=params.get('functional_color_channel', None),
-    )
-    job.log("Loaded init tifs")
-
-
+    todo("Check work. This is a big change. Before, all the parameters were passed directly with a params.get('name', default) call."+
+         "Now, they are inherited from job.params (because job is an attribute of the jobio object.)")
+    
+    init_mov = jobio.load_data(init_tifs)
+    
     nz, nt, ny, nx = init_mov.shape
     if params['init_n_frames'] is not None:
         if nt < params['init_n_frames']:
@@ -110,7 +104,7 @@ def run_init_pass(job):
         cross_coeff = None
 
     if job.params.get('fuse_strips',True):
-        __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True, n_ch=n_ch_tif, fix_fastZ=job.params.get('fix_fastZ',False))
+        xs = jobio.load_roi_start_pix()[1]
         if job.params.get('fuse_shift_override', None) is not None:
             fuse_shift = int(job.params['fuse_shift_override'])
             fuse_shifts = None
