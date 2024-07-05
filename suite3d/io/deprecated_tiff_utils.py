@@ -1,4 +1,3 @@
-import mrcfile
 import numpy as n
 import os
 import psutil
@@ -187,14 +186,6 @@ def save_plane_worker(filepath, mov):
     if debug:
         print("Saved in %.2f" % (toc - tic))
     return toc - tic
-
-@deprecated("Only used in old demos")
-def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
-    os.makedirs(dir, exist_ok=True)
-    fpath = os.path.join(dir, fname)
-    with mrcfile.new(fpath, overwrite=True) as mrc:
-        mrc.set_data(data.astype(dtype))
-        mrc.voxel_size = voxel_size
 
 
 @deprecated("Only called in animate_gif, which is also deprecated")

@@ -2,9 +2,10 @@ import numpy as n
 import os
 import re
 import tifffile
-import json
 from matplotlib import pyplot as plt
-from ..utils import todo
+import mrcfile
+from .lbmio import get_meso_rois
+from ..utils import todo, deprecated
 
 def get_si_params(tif_path):
     """
@@ -121,46 +122,6 @@ def get_tif_paths(dir_path, regex_filter=None, sort=True):
     if sort: tif_paths = sorted(tif_paths) #list(n.sort(tif_paths))
     return (tif_paths)
 
-def get_meso_rois(tif_path, max_roi_width_pix=145, find_common_z=True):
-    todo("Refactor get_meso_rois to combine with the one in lbmio!")
-    tf = tifffile.TiffFile(tif_path)
-    artists_json = tf.pages[0].tags["Artist"].value
-
-    si_rois = json.loads(artists_json)['RoiGroups']['imagingRoiGroup']['rois']
-
-    rois = []
-    warned = False
-
-    all_zs = [roi['zs'] for roi in si_rois]
-    # print(all_zs)
-    if find_common_z and type(all_zs[0]) is not int:
-        common_z = list(set(all_zs[0]).intersection(*map(set,all_zs[1:])))[0]
-    else:
-        common_z = 0
-
-    for roi in si_rois:
-        if type(roi['scanfields']) != list:
-            scanfield = roi['scanfields']
-        else: 
-            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==common_z)[0][0]]
-
-    #     print(scanfield)
-        roi_dict = {}
-        roi_dict['uid'] = scanfield['roiUuid']
-        roi_dict['center'] = n.array(scanfield['centerXY'])
-        roi_dict['sizeXY'] = n.array(scanfield['sizeXY'])
-        roi_dict['pixXY'] = n.array(scanfield['pixelResolutionXY'])
-        if roi_dict['pixXY'][0] > max_roi_width_pix and not warned:
-            print("SI ROI pix count in x is %d, which is impossible, setting it to %d" % (roi_dict['pixXY'][0],max_roi_width_pix))
-            warned=True
-            roi_dict['pixXY'][0] = max_roi_width_pix
-    #         print(scanfield)
-        rois.append(roi_dict)
-    #     print(len(roi['scanfields']))
-
-    roi_pixs = n.array([r['pixXY'] for r in rois])
-    return rois
-
 def get_tif_tag(tif_path, tag_name=None, number=True):
     tf = tifffile.TiffFile(tif_path)
     tags = tf.pages[0].tags['Software'].value.split('\n')
@@ -196,6 +157,12 @@ def get_fastZ(tif_path):
             return float(line.split(' ')[-1])
     return None
 
-
+@deprecated("Only used in old demos")
+def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
+    os.makedirs(dir, exist_ok=True)
+    fpath = os.path.join(dir, fname)
+    with mrcfile.new(fpath, overwrite=True) as mrc:
+        mrc.set_data(data.astype(dtype))
+        mrc.voxel_size = voxel_size
 
 
