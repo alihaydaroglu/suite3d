@@ -41,7 +41,7 @@ class JobInterface(param.Parameterized):
         self.bind_load_widgets()
         
     def bind_load_widgets(self):
-        pn.bind(self.update_load_job_selector, self=self, dir_string=self.jobdir_selector, watch=True)
+        pn.bind(self.update_load_job_selector, dir_string=self.jobdir_selector, watch=True)
         self.update_load_job_selector(self.jobdir_selector.value)
 
         self.load_job_button.on_click(self.load_job)

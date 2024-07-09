@@ -42,9 +42,18 @@ ui = pn.Tabs(job_interface.job_widget, init_panel.layout, reg_panel.layout, corr
 
 def job_load_callback(value):
     if value:
-        init_panel.load_job(job_interface)
-        reg_panel.load_job(job_interface)
-        corrmap_panel.load_job(job_interface)
+        try:
+            init_panel.load_job(job_interface)
+        except:
+            print("Could not load init panel")
+        try:
+            reg_panel.load_job(job_interface)
+        except:
+            print("Could not load registration panel")
+        try:
+            corrmap_panel.load_job(job_interface)
+        except:
+            print("Could not load corrmap panel")
 
 pn.bind(job_load_callback, job_interface.param.job_loaded, watch=True)
 
