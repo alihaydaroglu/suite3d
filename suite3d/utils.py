@@ -19,6 +19,9 @@ from skimage.measure import moments
 from suite2p.registration.nonrigid import make_blocks
 from datetime import datetime
 import pickle
+from skimage.metrics import normalized_mutual_information
+import time
+from . import tiff_utils as tfu
 
 try: 
     from git import Repo
@@ -729,3 +732,153 @@ def make_batch_paths(parent_dir, n_batches=1, prefix='batch', suffix='', dirs=Tr
         batch_dirs.append(batch_dir)
 
     return batch_dirs
+
+#TODO try numba to speed it up? (will have to do seperate cpu/gpu)
+def crosstalk_subtract(mov, crosstalk_coeff, cavity_size):
+    """
+    Subtracts the crosstalk from cavity A in cavity B planes
+
+    Parameters
+    ----------
+    mov : ndarray
+        The inital movie
+    crosstalk_coeff : float
+        The percentage of crosstalk
+    caivty_size : int
+        The size of cavity A
+
+    Returns
+    -------
+    ndarray
+        The crosstalk subtracted movie
+    """
+    nz, __, __, __ = mov.shape
+    if nz <= cavity_size: 
+        return mov
+    for i in range(nz - cavity_size):
+        mov[i + cavity_size] = mov[i + cavity_size] -  crosstalk_coeff * mov[i]
+    return mov
+
+def estimate_crosstalk(im3d, cavity_size, step_dist = 0.005, max_test_ct = 0.5, use_mutual_information = False):
+    """
+    This function estimates the crosstalk between two cavities by iterativley testing different
+    values of the crosstalk and looking at plane2 - ct*plane1 and by either:
+    1. Finding the point of inflection of the gradient of the correlation of plane 1 and (plane2 - ct*plane1)
+            this can be thought of as when it goes from subtracting crosstalk to adding -ve crosstalk
+    2. finding the minimum of mututal information of plane 1 and (plane2 - ct*plane1), this is a overestimate
+
+    Parameters
+    ----------
+    im3d : ndarray (nz, ny, nx)
+        The mean image of the raw data
+    cavity_size : int
+        The size of the cavity 
+    step_dist : float, optional
+        The step size of tested crosstalk coefficent values, by default 0.005
+    max_test_ct : float, optional
+        The maximum test corsstalk coefficent value, by default 0.5
+    use_mutual_information : bool, optional
+        If True will use the mutual information method (not reccomended), by default False
+
+    Returns
+    -------
+    ndarray, float
+        The array of estiamted crosstalk coefficents, the median crosstalk coefficent
+    """
+    time_init = time.time()
+
+    nz = im3d.shape[0] # if you are not ussing all pleans from the second caivty
+    n_second_cavity_planes = nz - cavity_size
+
+    steps = n.arange(0, max_test_ct, step_dist)
+    ct_metric_tmp = n.zeros_like(steps)
+    d2y = n.zeros((n_second_cavity_planes, steps.shape[0]-2))
+    ct = n.zeros(n_second_cavity_planes)
+
+    for z in range(n_second_cavity_planes):
+        for i, step in enumerate(steps):
+            base_plane = im3d[z]
+            test_plane = im3d[z+cavity_size]
+
+            test_plane_ct_sub = test_plane - step * base_plane
+
+            if use_mutual_information:
+                if z == 0 and i ==0:
+                    print('Using mutual information, not recommended')
+                ct_metric_tmp[i] = normalized_mutual_information(base_plane, test_plane_ct_sub, bins = 100)
+            else:
+                ct_metric_tmp[i] = n.corrcoef(base_plane.flatten(), test_plane_ct_sub.flatten())[0,1]
+
+        if use_mutual_information:
+            ct[z] = steps[n.argmin(ct_metric_tmp)]
+        else:
+            #The point of inflection of the gradient, is seemingly a good estiamte for the crosstalk
+            d2y[z,:] =  ct_metric_tmp[:-2] - 2*ct_metric_tmp[1:-1] + ct_metric_tmp[2:]
+            min_idx = n.argmin(d2y[z,:])
+            ct[z] = steps[min_idx + 2] # + 2 is to account for the change in shape doing second derivative
+
+    ct_estimate = n.median(ct)
+    print(f'Estiamted crosstalk in {time.time() - time_init}s')
+    return ct, ct_estimate
+
+def plot_ct_hist(crosstalk_planes, show_plots = True, save_plots = None):
+    """
+    Plots the crsstalk coefficent estiamtes as a histogram
+
+    Parameters
+    ----------
+    crosstalk_planes : ndarray
+        An array of the crosstalk estiamte for each plane
+    show_plots : bool, optional
+        If True will show the plot, by default True
+    save_plots : str, optional
+        The path to the save directory ifbeing saved, by default None
+    """
+
+    if save_plots is not None:
+        plot_dir = os.path.join(save_plots, 'crosstalk_plots')
+        os.makedirs(plot_dir, exist_ok=True)
+
+    plt.hist(crosstalk_planes, log=False, bins = n.arange(0,0.5, 0.025))
+    plt.axvline(n.median(crosstalk_planes))
+    plt.xlabel("Coeff value")
+    plt.title("Histogram of est. coefficients per plane")
+    if save_plots is not None:
+        plt.savefig(os.path.join(plot_dir, 'gamma_fit.png'), dpi=200)
+    if show_plots:
+        plt.show()
+    plt.close()
+
+def ct_gifs(im3d, cavity_size, crosstalk_planes, save_plots = None):
+    """
+    Will aniamte a 3 frame gif, showing the Cavity A palne, the Cavity B plane
+    and the Cavity B - the estiamted crosstalk
+
+    Parameters
+    ----------
+    im3d : ndarray (nz, ny, nx)
+        The mean image of the raw data
+    cavity_size : int
+        The size of the cavity 
+    crosstalk_planes : ndarray
+        An array of the crosstalk estiamte for each plane
+    save_plots : str, optional
+        The path to the save directory ifbeing saved, by default None
+    """
+    if save_plots is not None:
+        plot_dir = os.path.join(save_plots, 'crosstalk_plots')
+        os.makedirs(plot_dir, exist_ok=True)
+        plot_gif = os.path.join(plot_dir, 'crosstalk.gif')
+
+    ct_est = n.median(crosstalk_planes)
+    #a median plane
+    #Correct when the number of planes is even, and no planes have the median value!!
+    plane_idx =  n.argmin(n.abs(crosstalk_planes - ct_est))
+
+    #group the origina cavity A plane, cavity B plane and crosstalk sub cavity B plane
+    animate_planes = [im3d[plane_idx], im3d[plane_idx - cavity_size], 
+                      im3d[plane_idx - cavity_size] - ct_est * im3d[plane_idx]]
+    animate_planes = n.asarray(animate_planes)
+
+    titles = ['Cavity A', 'Cavity B', 'Cavity B crosstalk sub']
+    tfu.animate_gif(animate_planes, plot_gif, titles = titles)

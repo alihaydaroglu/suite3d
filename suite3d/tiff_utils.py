@@ -15,6 +15,7 @@ import json
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
 
+#TODO clean up colorbar option (cbar is the correct one?)
 def show_tif(im, flip=1, cmap='Greys_r', colorbar=False, other_args = {},figsize=(8,6), dpi=150, alpha=None, return_fig=True,
              ticks=False, ax = None, px_py=None, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
              norm=None, cbar=False, cbar_loc='left', cbar_fontcolor = 'k', cbar_ori='vertical', cbar_title='', interpolation='nearest', ax_off=False, cax_kwargs={'frameon':False}):
@@ -329,7 +330,7 @@ def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
 
 def animate_frame(Frame, ax, FrameNo, flip=1, cmap='Greys_r', colorbar=False, alpha=None, other_args = {},
              ticks=False, px_py=None, vminmax_percentile = (0.5,99.5), vminmax = None, facecolor='white', xticks=None, yticks = None,
-             norm=None, interpolation='nearest', ax_off=False):
+             norm=None, interpolation='nearest', ax_off=False, frame_title = None):
     
     """
     Used to animate a single frame of animate_gif
@@ -358,7 +359,11 @@ def animate_frame(Frame, ax, FrameNo, flip=1, cmap='Greys_r', colorbar=False, al
         new_args['vmin'] = None; new_args['vmax'] = None
 
     #Add Title as text as artist animation is unique
-    title = ax.text(0.5, 1.01, f'Frame {FrameNo}', horizontalalignment='center', verticalalignment='bottom', transform=ax.transAxes)
+    if frame_title is None: 
+        #add frame number
+        title = ax.text(0.5, 1.01, f'Frame {FrameNo}', horizontalalignment='center', verticalalignment='bottom', transform=ax.transAxes)
+    else:
+        title = ax.text(0.5, 1.01, frame_title, horizontalalignment='center', verticalalignment='bottom', transform=ax.transAxes)
 
     im.extend([ax.imshow(flip*Frame,cmap=cmap, **new_args), title])
 
@@ -377,7 +382,7 @@ def animate_frame(Frame, ax, FrameNo, flip=1, cmap='Greys_r', colorbar=False, al
 
 
 def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args = {}, figsize=(8,6), dpi=150, exact_pixels=False, vminmax_percentile = (0.5,99.5), vminmax = None,
-                  **kwargs):
+                  titles = None, **kwargs):
     """
     This function requires a 3D image e.g (nz, ny, nx) and will return an animated gif.
 
@@ -403,6 +408,8 @@ def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args =
         Threshold to clip movie, by default (0.5,99.5)
     vminmax : tuple, optional
         Values to clip the movie, by default None
+    titles : tuple, optional
+        A tuple of titles for each frames, by default None
     """
 
     Mov = Im3D.copy()
@@ -427,8 +434,12 @@ def animate_gif(Im3D, SaveDir, interval = 500, repeat_delay = 5000, other_args =
 
     ims = []
     for i in range(nFrames):
-        im = animate_frame(Mov[i], ax, i, vminmax = vminmaxFrame,  **kwargs)
-        ims.append(im)
+        if titles is None:
+            im = animate_frame(Mov[i], ax, i, vminmax = vminmaxFrame,  **kwargs)
+            ims.append(im)
+        else:
+            im = animate_frame(Mov[i], ax, i, vminmax = vminmaxFrame, frame_title = titles[i], **kwargs)
+            ims.append(im)
 
     ani = animation.ArtistAnimation(fig, ims, interval = interval, repeat_delay = repeat_delay)   
 
@@ -446,6 +457,8 @@ def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, nco
         figsize, best if it is a multiple of (ncols, nrows), by default (8,6)
     title : list, optional
         A list of title for each image, by default None
+    suptitle: string, optional
+        The title of the whole figure, by default None
     ncols : int, optional
         The number of collumns in the image, by default 5
     same_scale : bool, optional
@@ -459,7 +472,8 @@ def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, nco
 
     figsize = figsize #ideally multiple of rows and colloumns
 
-    fig, axs =  plt.subplots(nrows, ncols, figsize = (figsize), layout = 'constrained')
+    #squeeze = False allows (1,X) axs objects
+    fig, axs =  plt.subplots(nrows, ncols, figsize = (figsize), layout = 'constrained', squeeze = False)
 
     #make all the images have the same color scale
     if same_scale:

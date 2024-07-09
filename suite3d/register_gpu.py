@@ -4,6 +4,7 @@ from cupyx.scipy import fft as cufft
 from cupyx.scipy import ndimage as cuimage
 from functools import lru_cache
 from scipy import ndimage
+from . import utils
 import time
 try:
     import mkl_fft
@@ -116,7 +117,7 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
                     rmins, rmaxs, crosstalk_coeff = None, shift=True, 
                     min_pix_vals = None, fuse_and_pad=False, ypad=None, 
                     xpad=None, fuse_shift=None, new_xs=None, old_xs=None,
-                    log_cb=default_log):
+                    cavity_size = 15, log_cb=default_log):
     
     nz, nt, ny, nx = mov_cpu.shape
     start_t = time.time()
@@ -142,7 +143,7 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
 
     if crosstalk_coeff is not None: 
         log_cb("Subtracting crosstalk", 4)
-        mov_gpu = crosstalk_subtract(mov_gpu, crosstalk_coeff)
+        mov_gpu = utils.crosstalk_subtract(mov_gpu, crosstalk_coeff, cavity_size)
     
     if fuse_and_pad:
         log_cb("Fusing and padding movie",4)
@@ -199,7 +200,7 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     return ymaxs, xmaxs, cmaxs
 
 def rigid_2d_reg_cpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
-                    rmins, rmaxs, crosstalk_coeff = None, shift=True):
+                    rmins, rmaxs, crosstalk_coeff = None, shift=True, cavity_size = 15):
     nz, nt, ny, nx = mov_cpu.shape
     mov = n.asarray(mov_cpu, dtype=n.complex64)
     ymaxs = n.zeros((nz, nt), dtype=n.int16)
@@ -212,7 +213,7 @@ def rigid_2d_reg_cpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         mov_shifted = n.zeros((nt,nz,ny,nx), dtype=n.float32)
         mov_shifted[:] = mov.real.swapaxes(0,1)
     if crosstalk_coeff is not None: 
-        mov = crosstalk_subtract(mov, crosstalk_coeff)
+        mov = utils.crosstalk_subtract(mov, crosstalk_coeff, cavity_size)
     for zidx in range(nz):
         mov[zidx] = clip_and_mask_mov(mov[zidx], rmins[zidx], rmaxs[zidx],
                           mult_mask[zidx], add_mask[zidx], cp=n)
@@ -335,16 +336,6 @@ def convolve_2d_cpu(mov, ref_f):
     mov /= n.abs(mov) + n.complex64(1e-5)
     mov *= ref_f
     mov[:] = mkl_fft.ifft2(mov, axes=(1,2), overwrite_x=True)
-    return mov
-
-#TODO make dependant on parameter not 15
-#TODO try numba to speed it up? (will have to do seperate cpu/gpu)
-def crosstalk_subtract(mov, crosstalk_coeff):
-    nz, nt, ny, nx = mov.shape
-    if nz <= 15: 
-        return mov
-    for i in range(nz - 15):
-        mov[i + 15] -= crosstalk_coeff * mov[i]
     return mov
 
 #TODO xpad/ypad should be integer ?

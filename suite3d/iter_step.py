@@ -405,33 +405,33 @@ def init_batch_files(job_iter_dir=None, job_reg_data_dir=None, n_batches=1, make
 
         
 
-def subtract_crosstalk(shmem_params, coeff = None, planes = None, n_procs=15, log_cb = default_log):
+# def subtract_crosstalk(shmem_params, n_cavity, coeff = None, planes = None, n_procs=15, log_cb = default_log):
 
-    assert coeff is not None
+#     assert coeff is not None
 
-    if planes is None:
-        pairs = [(i, i+15) for i in range(15)]
-    else:
-        pairs = []
-        for plane_idx in planes:
-            if plane_idx > 15:
-                if plane_idx - 15 in planes:
-                    pairs.append((plane_idx-15, plane_idx))
-                    log_cb("Subtracting plane %d from %d" % (pairs[-1][0], pairs[-1][1]), 2)
-                else:
-                    log_cb("Plane %d does not have its pair %d" % (plane_idx, plane_idx-15),0)
-    # print(pairs)
-    p = Pool(n_procs)
-    p.starmap(subtract_crosstalk_worker, [(shmem_params, coeff, pair[0], pair[1]) \
-                                                    for pair in pairs])
+#     if planes is None:
+#         pairs = [(i, i+15) for i in range(15)]
+#     else:
+#         pairs = []
+#         for plane_idx in planes:
+#             if plane_idx > n_cavity:
+#                 if plane_idx - n_cavity in planes:
+#                     pairs.append((plane_idx-n_cavity, plane_idx))
+#                     log_cb("Subtracting plane %d from %d" % (pairs[-1][0], pairs[-1][1]), 2)
+#                 else:
+#                     log_cb("Plane %d does not have its pair %d" % (plane_idx, plane_idx-15),0)
+#     # print(pairs)
+#     p = Pool(n_procs)
+#     p.starmap(subtract_crosstalk_worker, [(shmem_params, coeff, pair[0], pair[1]) \
+#                                                     for pair in pairs])
 
-    return coeff
+#     return coeff
 
-def subtract_crosstalk_worker(shmem_params, coeff, deep_plane_idx, shallow_plane_idx):
-    shmem, mov3d = utils.load_shmem(shmem_params)
-    # print(mov3d.shape, shallow_plane_idx, deep_plane_idx)
-    mov3d[shallow_plane_idx] = mov3d[shallow_plane_idx] - coeff * mov3d[deep_plane_idx]
-    utils.close_shmem(shmem_params)
+# def subtract_crosstalk_worker(shmem_params, coeff, deep_plane_idx, shallow_plane_idx):
+#     shmem, mov3d = utils.load_shmem(shmem_params)
+#     # print(mov3d.shape, shallow_plane_idx, deep_plane_idx)
+#     mov3d[shallow_plane_idx] = mov3d[shallow_plane_idx] - coeff * mov3d[deep_plane_idx]
+#     utils.close_shmem(shmem_params)
     
     
 
@@ -494,6 +494,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
     fuse_strips        = params.get('fuse_strips', True)
     fix_fastZ          = params.get('fix_fastZ', False)
     reg_norm_frames    = params.get('reg_norm_frames', True)
+    cavity_size        = params.get('cavity_size', 15)
 
     # catch if rmins/rmaxs where not calculate in init_pass
     if rmins is None and rmaxs is None:
@@ -581,7 +582,7 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
                                     ref_2ds, max_reg_xy=max_rigid_shift,  min_pix_vals=min_pix_vals,
                                     rmins=rmins, rmaxs=rmaxs, crosstalk_coeff=crosstalk_coeff, shift=True,
                                     xpad=xpad, ypad=ypad, fuse_shift=fuse_shift, new_xs=new_xs, old_xs=old_xs,
-                                    fuse_and_pad = True, log_cb = log_cb)
+                                    fuse_and_pad = True, cavity_size = cavity_size, log_cb = log_cb)
             
             mov_shifted_cpu = mov_shifted_gpu.get()
             log_cb("Completed rigid registration in %.2f sec" % (time.time() - tic_rigid), 3)
@@ -707,6 +708,7 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
     split_tif_size = params.get('split_tif_size', None)
     n_ch_tif = params.get('n_ch_tif', 30)
     convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True)
+    cavity_size = params.get('cavity_size', 15)
 
     batches = init_batches(tifs, tif_batch_size, n_tifs_to_analyze)
     n_batches = len(batches)
@@ -752,8 +754,10 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
                 # print(min_pix_vals.shape)
                 log_cb("Subtracting min vals to enfore positivity", 1)
                 loaded_movs[0] -= min_pix_vals.reshape(len(min_pix_vals), 1, 1, 1)
-                # print(loaded_movs[0].shape)
+                # print(loaded_movs[0].shape
             mov_pad = reg_gpu.fuse_and_pad(loaded_movs[0], fuse_shift, ypad, xpad, new_xs, old_xs)
+            if do_subtract_crosstalk:
+                mov_pad = utils.crosstalk_subtract(mov_pad, crosstalk_coeff, cavity_size)
             shmem_mov,shmem_mov_params, mov = utils.create_shmem_from_arr(mov_pad, copy=True)
             log_cb("After Sharr creation:", level=3,log_mem_usage=True )
             if batch_idx + 1 < n_batches:
@@ -761,8 +765,6 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
                 io_thread = threading.Thread(target=io_thread_loader, args=(batches[batch_idx+1], batch_idx+1))
                 io_thread.start()
                 log_cb("After IO thread launch:", level=3,log_mem_usage=True )
-            if do_subtract_crosstalk:
-                __ = subtract_crosstalk(shmem_mov_params, crosstalk_coeff, planes = planes, log_cb = log_cb)
             log_cb("Registering Batch %d" % batch_idx, 1)
             
             log_cb("Before Reg:", level=3,log_mem_usage=True )
@@ -956,6 +958,7 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
     fuse_strips        = params.get('fuse_strips', True)
     fix_fastZ          = params.get('fix_fastZ', False)
     reg_norm_frames    = params.get('reg_norm_frames', True)
+    cavity_size        = params.get('cavity_size', 15)
 
     # catch if rmins/rmaxs where not calculate in init_pass
     if rmins is None and rmaxs is None:
@@ -1032,7 +1035,7 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
         phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts, mov_cpu = \
             reg_3d.rigid_3d_ref_gpu(mov_cpu, mask_mul, mask_offset, ref_2ds, pc_size, batch_size = gpu_reg_batchsize, #TODO make xpad/ypad automatically integers
                                     rmins = rmins, rmaxs = rmaxs, crosstalk_coeff = crosstalk_coeff,  shift_reg = False, xpad = int(xpad), ypad = int(ypad),
-                                    fuse_shift = fuse_shift, new_xs = new_xs, old_xs = old_xs, plane_shifts = plane_shifts, process_mov = True)
+                                    fuse_shift = fuse_shift, new_xs = new_xs, old_xs = old_xs, plane_shifts = plane_shifts, process_mov = True, cavity_size = cavity_size)
 
         log_cb(f"Completed rigid reg on batch in :{time.time() - time_pre_reg}s")
 
