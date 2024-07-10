@@ -39,21 +39,47 @@ def shift_mov_lbm_fast(mov, plane_shifts, fill_value = 0):
 
     for z in range(nz):
         shift = plane_shifts[z,:]
+        # print(z, shift)
         if (shift[0] == 0) & (shift[1] == 0):
+            # print(1)
             shifted_mov[z,:,:,:] = mov[z,:,:,:]    
-        elif (shift[0] > 0) & (shift[1] >0):
-            shifted_mov[z, :, :,:shift[1]] = fill_value
-            shifted_mov[z, :, :shift[0],:] = fill_value
-            shifted_mov[z, :, shift[0]:, shift[1]:] = mov[z, :, :-shift[0], :-shift[1]]
-        elif (shift[0] > 0) & (shift[1] < 0):
+        elif (shift[0] >= 0) & (shift[1] >= 0):
+            # print(2)
+            if shift[1] > 0:
+                # print('a')
+                shifted_mov[z, :, :,:shift[1]] = fill_value
+            if shift[0] > 0:
+                # print('b')
+                shifted_mov[z, :, :shift[0],:] = fill_value
+
+            if shift[0] == 0:
+                # print('c')
+                shifted_mov[z, :, :, shift[1]:] = mov[z, :, :, :-shift[1]]
+            elif shift[1] == 0:
+                shifted_mov[z, :, shift[0]:, :] = mov[z, :, :-shift[0],:]
+            else:
+                # print('e')
+                shifted_mov[z, :, shift[0]:, shift[1]:] = mov[z, :, :-shift[0], :-shift[1]]
+        elif (shift[0] >= 0) & (shift[1] < 0):
+            # print(3)
             shifted_mov[z, :, :, shift[1]:] = fill_value
-            shifted_mov[z, :, :shift[0], :] = fill_value
-            shifted_mov[z, :, shift[0]:, :shift[1]] = mov[z, :, :-shift[0], -shift[1]:]
-        elif (shift[0] < 0) & (shift[1] > 0):
-            shifted_mov[z, :, :, :shift[1]] = fill_value
+            if shift[0] > 0:
+                shifted_mov[z, :, :shift[0], :] = fill_value
+                shifted_mov[z, :, shift[0]:, :shift[1]] = mov[z, :, :-shift[0], -shift[1]:]
+            else:
+                shifted_mov[z, :, shift[0]:, :shift[1]] = mov[z, :, : , -shift[1]:]
+
+        elif (shift[0] < 0) & (shift[1] >= 0):
+            # print(4)
             shifted_mov[z, :, shift[0]:, :] = fill_value
-            shifted_mov[z, :, :shift[0], shift[1]:] = mov[z, :, -shift[0]:, :-shift[1]]
+            if shift[1] > 0:
+                shifted_mov[z, :, :, :shift[1]] = fill_value
+                shifted_mov[z, :, :shift[0], shift[1]:] = mov[z, :, -shift[0]:, :-shift[1]]
+            else: 
+                shifted_mov[z, :, :shift[0], shift[1]:] = mov[z, :, -shift[0]:, : ]
+
         else:
+            # print(5)
             shifted_mov[z, :, :, shift[1]:] = fill_value
             shifted_mov[z, :, shift[0]:, :] = fill_value
             shifted_mov[z, :, :shift[0], :shift[1]] = mov[z, :, -shift[0]:, -shift[1]:]
