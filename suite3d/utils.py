@@ -782,8 +782,9 @@ def estimate_crosstalk(im3d, cavity_size, step_dist = 0.005, max_test_ct = 0.5, 
 
     Returns
     -------
-    ndarray, float
-        The array of estiamted crosstalk coefficents, the median crosstalk coefficent
+    ndarray, float, dict
+        The array of estiamted crosstalk coefficents, the median crosstalk coefficent,
+        a dictionary containg the raw ct data 
     """
     time_init = time.time()
 
@@ -791,7 +792,8 @@ def estimate_crosstalk(im3d, cavity_size, step_dist = 0.005, max_test_ct = 0.5, 
     n_second_cavity_planes = nz - cavity_size
 
     steps = n.arange(0, max_test_ct, step_dist)
-    ct_metric_tmp = n.zeros_like(steps)
+    ct_metric = n.zeros((n_second_cavity_planes, steps.shape[0]))
+    ct_metric_grad = n.zeros((n_second_cavity_planes, steps.shape[0]-1))
     d2y = n.zeros((n_second_cavity_planes, steps.shape[0]-2))
     ct = n.zeros(n_second_cavity_planes)
 
@@ -805,21 +807,25 @@ def estimate_crosstalk(im3d, cavity_size, step_dist = 0.005, max_test_ct = 0.5, 
             if use_mutual_information:
                 if z == 0 and i ==0:
                     print('Using mutual information, not recommended')
-                ct_metric_tmp[i] = normalized_mutual_information(base_plane, test_plane_ct_sub, bins = 100)
+                ct_metric[z,i] = normalized_mutual_information(base_plane, test_plane_ct_sub, bins = 100)
             else:
-                ct_metric_tmp[i] = n.corrcoef(base_plane.flatten(), test_plane_ct_sub.flatten())[0,1]
+                ct_metric[z,i] = n.corrcoef(base_plane.flatten(), test_plane_ct_sub.flatten())[0,1]
 
         if use_mutual_information:
-            ct[z] = steps[n.argmin(ct_metric_tmp)]
+            ct_info = {'ct_metric' : ct_metric, 'steps' : steps}
+            ct[z] = steps[n.argmin(ct_metric[z,:])]
         else:
             #The point of inflection of the gradient, is seemingly a good estiamte for the crosstalk
-            d2y[z,:] =  ct_metric_tmp[:-2] - 2*ct_metric_tmp[1:-1] + ct_metric_tmp[2:]
+            ct_metric_grad[z,:] = ct_metric[z, 1:] - ct_metric[z, :-1]
+            d2y[z,:] =  ct_metric[z, :-2] - 2*ct_metric[z, 1:-1] + ct_metric[z, 2:]
             min_idx = n.argmin(d2y[z,:])
+
+            ct_info = {'ct_metric' : ct_metric, 'ct_metric_gradient' : ct_metric_grad, 'ct_metric_d2' : d2y, 'steps' : steps}
             ct[z] = steps[min_idx + 2] # + 2 is to account for the change in shape doing second derivative
 
     ct_estimate = n.median(ct)
     print(f'Estiamted crosstalk in {time.time() - time_init}s')
-    return ct, ct_estimate
+    return ct, ct_estimate, ct_info
 
 def plot_ct_hist(crosstalk_planes, show_plots = True, save_plots = None):
     """

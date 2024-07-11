@@ -142,7 +142,7 @@ def run_init_pass(job):
             #                                         show_plots=True, save_plots=job.dirs['summary'],
             #                                         verbose=(job.verbosity == 2))
 
-            crosstalk_planes, cross_coeff = utils.estimate_crosstalk(im3d, job.params['cavity_size'])
+            crosstalk_planes, cross_coeff , ct_info = utils.estimate_crosstalk(im3d, job.params['cavity_size'])
             utils.plot_ct_hist(crosstalk_planes, show_plots = True, save_plots = job.dirs['summary'])
             utils.ct_gifs(im3d, job.params['cavity_size'], crosstalk_planes, save_plots = job.dirs['summary'])
 
@@ -215,6 +215,7 @@ def run_init_pass(job):
             'img' : im3d, # crosstalk-subtracted
             'crosstalk_coeff' : cross_coeff,
             'crosstalk_planes' : crosstalk_planes,
+            'crosstalk_info' : ct_info, #dictionary of ct data for each test crosstalk and plane
             'plane_shifts' : tvecs,
             'refs_and_masks' : all_refs_and_masks,
             'reference_params' : reference_params,
@@ -243,6 +244,7 @@ def run_init_pass(job):
             'img' : im3d, # crosstalk-subtracted
             'crosstalk_coeff' : cross_coeff,
             'crosstalk_planes' : crosstalk_planes,
+            'crosstalk_info' : ct_info, #dictionary of ct data for each test crosstalk and plane
             'plane_shifts' : tvecs[0],
             'plane_shifts_uncorrected' : tvecs[1],
             'refs_and_masks' : all_refs_and_masks,
