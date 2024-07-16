@@ -74,7 +74,8 @@ def run_init_pass(job):
         min_pix_vals = im3d.min(axis=(1,2), keepdims=False).astype(int)
         job.log("Enforcing positivity in mean image",2)
         init_mov -= min_pix_vals[:, n.newaxis, n.newaxis, n.newaxis]
-        
+        im3d -= min_pix_vals[:, n.newaxis, n.newaxis]
+
         # job.log("Min pix vals: %s" % str(min_pix_vals.flatten()), 3)
     else: min_pix_vals = None
     if params['subtract_crosstalk']:
@@ -82,11 +83,17 @@ def run_init_pass(job):
             cross_coeff = params['override_crosstalk']
             job.log("Subtracting crosstalk with forced coefficient %0.3f" % cross_coeff)
         else:
-            __, __, cross_coeff = utils.calculate_crosstalk_coeff(im3d,
-                                                    estimate_from_last_n_planes=params['crosstalk_n_planes'],
-                                                    sigma=params['crosstalk_sigma'], fit_above_percentile = params['crosstalk_percentile'],
-                                                    show_plots=True, save_plots=job.dirs['summary'],
-                                                    verbose=(job.verbosity == 2))
+            #TODO delete when happy with new crosstalk method
+            # __, __, cross_coeff = utils.calculate_crosstalk_coeff(im3d,
+            #                                         estimate_from_last_n_planes=params['crosstalk_n_planes'],
+            #                                         sigma=params['crosstalk_sigma'], fit_above_percentile = params['crosstalk_percentile'],
+            #                                         show_plots=True, save_plots=job.dirs['summary'],
+            #                                         verbose=(job.verbosity == 2))
+
+            crosstalk_planes, cross_coeff , ct_info = utils.estimate_crosstalk(im3d, job.params['cavity_size'])
+            utils.plot_ct_hist(crosstalk_planes, show_plots = True, save_plots = job.dirs['summary'])
+            utils.ct_gifs(im3d, job.params['cavity_size'], crosstalk_planes, save_plots = job.dirs['summary'])
+
             job.log("Subtracting with estimated coefficient %0.3f" % cross_coeff)
             if cross_coeff > 0.4 or cross_coeff < 0.01:
                 job.log("WARNING - seems like coefficient esimation failed!")
@@ -156,6 +163,8 @@ def run_init_pass(job):
             'raw_img' : im3d_raw, # right from the tiff file
             'img' : im3d, # crosstalk-subtracted
             'crosstalk_coeff' : cross_coeff,
+            'crosstalk_planes' : crosstalk_planes,
+            'crosstalk_info' : ct_info, #dictionary of ct data for each test crosstalk and plane
             'plane_shifts' : tvecs,
             'refs_and_masks' : all_refs_and_masks,
             'reference_params' : reference_params,
@@ -183,6 +192,8 @@ def run_init_pass(job):
             'raw_img' : im3d_raw, # right from the tiff file
             'img' : im3d, # crosstalk-subtracted
             'crosstalk_coeff' : cross_coeff,
+            'crosstalk_planes' : crosstalk_planes,
+            'crosstalk_info' : ct_info, #dictionary of ct data for each test crosstalk and plane
             'plane_shifts' : tvecs[0],
             'plane_shifts_uncorrected' : tvecs[1],
             'refs_and_masks' : all_refs_and_masks,

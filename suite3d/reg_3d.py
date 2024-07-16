@@ -35,21 +35,47 @@ def shift_mov_lbm_fast(mov, plane_shifts, fill_value = 0):
 
     for z in range(nz):
         shift = plane_shifts[z,:]
+        # print(z, shift)
         if (shift[0] == 0) & (shift[1] == 0):
+            # print(1)
             shifted_mov[z,:,:,:] = mov[z,:,:,:]    
-        elif (shift[0] > 0) & (shift[1] >0):
-            shifted_mov[z, :, :,:shift[1]] = fill_value
-            shifted_mov[z, :, :shift[0],:] = fill_value
-            shifted_mov[z, :, shift[0]:, shift[1]:] = mov[z, :, :-shift[0], :-shift[1]]
-        elif (shift[0] > 0) & (shift[1] < 0):
+        elif (shift[0] >= 0) & (shift[1] >= 0):
+            # print(2)
+            if shift[1] > 0:
+                # print('a')
+                shifted_mov[z, :, :,:shift[1]] = fill_value
+            if shift[0] > 0:
+                # print('b')
+                shifted_mov[z, :, :shift[0],:] = fill_value
+
+            if shift[0] == 0:
+                # print('c')
+                shifted_mov[z, :, :, shift[1]:] = mov[z, :, :, :-shift[1]]
+            elif shift[1] == 0:
+                shifted_mov[z, :, shift[0]:, :] = mov[z, :, :-shift[0],:]
+            else:
+                # print('e')
+                shifted_mov[z, :, shift[0]:, shift[1]:] = mov[z, :, :-shift[0], :-shift[1]]
+        elif (shift[0] >= 0) & (shift[1] < 0):
+            # print(3)
             shifted_mov[z, :, :, shift[1]:] = fill_value
-            shifted_mov[z, :, :shift[0], :] = fill_value
-            shifted_mov[z, :, shift[0]:, :shift[1]] = mov[z, :, :-shift[0], -shift[1]:]
-        elif (shift[0] < 0) & (shift[1] > 0):
-            shifted_mov[z, :, :, :shift[1]] = fill_value
+            if shift[0] > 0:
+                shifted_mov[z, :, :shift[0], :] = fill_value
+                shifted_mov[z, :, shift[0]:, :shift[1]] = mov[z, :, :-shift[0], -shift[1]:]
+            else:
+                shifted_mov[z, :, shift[0]:, :shift[1]] = mov[z, :, : , -shift[1]:]
+
+        elif (shift[0] < 0) & (shift[1] >= 0):
+            # print(4)
             shifted_mov[z, :, shift[0]:, :] = fill_value
-            shifted_mov[z, :, :shift[0], shift[1]:] = mov[z, :, -shift[0]:, :-shift[1]]
+            if shift[1] > 0:
+                shifted_mov[z, :, :, :shift[1]] = fill_value
+                shifted_mov[z, :, :shift[0], shift[1]:] = mov[z, :, -shift[0]:, :-shift[1]]
+            else: 
+                shifted_mov[z, :, :shift[0], shift[1]:] = mov[z, :, -shift[0]:, : ]
+
         else:
+            # print(5)
             shifted_mov[z, :, :, shift[1]:] = fill_value
             shifted_mov[z, :, shift[0]:, :] = fill_value
             shifted_mov[z, :, :shift[0], :shift[1]] = mov[z, :, -shift[0]:, -shift[1]:]
@@ -371,7 +397,7 @@ def reg_3d_cpu(mov_frame, fft_3d_ref_conj, workers = -2):
     phase_corr_frame = np.abs(scipy.fft.ifftn(fft_correaltion, workers = workers))
     return phase_corr_frame
 
-def rigid_3d_ref_cpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, rmins = None, rmaxs = None, crosstalk_coeff = None):
+def rigid_3d_ref_cpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, rmins = None, rmaxs = None, crosstalk_coeff = None, cavity_size = 15):
     """
     Runs the 3d rigid registration for a 4D movie
 
@@ -412,7 +438,7 @@ def rigid_3d_ref_cpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, rmins = None
     sub_pixel_shifts = np.zeros((nt, 3))
     
     if crosstalk_coeff is not None: 
-        mov_cpu = reg.crosstalk_subtract(mov_cpu, crosstalk_coeff)
+        mov_cpu = utils.crosstalk_subtract(mov_cpu, crosstalk_coeff, cavity_size)
     if np.logical_or(np.all(rmins != None), np.all(rmaxs != None)):
         mov_cpu = clip_mov_cpu(mov_cpu, rmins, rmaxs)
 
@@ -428,7 +454,7 @@ def rigid_3d_ref_cpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, rmins = None
 ## GPU registration function
 def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size = 20, rmins = None, rmaxs = None,
                       crosstalk_coeff = None, shift_reg = False, xpad = None, ypad = None, fuse_shift = None, new_xs = None,
-                      old_xs = None, plane_shifts = None, process_mov = False):
+                      old_xs = None, plane_shifts = None, process_mov = False, cavity_size = 15):
     """
     Runs rigid registration on the gpu.
 
@@ -482,7 +508,7 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
 
         if process_mov:
             mov_gpu = cp.asarray(mov_cpu[:, t1:t2,:,:])             
-            mov_gpu, mov_cpu_processed_tmp = process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs, crosstalk_coeff = crosstalk_coeff)
+            mov_gpu, mov_cpu_processed_tmp = process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs, crosstalk_coeff = crosstalk_coeff, cavity_size = cavity_size)
             #ov_cpu_processed needs to be fused & padded but NOT spatially subseted!
             if mov_cpu_processed is None:
                 # allocate CPU array for fused & padded movie ("processed")
@@ -491,7 +517,7 @@ def rigid_3d_ref_gpu(mov_cpu, mult_mask, add_mask, refs_f, pc_size, batch_size =
         else:
             mov_gpu = cp.asarray(mov_cpu[:, t1:t2,:,:])
             if crosstalk_coeff is not None: 
-                mov_gpu = reg.crosstalk_subtract(mov_gpu, crosstalk_coeff)
+                mov_gpu = utils.crosstalk_subtract(mov_gpu, crosstalk_coeff, cavity_size)
         mult_mask = cp.asarray(mult_mask)
         add_mask = cp.asarray(add_mask)
         
@@ -629,14 +655,14 @@ def apply_mask4D_gpu(data, mask_mul, mask_offset):
         data[:, t,:,:] = data[:,t,:,:] * mask_mul + mask_offset
     return data
 
-def process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs, crosstalk_coeff = None): 
+def process_mov_gpu(mov_gpu, plane_shifts, xpad, ypad, fuse_shift, new_xs, old_xs, crosstalk_coeff = None, cavity_size = 15): 
     #fuse and pad the movie
                                                         #TODO solve the xpad ypad integer vs array conflict
     mov_gpu = fuse_and_pad_gpu(mov_gpu, fuse_shift, np.array(ypad), np.array(xpad), new_xs, old_xs)
     mov_gpu = mov_gpu.real 
     #subtract crosstalk between cavities if given, BEFORE plane shifts
     if crosstalk_coeff is not None: 
-        mov_gpu = reg.crosstalk_subtract(mov_gpu, crosstalk_coeff)  
+        mov_gpu = utils.crosstalk_subtract(mov_gpu, crosstalk_coeff, cavity_size)  
     #apply the lbm shifts
     mov_gpu = shift_mov_lbm_gpu(mov_gpu, plane_shifts)
     #get the processed movie on the cpu
