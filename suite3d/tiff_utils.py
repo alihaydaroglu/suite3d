@@ -14,7 +14,7 @@ from suite2p.io import lbm as lbmio
 import json
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
-from .utils import deprecated
+from .developer import deprecated
 
 @deprecated("Refactor: use the one in suite3d.io.tiff_utils instead.")
 #TODO clean up colorbar option (cbar is the correct one?)

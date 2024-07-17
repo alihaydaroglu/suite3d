@@ -2,7 +2,7 @@ from os.path import join
 from os.path import exists
 
 from . import io
-from .utils import deprecated
+from .developer import deprecated
 
 @deprecated(reason="Refactor: use suite3d.io.tiff_utils.get_si_params instead.")
 def get_si_params(tif_path):

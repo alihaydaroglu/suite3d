@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 import matplotlib.animation as animation
 from .tiff_utils import show_tif
 
-from ..utils import deprecated
+from ..developer import deprecated
 
 
 @deprecated("Not used anywhere")

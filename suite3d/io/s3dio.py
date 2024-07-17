@@ -1,7 +1,7 @@
 import tifffile
 import numpy as n
 import time
-from ..utils import todo, deprecated_inputs
+from ..developer import todo, deprecated_inputs
 from .lbmio import load_and_stitch_full_tif_mp, convert_lbm_plane_to_channel, get_roi_start_pix
 
 class s3dio:

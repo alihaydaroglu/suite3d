@@ -5,7 +5,7 @@ import tifffile
 from matplotlib import pyplot as plt
 import mrcfile
 from .lbmio import get_meso_rois
-from ..utils import todo, deprecated
+from ..developer import todo, deprecated
 
 def get_si_params(tif_path):
     """

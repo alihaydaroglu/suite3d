@@ -11,7 +11,8 @@ import json
 import psutil
 from . import tiff_utils as tfu
 import tracemalloc
-from .utils import default_log, deprecated_inputs
+from .utils import default_log
+from .developer import deprecated_inputs
 
     
 lbm_plane_to_ch = n.array([1,5,6,7,8,9,2,10,11,12,13,14,15,16,17,3,18,19,20,21,22,23,4,24,25,26,27,28,29,30])-1

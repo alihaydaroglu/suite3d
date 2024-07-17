@@ -6,7 +6,7 @@ from multiprocessing import shared_memory, Pool
 from scipy import signal
 import imreg_dft as imreg
 import json
-from ..utils import deprecated_inputs, todo
+from ..developer import deprecated_inputs, todo
 
 @deprecated_inputs("Translation is never set to anything except None or zeros, so it's effectively ignored.")
 def load_and_stitch_full_tif_mp(
