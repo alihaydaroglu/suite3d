@@ -160,7 +160,9 @@ def run_init_pass(job):
         im3d = init_mov.mean(axis=1)
     else:
         job.log("No crosstalk estimation or subtraction")
+        crosstalk_planes = None
         cross_coeff = None
+        ct_info = None
 
     if job.params.get('fuse_strips',True):
         __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True, n_ch=n_ch_tif, fix_fastZ=job.params.get('fix_fastZ',False))
