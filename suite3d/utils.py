@@ -23,6 +23,7 @@ from multiprocessing import cpu_count
 from skimage.metrics import normalized_mutual_information
 import time
 from . import tiff_utils as tfu
+from .developer import deprecated
 
 try: 
     from git import Repo
