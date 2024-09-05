@@ -1,18 +1,16 @@
 import os
 import numpy as n
-import copy
 
-import matplotlib.pyplot as plt
-from suite2p.registration import register
 from . import utils
 from . import lbmio
 from . import reference_image as ref
+from .utils import default_log
+from .developer import todo, deprecated
 
-def default_log(string, val): 
-    print(string)
+from .io import s3dio
+
 
 def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method='even', seed=2358):
-
     init_file_pool = []
     if init_file_pool_lims is not None:
         for limits in init_file_pool_lims:
@@ -30,84 +28,35 @@ def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method='even'
 
     return sample_tifs
 
-def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plane_ids_to_channel_ids=True,fix_fastZ=False,log_cb = default_log):
-    full_mov = lbmio.load_and_stitch_tifs(init_tifs, planes = planes, convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, n_ch = n_ch_tif, filt=filter_params, concat=False, fix_fastZ=fix_fastZ, log_cb=log_cb)
-
-    mov_lens = [mov.shape[1] for mov in full_mov] #not needed anymore?
+@deprecated("Using s3dio.load_data instead")
+def load_init_tifs(init_tifs, planes, filter_params, n_ch_tif = 30, convert_plane_ids_to_channel_ids=True, fix_fastZ=False, log_cb=default_log, lbm=True, num_colors=None, functional_color_channel=None):
+    full_mov = lbmio.load_and_stitch_tifs(init_tifs, planes = planes, convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids,
+                                          n_ch = n_ch_tif, filt=filter_params, concat=False, fix_fastZ=fix_fastZ, log_cb=log_cb,
+                                          lbm=lbm, num_colors=num_colors, functional_color_channel=functional_color_channel)
     full_mov = n.concatenate(full_mov, axis=1)
-
     return full_mov
-
-#TODO delete outdated if new reference function are used instead
-def prep_registration(full_mov, reg_ops, log_cb=default_log, filter_pcorr=0, force_plane_shifts=None):
-    nz, nt, ny, nx = full_mov.shape
-    ref_img_3d = []
-    log_cb("Computing reference images")
-    for i in range(nz):
-        ref_img = register.compute_reference(reg_ops, full_mov[i])
-        ref_img_3d.append(ref_img)
-        log_cb("  Computed reference for plane %d" % i,2)
-    ref_img_3d = n.array(ref_img_3d)
-
-    ref_img_3d_unaligned = n.copy(ref_img_3d)
-    if force_plane_shifts is None:
-        tvecs = n.concatenate([[[0,0]], utils.get_shifts_3d(ref_img_3d, filter_pcorr=filter_pcorr)])
-    else: tvecs = force_plane_shifts
-    log_cb("Tvecs: %s" % str(tvecs), 5)
-
-    ref_img_3d_aligned = utils.register_movie(ref_img_3d[:,n.newaxis], tvecs=tvecs)[:,0]
-
-    all_ref_and_masks = []
-    all_ops = []
-    for plane_idx in range(nz):
-        ref_img = ref_img_3d_aligned[plane_idx].copy()
-        plane_ops = copy.deepcopy(reg_ops)
-        if plane_ops.get('norm_frames',False):
-            plane_ops['rmin'], plane_ops['rmax'] = n.int16(n.percentile(ref_img,1)), n.int16(n.percentile(ref_img,99))
-            ref_img = n.clip(ref_img, plane_ops['rmin'], plane_ops['rmax'])    
-        ref_and_masks = register.compute_reference_masks(ref_img, plane_ops)
-        all_ref_and_masks.append(ref_and_masks)
-        all_ops.append(plane_ops)
-
-    return tvecs, ref_img_3d_aligned, all_ops, all_ref_and_masks, ref_img_3d_unaligned
-
-#Is this the old version, which uses suite 2p? 
-def register_sample_movie(full_mov, all_ops, all_refs, in_place=True, log_cb=default_log):
-    nz = full_mov.shape[0]
-    if not in_place:
-        full_mov = full_mov.copy()
-    log_cb("Registering sample movie")
-    all_offsets = []
-    for plane_idx in range(nz):
-        ref_and_masks = all_refs[plane_idx]
-        plane_ops = all_ops[plane_idx]
-        log_cb("  Registering plane %d" % plane_idx)
-        full_mov[plane_idx], ym, xm, cm, ym1, xm1, cm1 = \
-            register.register_frames(ref_and_masks, full_mov[plane_idx], ops=plane_ops)
-        all_offsets.append((ym, xm, cm, ym1, xm1, cm1))
-
-    return full_mov, all_offsets
-
 
 def run_init_pass(job):
     tifs = job.tifs
     params = job.params
 
+    jobio = s3dio(job)
+
     summary_path = os.path.join(job.dirs['summary'], 'summary.npy')
     job.log("Saving summary to %s" % summary_path,0)
     if not os.path.isdir(job.dirs['summary']):
         job.log("Summary dir does not exist!!")
-        assert False
+        raise ValueError("Summary dir does not exist!!")
 
     init_tifs = choose_init_tifs(tifs, params['n_init_files'], params['init_file_pool'], 
                                        params['init_file_sample_method'])
     n_ch_tif = job.params.get('n_ch_tif', 30)
     job.log("Loading init tifs with %d channels" % n_ch_tif)
-    init_mov = load_init_tifs(
-        init_tifs, params['planes'], params['notch_filt'], 
-        n_ch_tif = n_ch_tif, fix_fastZ=params.get('fix_fastZ', False),
-        convert_plane_ids_to_channel_ids = params.get('convert_plane_ids_to_channel_ids', True),
-        log_cb = job.log)
+    todo("Check work. This is a big change. Before, all the parameters were passed directly with a params.get('name', default) call."+
+         "Now, they are inherited from job.params (because job is an attribute of the jobio object.)")
+    
+    init_mov = jobio.load_data(init_tifs)
+    
     nz, nt, ny, nx = init_mov.shape
     if params['init_n_frames'] is not None:
         if nt < params['init_n_frames']:
@@ -165,7 +114,7 @@ def run_init_pass(job):
         ct_info = None
 
     if job.params.get('fuse_strips',True):
-        __, xs = lbmio.load_and_stitch_full_tif_mp(init_tifs[0], channels=n.arange(1), get_roi_start_pix=True, n_ch=n_ch_tif, fix_fastZ=job.params.get('fix_fastZ',False))
+        xs = jobio.load_roi_start_pix()[1]
         if job.params.get('fuse_shift_override', None) is not None:
             fuse_shift = int(job.params['fuse_shift_override'])
             fuse_shifts = None
@@ -180,6 +129,7 @@ def run_init_pass(job):
         fuse_shift = 0
         fuse_shifts = None
         fuse_ccs = None
+        xs = None
     # return
 
 
@@ -199,8 +149,8 @@ def run_init_pass(job):
         mov_fuse, new_xs, og_xs = ref.fuse_mov(init_mov, fuse_shift, xs)
     else:
         mov_fuse = init_mov
-        new_xs = [0]
-        og_xs = [0]
+        new_xs = [[0, mov_fuse.shape[3]]]
+        og_xs = [[0, mov_fuse.shape[3]]]
     
     if reference_params['3d_reg']:
         job.log("Using 3d registration")

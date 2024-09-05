@@ -18,6 +18,8 @@ from . import register_gpu as reg_gpu
 from . import reg_3d as reg_3d
 from . import reference_image as ref
 from . import quality_metrics as qm
+from .utils import default_log
+from .io import s3dio
 
 import traceback
 import gc
@@ -28,8 +30,6 @@ try:
 except:
     print("CUPY not installed! ")
 
-def default_log(string, *args, **kwargs): 
-    print(string)
 
 
 def init_batches(tifs, batch_size, max_tifs_to_analyze=None):
@@ -435,7 +435,9 @@ def init_batch_files(job_iter_dir=None, job_reg_data_dir=None, n_batches=1, make
     
     
 
-def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_gpu_batches=None):
+def register_dataset_gpu(job, tifs, params, dirs, summary, log_cb = default_log, max_gpu_batches=None):
+    jobio = s3dio(job)
+
     refs_and_masks     = summary['refs_and_masks']
     ref_img_3d         = summary['ref_img_3d']
     min_pix_vals       = summary['min_pix_vals']
@@ -525,8 +527,11 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
         tic_thread = time.time()
         log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif, fix_fastZ=fix_fastZ,
-                                                convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
+        loaded_mov = jobio.load_data(tifs)
+        # loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif, fix_fastZ=fix_fastZ,
+        #                                         convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb,
+        #                                         lbm=params.get('lbm', True), num_colors=params.get('num_colors', None), 
+        #                                         functional_color_channel=params.get('functional_color_channel', None))
         loaded_movs[0] = loaded_mov
         log_cb("[Thread] Thread for batch %d ready to join after %2.2f sec \n" % (batch_idx, time.time()-tic_thread), 5)
         log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
@@ -680,8 +685,9 @@ def register_dataset_gpu(tifs, params, dirs, summary, log_cb = default_log, max_
 
 
 
-def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
+def register_dataset(job, tifs, params, dirs, summary, log_cb = default_log,
                     start_batch_idx = 0):
+    jobio = s3dio(job)
 
     ref_img_3d = summary['ref_img_3d']
     crosstalk_coeff = summary['crosstalk_coeff']
@@ -729,8 +735,11 @@ def register_dataset(tifs, params, dirs, summary, log_cb = default_log,
     def io_thread_loader(tifs, batch_idx):
         log_cb("   [Thread] Loading batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,fix_fastZ=fix_fastZ,
-                                                convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
+        loaded_mov = jobio.load_data(tifs)
+        # loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,fix_fastZ=fix_fastZ,
+        #                                         convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb,
+        #                                         lbm=params.get('lbm', True), num_colors=params.get('num_colors', None), 
+        #                                         functional_color_channel=params.get('functional_color_channel', None))
         log_cb("   [Thread] Loaded batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
         loaded_movs[0] = loaded_mov
@@ -886,7 +895,9 @@ def calculate_corrmap_from_svd(svd_info, params,dirs, log_cb, iter_limit=None, i
 
 #New 3d registration 
 #TODO tidy up what is needed for 3D case
-def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, max_gpu_batches=None):
+def register_dataset_gpu_3d(job, tifs, params, dirs, summary, log_cb = default_log, max_gpu_batches=None):
+    jobio = s3dio(job)
+    
     refs_and_masks     = summary['refs_and_masks']
     ref_img_3d         = summary['ref_img_3d']
     min_pix_vals       = summary['min_pix_vals']
@@ -989,8 +1000,9 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
         tic_thread = time.time()
         log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
         log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif, fix_fastZ=fix_fastZ,
-                                                convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
+        loaded_mov = jobio.load_data(tifs)
+        # loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif, fix_fastZ=fix_fastZ,
+        #                                         convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
         loaded_movs[0] = loaded_mov
         log_cb("[Thread] Thread for batch %d ready to join after %2.2f sec \n" % (batch_idx, time.time()-tic_thread), 5)
         log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)

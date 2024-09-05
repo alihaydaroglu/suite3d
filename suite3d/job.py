@@ -372,17 +372,12 @@ class Job:
             self.dirs["job_dir"] = self.job_dir
 
         for dir_name in ["registered_fused_data", "summary", "iters"]:
-            dir_key = dir_name
-            if dir_key not in self.dirs.keys():
+            if dir_name not in self.dirs.keys() or not os.path.isdir(self.dirs[dir_name]):
                 new_dir = os.path.join(job_dir, dir_name)
                 if not os.path.isdir(new_dir):
                     os.makedirs(new_dir, exist_ok=True)
                     self.log("Created dir %s" % new_dir, 2)
-                # else:
-                #
-                # self.log("Found dir %s" % new_dir,2)
-                self.dirs[dir_key] = new_dir
-
+                self.dirs[dir_name] = new_dir
             else:
                 self.log("Found dir %s" % dir_name, 2)
         n.save(os.path.join(job_dir, "dirs.npy"), self.dirs)
@@ -463,14 +458,17 @@ class Job:
 
         if do_3d_reg:
             if do_gpu_reg:
-                register_dataset_gpu_3d(tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
+                register_dataset_gpu_3d(
+                    self, tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx
+                )
             else:
-                register_dataset_3d(tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
+                pass
+                # register_dataset_3d(self,tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
         else:
             if do_gpu_reg:
-                register_dataset_gpu(tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
+                register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
             else:
-                register_dataset(tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
+                register_dataset(self, tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
 
     def register_gpu(self, tifs=None, max_gpu_batches=None):
         params = self.params
@@ -478,7 +476,7 @@ class Job:
         save_dir = self.make_new_dir("registered_fused_data")
         if tifs is None:
             tifs = self.tifs
-        register_dataset_gpu(tifs, params, self.dirs, summary, self.log, max_gpu_batches=max_gpu_batches)
+        register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log, max_gpu_batches=max_gpu_batches)
 
     def register_gpu_3d(self, tifs=None, max_gpu_batches=None):
         params = self.params
@@ -486,7 +484,7 @@ class Job:
         save_dir = self.make_new_dir("registered_fused_data")
         if tifs is None:
             tifs = self.tifs
-        register_dataset_gpu_3d(tifs, params, self.dirs, summary, self.log, max_gpu_batches=max_gpu_batches)
+        register_dataset_gpu_3d(self, tifs, params, self.dirs, summary, self.log, max_gpu_batches=max_gpu_batches)
 
     def calculate_corr_map(self, mov=None, save=True, iter_limit=None, output_dir_name=None):
         """
@@ -1457,11 +1455,11 @@ class Job:
         return sweep_summary
 
     def vis_vmap_sweep(self, summary):
-        nz, ny, nx = summary["vmaps"][0].shape
+        nz, ny, nx = summary["results"][0]["corrmap"].shape
         param_dict = summary["param_sweep_dict"]
         param_names = summary["param_names"]
         combinations = summary["combinations"]
-        vmaps = summary["vmaps"]
+        vmaps = [r["corrmap"] for r in summary["results"]]
         n_val_per_param = [len(param_dict[k]) for k in param_names]
         vmap_sweep = n.zeros(tuple(n_val_per_param) + (nz, ny, nx))
         print(n_val_per_param)
@@ -1469,7 +1467,7 @@ class Job:
         n_params = len(param_names)
         for cidx, combination in enumerate(combinations):
             param_idxs = [
-                n.where(param_dict[param_names[pidx]] == combination[pidx])[0][0] for pidx in range(n_params)
+                n.where(n.array(param_dict[param_names[pidx]]) == combination[pidx])[0][0] for pidx in range(n_params)
             ]
             vmap_sweep[tuple(param_idxs)] = vmaps[cidx]
         v = ui.napari.Viewer()
