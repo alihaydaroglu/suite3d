@@ -109,7 +109,9 @@ def run_init_pass(job):
         im3d = init_mov.mean(axis=1)
     else:
         job.log("No crosstalk estimation or subtraction")
+        crosstalk_planes = None
         cross_coeff = None
+        ct_info = None
 
     if job.params.get('fuse_strips',True):
         xs = jobio.load_roi_start_pix()[1]

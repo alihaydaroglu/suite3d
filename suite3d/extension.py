@@ -57,7 +57,7 @@ def detect_cells(patch, vmap, max_iter = 10000, peak_thresh = 2.5, activity_thre
             # print(zz)
             # print(zzx)
             vmap[zzx,yyx,xxx] = vmin
-        
+
         stat = {
             'idx' : iter_idx,
             'coords_patch' : (zz,yy,xx),
@@ -70,7 +70,7 @@ def detect_cells(patch, vmap, max_iter = 10000, peak_thresh = 2.5, activity_thre
 
         }
         stats.append(stat)
-        # 
+        #
         # log("Cell %d activity_thresh %.3f, peak_thresh: %.3f, %d active_frames" % (iter_idx+1, threshold, peak_thresh, len(active_frames)), 2)
         log("Added cell %d at %02d, %03d, %03d, peak: %0.3f, %d frames, %d pixels" % (len(stats), stat['med'][0],stat['med'][1],stat['med'][2], peak_val, len(active_frames), npix), 3)
         if savepath is not None and iter_idx % 250 == 0 and iter_idx > 0:
@@ -86,120 +86,288 @@ def detect_cells(patch, vmap, max_iter = 10000, peak_thresh = 2.5, activity_thre
         log("Saving iscell.npy to %s" % is_cell_path, 1)
         n.save(is_cell_path, is_cell)
     return stats
-    
 
-def detect_cells_mp(patch, vmap, n_proc_detect = 8, max_iter = 10000, peak_thresh = 2.5, activity_thresh = 2.5, extend_thresh=0.2, 
-                    roi_ext_iterations=2, max_ext_iters=20, percentile=0, log=default_log, max_pix = 250,
-                    recompute_v = False, allow_overlap = True, offset=(0,0,0), savepath=None, debug=False,patch_idx = -1, **kwargs):
+
+def detect_cells_mp(
+    patch,
+    vmap,
+    n_proc_detect=8,
+    max_iter=10000,
+    peak_thresh=2.5,
+    activity_thresh=2.5,
+    extend_thresh=0.2,
+    roi_ext_iterations=2,
+    max_ext_iters=20,
+    percentile=0,
+    log=default_log,
+    max_pix=250,
+    recompute_v=False,
+    allow_overlap=True,
+    offset=(0, 0, 0),
+    savepath=None,
+    debug=False,
+    patch_idx=-1,
+    **kwargs,
+):
+    """
+    Detect cells in a 3D patch using multiprocessing.
+
+    Args:
+        patch (np.ndarray): 4D array of image data (time, z, y, x)
+        vmap (np.ndarray): 3D array of variance map
+        n_proc_detect (int): Number of processes to use for detection
+        max_iter (int): Maximum number of iterations
+        peak_thresh (float): Threshold for peak detection
+        activity_thresh (float): Threshold for activity detection
+        extend_thresh (float): Threshold for ROI extension
+        roi_ext_iterations (int): Number of iterations for ROI extension
+        max_ext_iters (int): Maximum number of extension iterations
+        percentile (float): Percentile for thresholding
+        log (function): Logging function
+        max_pix (int): Maximum number of pixels in an ROI
+        recompute_v (bool): Whether to recompute variance map
+        allow_overlap (bool): Whether to allow overlapping ROIs
+        offset (tuple): Offset for coordinates
+        savepath (str): Path to save results
+        debug (bool): Whether to run in debug mode
+        patch_idx (int): Index of the current patch
+
+    Returns:
+        list: List of detected cell statistics
+    """
     stats = []
     log("Loading movie patch to shared memory", 3)
     shmem_patch, shmem_par_patch, patch = utils.create_shmem_from_arr(patch, copy=True)
     log("Loaded", 3)
     Th2 = activity_thresh
-    vmultiplier = 1 #max(1, nt / magic_number)
+    vmultiplier = 1
     peak_thresh = vmultiplier * peak_thresh
     vmin = vmap.min()
-    log("Starting extraction with peak_thresh: %0.3f and Th2: %0.3f" % (peak_thresh, Th2), 2)
-    nt, nz,ny,nx = patch.shape
+    log(f"Starting extraction with peak_thresh: {peak_thresh:.3f} and Th2: {Th2:.3f}", 2)
+    nt, nz, ny, nx = patch.shape
     n_iters = max_iter // n_proc_detect
     roi_idx = 0
     widxs = n.arange(n_proc_detect)
-    # print(vmap.shape)
+
     with Pool(n_proc_detect) as p:
         for iter_idx in range(n_iters):
-            # med, zz, yy, xx, lam, peak_val = find_top_roi3d(vmap, xy_pix_scale = 3)
-            outs = find_top_n_rois(vmap, n_rois = n_proc_detect)
-            good_outs = [] 
-            for out in outs:
-                if out[-1] < peak_thresh:
-                    skip = True
-                    # log("Skipping", 3)
-                else:
-                    good_outs.append(out)
-            if len(good_outs) < 1:
-                log("Iter %04d: peak is too small  - ending extraction" % (iter_idx), 2)
+            outs = find_top_n_rois(vmap, n_rois=n_proc_detect)
+            good_outs = filter_rois(outs, peak_thresh)
+
+            if not good_outs:
+                log(f"Iter {iter_idx:04d}: peak is too small - ending extraction", 2)
                 break
-            log("Iter %04d: running %02d ROIs in parallel" % (iter_idx, len(good_outs)), 3)
+
+            log(f"Iter {iter_idx:04d}: running {len(good_outs):02d} ROIs in parallel", 3)
             roi_idxs = n.arange(len(good_outs)) + roi_idx + 1
 
-            returns = p.starmap(detect_cells_worker, 
-                    [(widxs[i], roi_idxs[i], shmem_par_patch, good_outs[i], Th2, percentile, roi_ext_iterations, extend_thresh, max_ext_iters, offset, max_pix, patch_idx) for i in range(len(good_outs))])
-            # print("RETUNRED")
-            # print(vmap.shape)
-            for i in range(len(returns)):
-                batch_stats, batch_sub = returns[i]
-                zz,yy,xx = batch_stats['coords_patch']
-                # print(batch_stats['coords_patch'])
-                # print(batch_stats['coords'])
-                threshold = batch_stats['threshold']
-                sub = batch_sub
-                patch[:,zz,yy,xx] -= sub
+            returns = p.starmap(
+                detect_cells_worker,
+                [
+                    (
+                        widxs[i],
+                        roi_idxs[i],
+                        shmem_par_patch,
+                        good_outs[i],
+                        Th2,
+                        percentile,
+                        roi_ext_iterations,
+                        extend_thresh,
+                        max_ext_iters,
+                        offset,
+                        max_pix,
+                        patch_idx,
+                    )
+                    for i in range(len(good_outs))
+                ],
+            )
 
-                if allow_overlap:
-                    mnew = patch[:,zz,yy,xx]
-                    vmap[zz,yy,xx] = (mnew * n.float32(mnew > threshold)).sum(axis=0) ** 0.5
-                else:
-                    zzx, yyx, xxx = extend_roi3d(zz,yy,xx, (nz,ny,nx), extend_z=True)
-                    vmap[zzx,yyx,xxx] = vmin
-                stats.append(batch_stats)
-                roi_idx = batch_stats['idx']
-                med = batch_stats['med']
-                peak_val = batch_stats['peak_val']
-                npix = len(zz)
-                log("Added cell %d at %02d, %03d, %03d, peak: %0.3f, thresh: %.03f, %d frames, %d pixels" % (
-                    len(stats), med[0], med[1], med[2], peak_val, threshold, len(batch_stats['active_frames']), npix), 3)
+            process_returns(returns, patch, vmap, stats, allow_overlap, vmin, savepath, log)
+            roi_idx = len(stats)
 
-        if savepath is not None and roi_idx % 250 == 0 and roi_idx > 0:
-            n.save(savepath,stats)
-            log("Saving checkpoint to %s" % savepath,2)
-    shmem_patch.close(); shmem_patch.unlink()
-    log("Found %d cells in %d iterations" % (roi_idx, iter_idx))
-    if savepath is not None:
-        log("Saving cells to %s" % savepath, 1)
-        n.save(savepath, stats)
-        # bad way to change the ...//stats.npy path to iscell.npy
-        is_cell_path = savepath[:-9] + 'iscell.npy'
-        is_cell = n.ones((len(stats), 2), dtype=int)
-        log("Saving iscell.npy to %s" % is_cell_path, 1)
-        n.save(is_cell_path, is_cell)
+            if savepath is not None and roi_idx % 250 == 0 and roi_idx > 0:
+                save_checkpoint(savepath, stats, log)
+
+    shmem_patch.close()
+    shmem_patch.unlink()
+    log(f"Found {roi_idx} cells in {iter_idx+1} iterations")
+    save_final_results(savepath, stats, log)
     return stats
-    
-def detect_cells_worker(worker_idx, roi_idx, patch_par, out, Th2, percentile, roi_ext_iterations, extend_thresh, max_ext_iters, offset, max_pix = 1000, patch_idx = -1):
+
+
+def filter_rois(outs, peak_thresh):
+    """
+    Filter ROIs based on peak threshold.
+
+    Args:
+        outs (list): List of ROI outputs
+        peak_thresh (float): Threshold for peak values
+
+    Returns:
+        list: Filtered list of ROIs
+    """
+    return [out for out in outs if out[-1] >= peak_thresh]
+
+
+def process_returns(returns, patch, vmap, stats, allow_overlap, vmin, savepath, log):
+    """
+    Process the returns from cell detection workers.
+
+    Args:
+        returns (list): List of returns from workers
+        patch (np.ndarray): 4D array of image data
+        vmap (np.ndarray): 3D array of variance map
+        stats (list): List to store cell statistics
+        allow_overlap (bool): Whether to allow overlapping ROIs
+        vmin (float): Minimum value for vmap
+        savepath (str): Path to save results
+        log (function): Logging function
+    """
+    for batch_stats, batch_sub in returns:
+        zz, yy, xx = batch_stats["coords_patch"]
+        threshold = batch_stats["threshold"]
+        patch[:, zz, yy, xx] -= batch_sub
+
+        update_vmap(vmap, patch, zz, yy, xx, threshold, allow_overlap, vmin)
+        stats.append(batch_stats)
+        log_cell_addition(log, batch_stats, len(stats))
+
+
+def update_vmap(vmap, patch, zz, yy, xx, threshold, allow_overlap, vmin):
+    """
+    Update the variance map after detecting a cell.
+
+    Args:
+        vmap (np.ndarray): 3D array of variance map
+        patch (np.ndarray): 4D array of image data
+        zz, yy, xx (np.ndarray): Coordinates of the detected cell
+        threshold (float): Activity threshold
+        allow_overlap (bool): Whether to allow overlapping ROIs
+        vmin (float): Minimum value for vmap
+    """
+    if allow_overlap:
+        mnew = patch[:, zz, yy, xx]
+        vmap[zz, yy, xx] = (mnew * n.float32(mnew > threshold)).sum(axis=0) ** 0.5
+    else:
+        zzx, yyx, xxx = extend_roi3d(zz, yy, xx, vmap.shape, extend_z=True)
+        vmap[zzx, yyx, xxx] = vmin
+
+
+def log_cell_addition(log, batch_stats, stats_len):
+    """
+    Log the addition of a new cell.
+
+    Args:
+        log (function): Logging function
+        batch_stats (dict): Statistics of the detected cell
+        stats_len (int): Current number of detected cells
+    """
+    med = batch_stats["med"]
+    peak_val = batch_stats["peak_val"]
+    npix = len(batch_stats["coords_patch"][0])
+    log(
+        f"Added cell {stats_len} at {med[0]:02d}, {med[1]:03d}, {med[2]:03d}, peak: {peak_val:.3f}, thresh: {batch_stats['threshold']:.03f}, {len(batch_stats['active_frames'])} frames, {npix} pixels",
+        3,
+    )
+
+
+def save_checkpoint(savepath, stats, log):
+    """
+    Save a checkpoint of the current cell detection progress.
+
+    Args:
+        savepath (str): Path to save the checkpoint
+        stats (list): List of cell statistics
+        log (function): Logging function
+    """
+    n.save(savepath, stats)
+    log(f"Saving checkpoint to {savepath}", 2)
+
+
+def save_final_results(savepath, stats, log):
+    """
+    Save the final results of cell detection.
+
+    Args:
+        savepath (str): Path to save the results
+        stats (list): List of cell statistics
+        log (function): Logging function
+    """
+    if savepath is not None:
+        log(f"Saving cells to {savepath}", 1)
+        n.save(savepath, stats)
+        is_cell_path = savepath[:-9] + "iscell.npy"
+        is_cell = n.ones((len(stats), 2), dtype=int)
+        log(f"Saving iscell.npy to {is_cell_path}", 1)
+        n.save(is_cell_path, is_cell)
+
+
+def detect_cells_worker(
+    worker_idx,
+    roi_idx,
+    patch_par,
+    out,
+    Th2,
+    percentile,
+    roi_ext_iterations,
+    extend_thresh,
+    max_ext_iters,
+    offset,
+    max_pix=1000,
+    patch_idx=-1,
+):
+    """
+    Worker function for detecting cells in parallel.
+
+    Args:
+        worker_idx: Index of the worker
+        roi_idx: Index of the ROI being processed
+        patch_par: Shared memory parameters for the patch
+        out: Output from find_top_roi3d
+        Th2: Activity threshold
+        percentile: Percentile for thresholding
+        roi_ext_iterations: Number of iterations for ROI extension
+        extend_thresh: Threshold for ROI extension
+        max_ext_iters: Maximum number of extension iterations
+        offset: Offset for coordinates
+        max_pix: Maximum number of pixels in an ROI
+        patch_idx: Index of the current patch
+
+    Returns:
+        A tuple containing cell statistics and subtracted values
+    """
     patch_sh, patch = utils.load_shmem(patch_par)
     med, zz, yy, xx, lam, peak_val = out
     tproj = patch[:, zz, yy, xx] @ lam
     threshold = min(Th2, n.percentile(tproj, percentile)) if percentile > 0 else Th2
 
-    # default_log("W%02d: Cell %d at with peak %.3f, activity_thresh %.3f, max %0.3f" % (worker_idx, roi_idx+1, peak_val, threshold, tproj.max()), 2)
     active_frames = n.nonzero(tproj > threshold)[0]
-    # default_log("W%02d, Cell %d. Thresh: %.3f, Active frames: %d" % (worker_idx, roi_idx + 1, threshold, len(active_frames)))
 
     for i in range(roi_ext_iterations):
-        # default_log("%d active frames" % (len(active_frames)), 3)
         if len(active_frames) == 0:
-            # continue
-            default_log(1,"WARNING: no active frames in roi %d" % roi_idx)
-        zz,yy,xx,lam = iter_extend3d(zz,yy,xx,active_frames, patch, extend_thresh=extend_thresh,
-                                        max_ext_iters=max_ext_iters, max_pix = max_pix)
-        tproj = patch[:,zz,yy,xx] @ lam
+            default_log(1, "WARNING: no active frames in roi %d" % roi_idx)
+        zz, yy, xx, lam = iter_extend3d(
+            zz, yy, xx, active_frames, patch, extend_thresh=extend_thresh, max_ext_iters=max_ext_iters, max_pix=max_pix
+        )
+        tproj = patch[:, zz, yy, xx] @ lam
         active_frames = n.nonzero(tproj > threshold)[0]
-        # default_log("W%02d, Cell %d. Iter: %d, %d pix. Thresh: %.3f, Active frames: %d" % (worker_idx, roi_idx + 1, i, len(lam), threshold, len(active_frames)))
         npix = len(lam)
-    
-    sub = n.zeros((patch.shape[0],npix))
+
+    sub = n.zeros((patch.shape[0], npix))
     sub[active_frames] = tproj[active_frames, n.newaxis] @ lam[n.newaxis]
     patch_sh.close()
     stat = {
-        'idx' : roi_idx,
-        'threshold' : threshold,
-        'coords_patch' : (zz,yy,xx),
-        'coords' : (zz+offset[0],yy+offset[1],xx+offset[2]),
-        'lam' : lam,
-        'peak_val' : peak_val,
-        'med_patch' : med,
-        'med' : (med[0] + offset[0], med[1] + offset[1], med[2] + offset[2]),
-        'patch_idx' : patch_idx,
-        'active_frames' : active_frames}
+        "idx": roi_idx,
+        "threshold": threshold,
+        "coords_patch": (zz, yy, xx),
+        "coords": (zz + offset[0], yy + offset[1], xx + offset[2]),
+        "lam": lam,
+        "peak_val": peak_val,
+        "med_patch": med,
+        "med": (med[0] + offset[0], med[1] + offset[1], med[2] + offset[2]),
+        "patch_idx": patch_idx,
+        "active_frames": active_frames,
+    }
 
     return stat, sub
 
@@ -543,7 +711,6 @@ def extract_activity(mov, stats, batchsize_frames=500, log=default_log, offset=N
             n.save(os.path.join(intermediate_save_dir, 'F.npy'), F_roi)
             n.save(os.path.join(intermediate_save_dir, 'Fneu.npy'), F_neu)
     return F_roi, F_neu
-
 
 
 def prune_overlapping_cells(stats, dist_thresh = 5, lam_overlap_thresh=0.5):
