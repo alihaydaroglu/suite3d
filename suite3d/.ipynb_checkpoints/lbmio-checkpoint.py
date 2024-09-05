@@ -9,18 +9,14 @@ import tifffile
 import imreg_dft as imreg
 import json
 import psutil
-from . import tiff_utils as tfu
 import tracemalloc
-from .utils import default_log
-from .developer import deprecated_inputs
 
+def default_log(string, val=None): print(string)
     
 lbm_plane_to_ch = n.array([1,5,6,7,8,9,2,10,11,12,13,14,15,16,17,3,18,19,20,21,22,23,4,24,25,26,27,28,29,30])-1
 lbm_ch_to_plane = n.array(n.argsort(lbm_plane_to_ch))
- 
-@deprecated_inputs("use_roi_idxs is probably not needed. See stitch_rois_fast for explanation.")
-def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, filt=None, concat=True, n_ch=30, fix_fastZ=False, use_roi_idxs=None,
-                         convert_plane_ids_to_channel_ids = True, log_cb=default_log, debug=False, lbm=True, num_colors=1, functional_color_channel=0):
+    
+def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, filt=None, concat=True, n_ch=30, convert_plane_ids_to_channel_ids = True, log_cb=default_log, debug=False, lbm=True, num_colors=1, functional_color_channel=0):
     '''
     Load tifs into memory
 
@@ -69,7 +65,8 @@ def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, fi
     
     for tif_path in paths:
         if verbose: log_cb("Loading %s" % tif_path, 2)
-        im, px, py = load_and_stitch_full_tif_mp(tif_path, channels=channels, verbose=False, filt=filt, n_ch = n_ch, n_proc=n_proc,debug=debug,use_roi_idxs=use_roi_idxs,fix_fastZ=fix_fastZ, **mp_args)
+        
+        im, px, py = load_and_stitch_full_tif_mp(tif_path, channels=channels, verbose=False, filt=filt, n_ch = n_ch, n_proc=n_proc,debug=debug, **mp_args)
         mov_list.append(im)
     if concat:
         mov = n.concatenate(mov_list,axis=1)
@@ -81,13 +78,8 @@ def load_and_stitch_tifs(paths, planes, verbose=True,n_proc=15, mp_args = {}, fi
     return mov
 
 
-@deprecated_inputs(
-    "use_roi_idxs is probably not needed. See stitch_rois_fast for explanation."
-    "Translation is never set to anything except None or zeros, so it's effectively ignored."
-)
-def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True, n_ch = 30,
-                                translations=None, filt = None, debug=False, get_roi_start_pix=False,
-                                use_roi_idxs=None, fix_fastZ=False):
+def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True,n_ch = 30,
+                                translations=None, filt = None, debug=False, get_roi_start_pix=False):
     tic = time.time()
     # TODO imread from tifffile has an overhead of ~20-30 seconds before it actually reads the file?
     tiffile = tifffile.imread(path)
@@ -97,7 +89,7 @@ def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True, n_ch = 
         if debug: print(n_t_ch, n_ch, int(n_t_ch/n_ch), n1, n2)
         tiffile = tiffile.reshape(int(n_t_ch/n_ch), n_ch, n1,n2)
     if debug: print(tiffile.shape)
-    rois = get_meso_rois(path, fix_fastZ=fix_fastZ)
+    rois = get_meso_rois(path)
     # print("XXXXXX %.2f" % (tiffile.nbytes / 1024**3))
     sh_mem = shared_memory.SharedMemory(create=True, size=tiffile.nbytes)
     sh_tif = n.ndarray(tiffile.shape, dtype=tiffile.dtype, buffer=sh_mem.buf)
@@ -114,8 +106,8 @@ def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True, n_ch = 
     if debug: print("5, %.4f" % (time.time()-tic))
     # sample_out = stitch_rois(ims_sample, rois, return_coords=False,mean_img=False)
     if get_roi_start_pix:
-        return stitch_rois_fast(ims_sample, rois, mean_img=False, get_roi_start_pix=True, use_roi_idxs=use_roi_idxs)
-    sample_out, px, py = stitch_rois_fast(ims_sample, rois,mean_img=False, use_roi_idxs=use_roi_idxs)
+        return stitch_rois_fast(ims_sample, rois, mean_img=False, get_roi_start_pix=True)
+    sample_out, px, py = stitch_rois_fast(ims_sample, rois,mean_img=False)
     if debug: print("6, %.4f" % (time.time()-tic))
     __, n_y, n_x = sample_out.shape
     del tiffile
@@ -137,7 +129,7 @@ def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True, n_ch = 
 
     p = Pool(processes = n_proc)
     output = p.starmap(load_and_stitch_full_tif_worker, 
-                      [(idx,ch_id, rois, sh_mem_name, sh_mem_params, sh_out_name, sh_out_params, translations[idx], filt, use_roi_idxs)\
+                      [(idx,ch_id, rois, sh_mem_name, sh_mem_params, sh_out_name, sh_out_params, translations[idx], filt)\
                         for idx,ch_id in enumerate(channels)])
     proc_tic = time.time()
     if verbose: print("    Workers completed in %.2f sec" % (proc_tic - prep_tic))
@@ -158,13 +150,7 @@ def load_and_stitch_full_tif_mp(path, channels, n_proc=10, verbose=True, n_ch = 
 
     return im_full, px, py
 
-
-@deprecated_inputs(
-        "use_roi_idxs is probably not needed. See stitch_rois_fast for explanation."
-        "Translation is never set to anything except None or zeros, so it's effectively ignored."
-)
-def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params, sh_out_name, sh_out_params, translation=None, 
-                                    filt=None,use_roi_idxs=None):
+def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params, sh_out_name, sh_out_params, translation=None, filt=None):
     debug=False
     if debug: print("Loading channel %d" % ch_id)
     tic = time.time()
@@ -190,7 +176,7 @@ def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params
     ims = split_rois_from_tif(tiffile, rois, ch_id = ch_id, return_coords=False)
     split_time = time.time()
     if debug: print(" %d Split in %.2f" % (ch_id, split_time-prep_time))
-    outputs[idx], __, __ = stitch_rois_fast(ims, rois, mean_img=False, translation=translation, use_roi_idxs=use_roi_idxs)
+    outputs[idx], __, __ = stitch_rois_fast(ims, rois, mean_img=False, translation=translation)
     stitch_time = time.time()
     if debug: print(" %d Stitch in %.2f" % (ch_id, stitch_time-split_time))
     if debug: print("Channel %d done in %.2f" % (ch_id, time.time()-tic))
@@ -202,37 +188,19 @@ def load_and_stitch_full_tif_worker(idx, ch_id, rois, sh_mem_name, sh_arr_params
     return time.time()-tic
 
 
-def get_meso_rois(tif_path, max_roi_width_pix=145, fix_fastZ=False, debug=False):
+def get_meso_rois(tif_path, max_roi_width_pix=145):
     tf = tifffile.TiffFile(tif_path)
     artists_json = tf.pages[0].tags["Artist"].value
 
     si_rois = json.loads(artists_json)['RoiGroups']['imagingRoiGroup']['rois']
 
-    all_zs = [roi['zs'] for roi in si_rois]
-
-    if type(fix_fastZ) == int:
-        z_imaging = fix_fastZ
-    elif fix_fastZ:
-        z_imaging = list(set(all_zs[0]).intersection(*map(set,all_zs[1:])))[0]
-    else:
-        z_imaging = 0
-    # if fix_fastZ:
-    #     z_imaging = tfu.get_fastZ(tif_path)
-    # else:
-    #     z_imaging = 0
-        
-    # print(z_imaging)
-
     rois = []
     warned = False
     for roi in si_rois:
-        if debug: print(roi['zs'])
         if type(roi['scanfields']) != list:
             scanfield = roi['scanfields']
         else: 
-            z_match = n.where(n.array(roi['zs'])==z_imaging)[0]
-            if len(z_match) == 0: continue
-            scanfield = roi['scanfields'][z_match[0]]
+            scanfield = roi['scanfields'][n.where(n.array(roi['zs'])==0)[0][0]]
 
     #     print(scanfield)
         roi_dict = {}
@@ -275,17 +243,9 @@ def split_rois_from_tif(im, rois, ch_id = 0, return_coords=False):
     return split_ims
 
 
-@deprecated_inputs(
-        "use_roi_idxs is processed here, but it's set to None everywhere in the suite3d package, so is effectively ignored."
-        "mean_img is passed to stitch_rois_fast_helper, but if True it causes an error due to not being implemented."
-        "Translation is never set to anything except None or zeros, so it's effectively ignored."
-)
-def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_start_pix=False, use_roi_idxs=None):
+def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_start_pix=False):
     tic = time.time()
 
-    if use_roi_idxs is not None:
-        ims = [ims[i] for i in use_roi_idxs]
-        rois = [rois[i] for i in use_roi_idxs]
     sizes_pix = n.array([im.shape[1:][::-1] for im in ims])
 
     centers = n.array([r['center'] for r in rois])
@@ -296,7 +256,7 @@ def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_star
     # X is the fast axis along the resonant scanner line direction, Y is orthogonal slow axis
     # For a typical strip, x extent is small and y extent is large
 
-    # maximim and minimum x/y coordinates in SI units (not pixels, also strangely not always um)
+    # maximim and minimum x/y coordinates in SI units (not pixels, also strangely not um)
     xmin, xmax = corners[:,0].min(),(corners[:,0] + sizes[:,0]).max()
     ymin, ymax = corners[:,1].min(),(corners[:,1] + sizes[:,1]).max()
 
@@ -357,7 +317,6 @@ def stitch_rois_fast(ims, rois, mean_img=False, translation = None, get_roi_star
     
     
 # @numba.jit(nopython=True)
-@deprecated_inputs("mean_img causes a no-implementation error if set to True.")
 def stitch_rois_fast_helper(full_image, ims, roi_start_pix_x, roi_start_pix_y, sizes_pix, mean_img):
     n_rois = len(ims)
     # place each ROI into full image
@@ -407,12 +366,11 @@ def load_and_stitch_tifs_notLBM(paths, planes, verbose=True, filt=None, concat=T
         functional_color_channel (int, optional): index of functional color channel. Defaults to 0. 
 
     Returns:
+        _type_: _description_
     '''
     if filt is not None:
         print("a filter was requested but it is not coded for load_and_stitch_tifs_noLBM")
-    
-    tic = time.time()
-    
+        
     mov_list = []
     for tif_path in paths:
         if verbose: log_cb("Loading %s" % tif_path, 2)
@@ -423,16 +381,8 @@ def load_and_stitch_tifs_notLBM(paths, planes, verbose=True, filt=None, concat=T
             tif_file = n.take(tif_file, functional_color_channel, axis=1)
         t, py, px = tif_file.shape
         frames = t // len(planes)
-        if frames * len(planes) != t:
-            if verbose:
-                extra_planes = t % len(planes)
-                log_cb("Standard 2P Warning: number of planes does not divide into number of tiff images, dropping %d frames" % extra_planes)
-
-            tif_file = tif_file[:frames * len(planes)]
-            t = frames * len(planes)
-            
         assert frames * len(planes) == t, "number of planes does not divide into number of tiff images"
-        tif_file = n.swapaxes(tif_file.reshape(frames, len(planes), py, px), 0, 1)
+        tif_file = n.swap_axes(tif_file.reshape(frames, len(planes), py, px), 0, 1)
     
         if debug: print(tif_file.shape)
         if debug: print("8, %.4f" % (time.time() - tic))

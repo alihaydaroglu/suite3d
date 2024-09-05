@@ -5,8 +5,7 @@ import numpy as n
 from multiprocessing import Pool
 from . import utils
 from scipy.spatial import distance_matrix
-def default_log(string, *args, **kwargs): 
-    print(string)
+from .utils import default_log
 
 
 def detect_cells(
