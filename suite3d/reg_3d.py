@@ -715,21 +715,37 @@ def shift_mov_lbm_gpu(mov_gpu, plane_shifts, fill_value = 0):
 
     for z in range(nz):
         shift = plane_shifts[z,:]
-        if (shift[0] == 0) & (shift[1] == 0):
+        # print(shift)
+        if (shift[0] == 0) & (shift[1] == 0): # 00 
             mov_gpu[z,:,:,:] = mov_gpu[z,:,:,:]    
-        elif (shift[0] > 0) & (shift[1] >0):
+        elif (shift[0] > 0) & (shift[1] > 0): # ++
             mov_gpu[z, :, shift[0]:, shift[1]:] = mov_gpu[z, :, :-shift[0], :-shift[1]]
             mov_gpu[z, :, :,:shift[1]] = fill_value
             mov_gpu[z, :, :shift[0],:] = fill_value
-        elif (shift[0] > 0) & (shift[1] < 0):
+        elif (shift[0] > 0) & (shift[1] < 0): # +-
             mov_gpu[z, :, shift[0]:, :shift[1]] = mov_gpu[z, :, :-shift[0], -shift[1]:]
             mov_gpu[z, :, :, shift[1]:] = fill_value
             mov_gpu[z, :, :shift[0], :] = fill_value
-        elif (shift[0] < 0) & (shift[1] > 0):
+        elif (shift[0] == 0) & (shift[1] < 0): # 0-
+            mov_gpu[z, :, shift[0]:, :shift[1]] = mov_gpu[z, :, :, -shift[1]:]
+            mov_gpu[z, :, :, shift[1]:] = fill_value
+        elif (shift[0] > 0) & (shift[1] == 0): # +0
+            mov_gpu[z, :, shift[0]:,:] = mov_gpu[z, :, :-shift[0],:]
+            mov_gpu[z, :, :shift[0], :] = fill_value
+
+        elif (shift[0] < 0) & (shift[1] > 0): # -+
             mov_gpu[z, :, :shift[0], shift[1]:] = mov_gpu[z, :, -shift[0]:, :-shift[1]]
             mov_gpu[z, :, :, :shift[1]] = fill_value
             mov_gpu[z, :, shift[0]:, :] = fill_value
-        else:
+
+        elif (shift[0] < 0) & (shift[1] == 0): # -0
+            mov_gpu[z, :, :shift[0], :] = mov_gpu[z, :, -shift[0]:, :]
+            mov_gpu[z, :, shift[0]:, :] = fill_value
+        elif (shift[0] == 0) & (shift[1] > 0): # 0+
+            mov_gpu[z, :, :, shift[1]:] = mov_gpu[z, :, :, :-shift[1]]
+            mov_gpu[z, :, :, :shift[1]] = fill_value
+
+        else:                                 # --
             mov_gpu[z, :, :shift[0], :shift[1]] = mov_gpu[z, :, -shift[0]:, -shift[1]:]
             mov_gpu[z, :, :, shift[1]:] = fill_value
             mov_gpu[z, :, shift[0]:, :] = fill_value
