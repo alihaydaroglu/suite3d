@@ -66,7 +66,7 @@ def minimal_corrmap(mov, ):
 
 
 
-def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return_mov_filt=False,iter_limit=None,
+def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return_mov_filt=False,iter_limit=None, save_mov_sub=True,
                       iter_dir_tag = 'iters', mov_sub_dir_tag = 'mov_sub', summary=None):
     # TODO This can be accelerated 
     # np sub and convolution takes about ~1/2 of the time, that is parallelized
@@ -126,7 +126,10 @@ def calculate_corrmap(mov, params, dirs, log_cb = default_log, save=True, return
     n_batches = int(n.ceil(nt / t_batch_size))
     if save:
         batch_dirs, __ = init_batch_files(dirs[iter_dir_tag], makedirs=True, n_batches=n_batches)
-        __, mov_sub_paths = init_batch_files(None, dirs[mov_sub_dir_tag], makedirs=False, n_batches=n_batches, filename='mov_sub')
+        if save_mov_sub:
+            __, mov_sub_paths = init_batch_files(None, dirs[mov_sub_dir_tag], makedirs=False, n_batches=n_batches, filename='mov_sub')
+        else:
+            mov_sub_paths = [None] * n_batches
         # print(mov_sub_paths)
         log_cb("Created files and dirs for %d batches" % n_batches, 1)
     else: mov_sub_paths = [None] * n_batches
@@ -1043,6 +1046,7 @@ def register_dataset_gpu_3d(tifs, params, dirs, summary, log_cb = default_log, m
         #shift entire abtch on cpu at once
         #log this info
         mov_shifted = reg_3d.shift_mov_fast(mov_cpu, -int_shift)
+        # TODO: add optional zshift here
         log_cb(f"Shifted the mov in: {time.time() - time_shift}s")
 
         #NOTE changed this so gets int_shifts + sub_pixel shifts etc
