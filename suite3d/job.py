@@ -504,9 +504,7 @@ class Job:
         else:
             corr_map_dir = self.make_new_dir("corrmap", parent_dir_name=output_dir_name)
             mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
-        else:
-            corr_map_dir = None
-            mov_sub_dir = None
+
 
         if mov is None:
             mov = self.get_registered_movie("registered_fused_data", "fused")
@@ -706,7 +704,7 @@ class Job:
         Returns:
             dict: sweep_summary containing results and sweep info
         """
-        """
+        
         sweep_summary = self.setup_sweep(params_to_sweep, sweep_name, all_combinations=all_combinations)
         sweep_summary["sweep_type"] = "segmentation"
         sweep_dir_path = sweep_summary["sweep_dir_path"]

@@ -273,6 +273,7 @@ def update_vmap(vmap, patch, zz, yy, xx, threshold, allow_overlap, vmin, ext_sub
         allow_overlap (bool): Whether to allow overlapping ROIs
         vmin (float): Minimum value for vmap
     """
+    nz,ny,nx = vmap.shape
     if allow_overlap:
         mnew = patch[:, zz, yy, xx]
         vmap[zz, yy, xx] = (mnew * n.float32(mnew > threshold)).sum(axis=0) ** 0.5
@@ -481,10 +482,6 @@ def iter_extend3d(
     iter_idx = 0
     mov_act = mov[active_frames].mean(axis=0)
     use_ratio = False
-    if inactive_frames is not None:
-        mov_inact = mov[inactive_frames].mean(axis=0)
-        mov_ratio = mov_act - mov_inact
-        use_ratio = True
     # lam = n.array([lam0])
     while npix < max_pix and iter_idx < max_ext_iters:
         npix = len(yy)
