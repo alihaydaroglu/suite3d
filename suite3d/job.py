@@ -498,7 +498,6 @@ class Job:
             iter_limit (int, optional): Number of batches to run. Set to None for the whole recording. Defaults to None.
             output_dir_name (str, optional): Name of the parent directory to place results in. Defaults to None.
         """
-        """
         if save:
             corr_map_dir = self.make_new_dir("corrmap", parent_dir_name=output_dir_name)
             mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
