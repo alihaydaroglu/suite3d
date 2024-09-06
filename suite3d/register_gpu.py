@@ -11,8 +11,7 @@ try:
 except:
     print("No MKL fft ")
 
-def default_log(string, *args, **kwargs): 
-    print(string)
+from .utils import default_log
 
 def log_gpu_memory(mempool=None):
     if mempool is None:

@@ -372,17 +372,12 @@ class Job:
             self.dirs["job_dir"] = self.job_dir
 
         for dir_name in ["registered_fused_data", "summary", "iters"]:
-            dir_key = dir_name
-            if dir_key not in self.dirs.keys():
+            if dir_name not in self.dirs.keys() or not os.path.isdir(self.dirs[dir_name]):
                 new_dir = os.path.join(job_dir, dir_name)
                 if not os.path.isdir(new_dir):
                     os.makedirs(new_dir, exist_ok=True)
                     self.log("Created dir %s" % new_dir, 2)
-                # else:
-                #
-                # self.log("Found dir %s" % new_dir,2)
-                self.dirs[dir_key] = new_dir
-
+                self.dirs[dir_name] = new_dir
             else:
                 self.log("Found dir %s" % dir_name, 2)
         n.save(os.path.join(job_dir, "dirs.npy"), self.dirs)
@@ -440,17 +435,40 @@ class Job:
             if summary["fuse_shifts"] is not None:
                 utils.plot_fuse_shifts(summary["fuse_shifts"], summary["fuse_ccs"])
 
-    def register(self, tifs=None, start_batch_idx=0, params=None, summary=None):
+    def register(self, tifs=None, start_batch_idx=0):
+        """
+        Register the dataset using the method specified in job.params.
+
+        Args:
+            tifs (list): List of tif files to register. If None, uses self.tifs.
+            start_batch_idx (int): Starting batch index.
+        """
         self.make_new_dir("registered_fused_data")
-        if params is None:
-            params = self.params
+        params = self.params
+        summary = self.load_summary()
         self.save_params(params=params, copy_dir_tag="registered_fused_data")
-        if summary is None:
-            summary = self.load_summary()
-        # n.save(os.path.join(self.dirs['registered_fused_data'], 'summary.npy'), summary)
+
         if tifs is None:
             tifs = self.tifs
-        register_dataset(tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
+
+        do_3d_reg = params.get("3d_reg", False)
+        do_gpu_reg = params.get("gpu_reg", False)
+
+        self.log(f"Starting registration: 3D: {do_3d_reg}, GPU: {do_gpu_reg}", 1)
+
+        if do_3d_reg:
+            if do_gpu_reg:
+                register_dataset_gpu_3d(
+                    self, tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx
+                )
+            else:
+                pass
+                # register_dataset_3d(self,tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
+        else:
+            if do_gpu_reg:
+                register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
+            else:
+                register_dataset(self, tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
 
     def register_gpu(self, tifs=None, max_gpu_batches=None):
         params = self.params
@@ -458,7 +476,7 @@ class Job:
         save_dir = self.make_new_dir("registered_fused_data")
         if tifs is None:
             tifs = self.tifs
-        register_dataset_gpu(tifs, params, self.dirs, summary, self.log, max_gpu_batches=max_gpu_batches)
+        register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log, max_gpu_batches=max_gpu_batches)
 
     def register_gpu_3d(self, tifs=None, max_gpu_batches=None):
         params = self.params
@@ -466,7 +484,7 @@ class Job:
         save_dir = self.make_new_dir("registered_fused_data")
         if tifs is None:
             tifs = self.tifs
-        register_dataset_gpu_3d(tifs, params, self.dirs, summary, self.log, max_gpu_batches=max_gpu_batches)
+        register_dataset_gpu_3d(self, tifs, params, self.dirs, summary, self.log, max_gpu_batches=max_gpu_batches)
 
     def calculate_corr_map(self, mov=None, save=True, iter_limit=None, output_dir_name=None, save_mov_sub=True):
         """
@@ -480,7 +498,11 @@ class Job:
             iter_limit (int, optional): Number of batches to run. Set to None for the whole recording. Defaults to None.
             output_dir_name (str, optional): Name of the parent directory to place results in. Defaults to None.
         """
+        """
         if save:
+            corr_map_dir = self.make_new_dir("corrmap", parent_dir_name=output_dir_name)
+            mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
+        else:
             corr_map_dir = self.make_new_dir("corrmap", parent_dir_name=output_dir_name)
             mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
         else:
@@ -488,6 +510,7 @@ class Job:
             mov_sub_dir = None
 
         if mov is None:
+            mov = self.get_registered_movie("registered_fused_data", "fused")
             mov = self.get_registered_movie("registered_fused_data", "fused")
 
         self.save_params(copy_dir=corr_map_dir)
@@ -504,10 +527,14 @@ class Job:
 
         return self.corrmap
 
+
     def load_corr_map_results(self, parent_dir_name=None):
         files = ["max_img.npy", "mean_img.npy", "vmap.npy"]
         corrmap_dir_tag = "corrmap"
+        files = ["max_img.npy", "mean_img.npy", "vmap.npy"]
+        corrmap_dir_tag = "corrmap"
         if parent_dir_name is not None:
+            corrmap_dir_tag = parent_dir_name + "-corrmap"
             corrmap_dir_tag = parent_dir_name + "-corrmap"
         results = {}
         for file in files:
@@ -630,6 +657,9 @@ class Job:
             comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
             comb_params = sweep_summary["comb_params"][comb_idx]
             self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
+            comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
+            comb_params = sweep_summary["comb_params"][comb_idx]
+            self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             self.params = comb_params
             corrmap = self.calculate_corr_map(
                 output_dir_name=comb_dir_name, save_mov_sub=save_mov_sub, mov=mov, iter_limit=iter_limit
@@ -639,7 +669,11 @@ class Job:
                 maps = self.load_corr_map_results(comb_dir_name)
                 sweep_summary["mean_img"] = maps["mean_img"]
                 sweep_summary["max_img"] = maps["max_img"]
+                sweep_summary["mean_img"] = maps["mean_img"]
+                sweep_summary["max_img"] = maps["max_img"]
 
+            sweep_summary["results"].append(results)
+            self.save_file("sweep_summary", sweep_summary, path=sweep_dir_path)
             sweep_summary["results"].append(results)
             self.save_file("sweep_summary", sweep_summary, path=sweep_dir_path)
 
@@ -673,13 +707,21 @@ class Job:
         Returns:
             dict: sweep_summary containing results and sweep info
         """
+        """
         sweep_summary = self.setup_sweep(params_to_sweep, sweep_name, all_combinations=all_combinations)
+        sweep_summary["sweep_type"] = "segmentation"
+        sweep_dir_path = sweep_summary["sweep_dir_path"]
+        sweep_summary["results"] = []
+        combinations = sweep_summary["combinations"]
         sweep_summary["sweep_type"] = "segmentation"
         sweep_dir_path = sweep_summary["sweep_dir_path"]
         sweep_summary["results"] = []
         combinations = sweep_summary["combinations"]
         n_combs = len(combinations)
         for comb_idx in range(n_combs):
+            comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
+            comb_params = sweep_summary["comb_params"][comb_idx]
+            self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
             comb_params = sweep_summary["comb_params"][comb_idx]
             self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
@@ -738,6 +780,8 @@ class Job:
         if vmap is None:
             vmap = maps["vmap"]
         nt, nz, ny, nx = mov_sub.shape
+        if ts is None:
+            ts = (0, nt)
         if ts is None:
             ts = (0, nt)
 
@@ -817,6 +861,9 @@ class Job:
             patch_counter += 1
 
         # combine all segmented patches
+        rois_dir_path = self.combine_patches(
+            patches_to_segment, rois_dir_path, parent_dir_name=segmentation_dir_tag, info_use_idx=None
+        )
         rois_dir_path = self.combine_patches(
             patches_to_segment, rois_dir_path, parent_dir_name=segmentation_dir_tag, info_use_idx=None
         )
@@ -1455,11 +1502,11 @@ class Job:
         return sweep_summary
 
     def vis_vmap_sweep(self, summary):
-        nz, ny, nx = summary["vmaps"][0].shape
+        nz, ny, nx = summary["results"][0]["corrmap"].shape
         param_dict = summary["param_sweep_dict"]
         param_names = summary["param_names"]
         combinations = summary["combinations"]
-        vmaps = summary["vmaps"]
+        vmaps = [r["corrmap"] for r in summary["results"]]
         n_val_per_param = [len(param_dict[k]) for k in param_names]
         vmap_sweep = n.zeros(tuple(n_val_per_param) + (nz, ny, nx))
         print(n_val_per_param)
@@ -1467,7 +1514,7 @@ class Job:
         n_params = len(param_names)
         for cidx, combination in enumerate(combinations):
             param_idxs = [
-                n.where(param_dict[param_names[pidx]] == combination[pidx])[0][0] for pidx in range(n_params)
+                n.where(n.array(param_dict[param_names[pidx]]) == combination[pidx])[0][0] for pidx in range(n_params)
             ]
             vmap_sweep[tuple(param_idxs)] = vmaps[cidx]
         v = ui.napari.Viewer()

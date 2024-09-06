@@ -1,5 +1,7 @@
 import numpy as n
 import copy
+from .utils import set_num_processors
+
 
 
 def get_default_params():
@@ -24,12 +26,15 @@ params = {
     # If you have less than 30 planes or you don't want to correct the channel mappings, set to False
     "convert_plane_ids_to_channel_ids": False,
     "n_ch_tif": 30,  # number of planes in the recording
+    "lbm": True,  # whether the data is from light-bead microscopy
     ### File I/O ###
     # Notch filter to remove line noise.
     # Should be a dictionary like:  {'f0' : 200, 'Q' : 1}
     # Where f0 is the frequency of the line noise, and Q is the quality factor
     "notch_filt": None,
     "fix_fastZ": False,  # if you messed up your ROI z-definitions in scanimage, this is useful
+    "num_colors": 1,  # if not lbm data, how many color channels were recorded by scanimage
+    "functional_color_channel": 0,  # if not lbm data, which color channel is the functional one
     ### Initialization Step ###
     # number of files to use for the initialization step
     # Usually the equivalent of ~1 minute is enough
@@ -82,7 +87,8 @@ params = {
     "nr_smooth_iters": 2,
     # 3d registration params
     "pc_size": n.asarray((2, 40, 40)),  # ~ max_reg_zyx
-    "3d_reg": True,  # Use the new 3d registration fucntions
+    "3d_reg": False,  # Use the new 3d registration fucntions
+    "gpu_reg": False,
     # reference image paramaters
     "percent_contribute": 0.9,
     # percentage of frames which contribute to the reference image
@@ -170,9 +176,9 @@ params = {
     # for efficiency, should be t_batch_size / n_proc_corr
     "mproc_batchsize": 25,
     # number of processors to use during correlation map calculation
-    "n_proc": 16,
-    "n_proc_corr": 16,
-    "n_proc_detect": 16,
+    "n_proc": set_num_processors(16),
+    "n_proc_corr": set_num_processors(16),
+    "n_proc_detect": set_num_processors(16),
     # don't touch this
     "dtype": n.float32,
     ### Cell detection ###

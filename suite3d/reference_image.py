@@ -16,9 +16,7 @@ from numpy import fft
 
 from . import register_gpu as reg
 from . import reg_3d as reg_3d # new 3d registration functions
-
-def default_log(string, val): 
-    print(string)
+from .utils import default_log
 
 #Function which runs createion of reference image+ masks
 
