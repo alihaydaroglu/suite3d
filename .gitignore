@@ -1,3 +1,5 @@
 runs
 dev_nb
 *.pyc
+*.nbc
+*.nbi
