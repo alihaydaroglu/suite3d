@@ -435,7 +435,7 @@ class Job:
             if summary["fuse_shifts"] is not None:
                 utils.plot_fuse_shifts(summary["fuse_shifts"], summary["fuse_ccs"])
 
-    def register(self, tifs=None, start_batch_idx=0):
+    def register(self, tifs=None):
         """
         Register the dataset using the method specified in job.params.
 
@@ -458,17 +458,15 @@ class Job:
 
         if do_3d_reg:
             if do_gpu_reg:
-                register_dataset_gpu_3d(
-                    self, tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx
-                )
+                register_dataset_gpu_3d(self, tifs, params, self.dirs, summary, self.log)
             else:
                 pass
                 # register_dataset_3d(self,tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
         else:
             if do_gpu_reg:
-                register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
+                register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log)
             else:
-                register_dataset(self, tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
+                register_dataset(self, tifs, params, self.dirs, summary, self.log)
 
     def register_gpu(self, tifs=None, max_gpu_batches=None):
         params = self.params
@@ -505,7 +503,6 @@ class Job:
             corr_map_dir = self.make_new_dir("corrmap", parent_dir_name=output_dir_name)
             mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
 
-
         if mov is None:
             mov = self.get_registered_movie("registered_fused_data", "fused")
             mov = self.get_registered_movie("registered_fused_data", "fused")
@@ -523,7 +520,6 @@ class Job:
         )
 
         return self.corrmap
-
 
     def load_corr_map_results(self, parent_dir_name=None):
         files = ["max_img.npy", "mean_img.npy", "vmap.npy"]
@@ -704,7 +700,7 @@ class Job:
         Returns:
             dict: sweep_summary containing results and sweep info
         """
-        
+
         sweep_summary = self.setup_sweep(params_to_sweep, sweep_name, all_combinations=all_combinations)
         sweep_summary["sweep_type"] = "segmentation"
         sweep_dir_path = sweep_summary["sweep_dir_path"]
@@ -852,7 +848,7 @@ class Job:
                 log=self.log,
                 savepath=stats_path,
                 patch_idx=patch_idx,
-                offset=(zs[0], ys[0], xs[0])
+                offset=(zs[0], ys[0], xs[0]),
             )
             n.save(info_path, mini_info)
             patch_counter += 1
