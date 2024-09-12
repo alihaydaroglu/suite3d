@@ -3,7 +3,6 @@ import copy
 from .utils import set_num_processors
 
 
-
 def get_default_params():
     return copy.deepcopy(params)
 
@@ -70,7 +69,6 @@ params = {
     # lead to better estimates of the crosstalk
     "crosstalk_n_planes": 2,
     ### Registration ###
-    "use_GPU_registration": True,  # TODO intergrate with registration
     # whether or not to fuse the mesoscope strips
     "fuse_strips": True,
     # number of pixels to skip between strips - None will auto estimate
