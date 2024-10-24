@@ -2,7 +2,12 @@ import tifffile
 import numpy as n
 import time
 from ..developer import todo, deprecated_inputs
-from .lbmio import load_and_stitch_full_tif_mp, convert_lbm_plane_to_channel, get_roi_start_pix
+from .lbmio import (
+    load_and_stitch_full_tif_mp,
+    convert_lbm_plane_to_channel,
+    get_roi_start_pix,
+)
+
 
 class s3dio:
     """
@@ -71,7 +76,6 @@ class s3dio:
         mov_list = _dataloader(paths, params, verbose=verbose, debug=debug)
 
         # concatenate movies across time to make a single movie
-        print()
         mov = n.concatenate(mov_list, axis=1)
 
         if verbose:
@@ -105,15 +109,19 @@ class s3dio:
             params (dict): parameters for loading the tiffs (inherited from self.job.params in the caller)
             verbose (bool, optional): Verbosity. Defaults to True.
             debug (bool, optional): Debugging mode. Defaults to False.
-            
+
         Returns:
             mov (ndarray): the loaded tiff data with shape (planes, frames, y-pixels, x-pixels)
         """
-        todo("The lbm loader filters across the slow y-axis (?), should we do something similar here?")
+        todo(
+            "The lbm loader filters across the slow y-axis (?), should we do something similar here?"
+        )
         todo("Performance may be improved by using multithreaded operations.")
 
         if any([p < 0 or p > params["n_ch_tif"] for p in params["planes"]]):
-            raise ValueError(f"Planes must be in range 0-{params['n_ch_tif']}, but it's set to: {params['planes']}")
+            raise ValueError(
+                f"Planes must be in range 0-{params['n_ch_tif']}, but it's set to: {params['planes']}"
+            )
 
         tic = time.time()
 
@@ -127,41 +135,56 @@ class s3dio:
                 # TODO: make sure that tiffs are 3d when num_colors==1
                 # get functional channel from multi-channel tiff
                 if len(tif_file.shape) != 4:
-                    raise ValueError(f"tiff file is {tif_file.ndim}D instead of 4D, expecting (frames, colors, y-pixels, x-pixels)")
+                    raise ValueError(
+                        f"tiff file is {tif_file.ndim}D instead of 4D, expecting (frames, colors, y-pixels, x-pixels)"
+                    )
                 if tif_file.shape[1] != params["num_colors"]:
-                    raise ValueError(f"tiffs have {tif_file.shape[1]} color channels, expecting {params['num_colors']}")
+                    raise ValueError(
+                        f"tiffs have {tif_file.shape[1]} color channels, expecting {params['num_colors']}"
+                    )
 
                 # in general, imaging is only done with one functional color channel, so we take that one and ignore the others
-                # if anyone is using multiple functional color channels, they need to modify the code themselves or raise an 
+                # if anyone is using multiple functional color channels, they need to modify the code themselves or raise an
                 # issue to ask for this feature to be implemented. A simple work around is to run the suite3d pipeline multiple
-                # times with different functional color channels and then combine the results however you see fit. 
+                # times with different functional color channels and then combine the results however you see fit.
                 tif_file = n.take(tif_file, params["functional_color_channel"], axis=1)
 
-            assert tif_file.ndim == 3, "tiff file (potentially post color_channel selection) is not 3D, expecting (frames, y-pixels, x-pixels)"
+            assert (
+                tif_file.ndim == 3
+            ), "tiff file (potentially post color_channel selection) is not 3D, expecting (frames, y-pixels, x-pixels)"
 
             t, py, px = tif_file.shape
             frames = t // params["n_ch_tif"]
             if frames * params["n_ch_tif"] != t:
                 if verbose:
                     extra_planes = t % params["n_ch_tif"]
-                    self.job.log("Standard 2P Warning: number of planes does not divide into number of tiff images, dropping %d frames" % extra_planes)
+                    self.job.log(
+                        "Standard 2P Warning: number of planes does not divide into number of tiff images, dropping %d frames"
+                        % extra_planes
+                    )
 
                 # handle the possibility of uneven plane number by removing extra frames
                 tif_file = tif_file[: frames * params["n_ch_tif"]]
                 t = frames * len(params["planes"])
 
-            assert frames * len(params["planes"]) == t, "number of planes does not divide into number of tiff images"
-            tif_file = n.swapaxes(tif_file.reshape(frames, len(params["planes"]), py, px), 0, 1)
+            assert (
+                frames * len(params["planes"]) == t
+            ), "number of planes does not divide into number of tiff images"
+            tif_file = n.swapaxes(
+                tif_file.reshape(frames, len(params["planes"]), py, px), 0, 1
+            )
             tif_file = tif_file[params["planes"]]
 
             if debug:
-                print(f"loaded tif_file has shape: {tif_file.shape}, corresponding to [planes, frames, y-pixels, x-pixels]")
+                print(
+                    f"loaded tif_file has shape: {tif_file.shape}, corresponding to [planes, frames, y-pixels, x-pixels]"
+                )
                 print(f":Loading time up to tiff #{itif+1}: {time.time() - tic:.4f} s")
 
             mov_list.append(tif_file)
 
         return mov_list
-    
+
     @deprecated_inputs("mp_args is never set to anything except an empty dictionary")
     def _load_lbm_tifs(self, paths, params, verbose=True, debug=False):
         """
@@ -172,48 +195,53 @@ class s3dio:
             params (dict): parameters for loading the tiffs (inherited from self.job.params in the caller)
             verbose (bool, optional): Verbosity. Defaults to True.
             debug (bool, optional): Debugging mode. Defaults to False.
-            
+
         Returns:
             _type_: _description_
         """
         todo("Add explanation of how lbm tiffs are organized to the docstring.")
 
-        n_ch_tif = params.get('n_ch_tif', 30)
-        if n_ch_tif == 30 and params.get('convert_plane_ids_to_channel_ids', True):
+        n_ch_tif = params.get("n_ch_tif", 30)
+        if n_ch_tif == 30 and params.get("convert_plane_ids_to_channel_ids", True):
             channels = convert_lbm_plane_to_channel(params["planes"])
         else:
             channels = n.array(params["planes"])
-            if params.get('convert_plane_ids_to_channel_ids', True):
-                self.job.log(f"Can't convert plane ids to channel ids, because n_ch is set to {n_ch_tif} rather than 30.")
+            if params.get("convert_plane_ids_to_channel_ids", True):
+                self.job.log(
+                    f"Can't convert plane ids to channel ids, because n_ch is set to {n_ch_tif} rather than 30."
+                )
 
         mov_list = []
         for tif_path in paths:
-            if verbose: 
+            if verbose:
                 self.job.log("Loading %s" % tif_path, 2)
 
-            todo("Removed the **mp_args argument from load_and_stitch_full_tif_mp, should we add it back?")
+            todo(
+                "Removed the **mp_args argument from load_and_stitch_full_tif_mp, should we add it back?"
+            )
             im = load_and_stitch_full_tif_mp(
                 tif_path,
                 channels,
                 n_ch_tif,
-                filt=params['notch_filt'],
-                fix_fastZ=params.get('fix_fastZ', False),
-                n_proc=params.get('n_proc'),
+                filt=params["notch_filt"],
+                fix_fastZ=params.get("fix_fastZ", False),
+                skip_roi=params.get("skip_roi", None),
+                n_proc=params.get("n_proc"),
                 verbose=verbose,
                 debug=debug,
             )
-                        
+
             mov_list.append(im)
-        
+
         return mov_list
-    
+
     def load_roi_start_pix(self, **parameters):
         params = self._update_prms(**parameters)
         if params["lbm"]:
             return self._load_roi_start_pix_lbm(params)
         else:
             return n.array([0]), n.array([0])
-    
+
     def _load_roi_start_pix_lbm(self, params):
         """
         Get the starting y/x pixels for each ROI in the full image. This is required for stitching ROIs into a full image.
@@ -222,7 +250,9 @@ class s3dio:
             ims: list of numpy arrays, each of shape (nt, ny, nx) where nt is the number of frames, and ny, nx are the pixel dimensions.
             rois: list of dictionaries, each containing the keys 'center' and 'sizeXY' which are the center and size of the ROI in SI units.
         """
-        todo("Check if this assumption is correct, that the roi_start_pix values don't depend on which tif we use.")
+        todo(
+            "Check if this assumption is correct, that the roi_start_pix values don't depend on which tif we use."
+        )
         # we only ever need one of the tifs for this (and it shouldn't matter which one)
         tif_path = self.job.tifs[0]
         roi_start_pix_y, roi_start_pix_x = get_roi_start_pix(tif_path, params)

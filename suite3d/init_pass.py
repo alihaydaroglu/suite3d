@@ -10,7 +10,9 @@ from .developer import todo, deprecated
 from .io import s3dio
 
 
-def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method="even", seed=2358):
+def choose_init_tifs(
+    tifs, n_init_files, init_file_pool_lims=None, method="even", seed=2358
+):
     init_file_pool = []
     if init_file_pool_lims is not None:
         for limits in init_file_pool_lims:
@@ -20,7 +22,9 @@ def choose_init_tifs(tifs, n_init_files, init_file_pool_lims=None, method="even"
     init_file_pool = n.array(init_file_pool)
 
     if method == "even":
-        sample_file_ids = n.linspace(0, len(init_file_pool), n_init_files + 2, dtype=int)[1:-1]
+        sample_file_ids = n.linspace(0, len(init_file_pool), n_init_files + 2, dtype=int)[
+            1:-1
+        ]
         sample_tifs = n.array(init_file_pool)[sample_file_ids]
     elif method == "random":
         # n.random.seed(seed)
@@ -72,7 +76,10 @@ def run_init_pass(job):
         raise ValueError("Summary dir does not exist!!")
 
     init_tifs = choose_init_tifs(
-        tifs, params["n_init_files"], params["init_file_pool"], params["init_file_sample_method"]
+        tifs,
+        params["n_init_files"],
+        params["init_file_pool"],
+        params["init_file_sample_method"],
     )
     n_ch_tif = job.params.get("n_ch_tif", 30)
     job.log("Loading init tifs with %d channels" % n_ch_tif)
@@ -86,10 +93,17 @@ def run_init_pass(job):
     nz, nt, ny, nx = init_mov.shape
     if params["init_n_frames"] is not None:
         if nt < params["init_n_frames"]:
-            job.log("Not enough frames in loaded tifs - using %d init frames instead" % nt)
+            job.log(
+                "Not enough frames in loaded tifs - using %d init frames instead" % nt
+            )
         elif nt > params["init_n_frames"]:
-            subset_ts = n.random.choice(n.arange(nt), params["init_n_frames"], replace=False)
-            job.log("Selecting %d random frames from the init tif files" % params["init_n_frames"])
+            subset_ts = n.random.choice(
+                n.arange(nt), params["init_n_frames"], replace=False
+            )
+            job.log(
+                "Selecting %d random frames from the init tif files"
+                % params["init_n_frames"]
+            )
             init_mov = init_mov[:, subset_ts]
     nz, nt, ny, nx = init_mov.shape
     job.log("Loaded movie with %d frames and shape %d, %d, %d" % (nt, nz, ny, nx))
@@ -118,9 +132,18 @@ def run_init_pass(job):
             #                                         show_plots=True, save_plots=job.dirs['summary'],
             #                                         verbose=(job.verbosity == 2))
 
-            crosstalk_planes, cross_coeff, ct_info = utils.estimate_crosstalk(im3d, job.params["cavity_size"])
-            utils.plot_ct_hist(crosstalk_planes, show_plots=True, save_plots=job.dirs["summary"])
-            utils.ct_gifs(im3d, job.params["cavity_size"], crosstalk_planes, save_plots=job.dirs["summary"])
+            crosstalk_planes, cross_coeff, ct_info = utils.estimate_crosstalk(
+                im3d, job.params["cavity_size"]
+            )
+            utils.plot_ct_hist(
+                crosstalk_planes, show_plots=True, save_plots=job.dirs["summary"]
+            )
+            utils.ct_gifs(
+                im3d,
+                job.params["cavity_size"],
+                crosstalk_planes,
+                save_plots=job.dirs["summary"],
+            )
 
             job.log("Subtracting with estimated coefficient %0.3f" % cross_coeff)
             if cross_coeff > 0.4 or cross_coeff < 0.01:
@@ -130,9 +153,16 @@ def run_init_pass(job):
                 # plane_idx = n.where(n.array(params['planes']) == plane)[0][0]
                 # sub_plane_idx = n.where(n.array(params['planes']) == plane - 15)[0][0]
 
-                job.log("Subtracting plane %d from %d" % (plane - params["cavity_size"], plane), 3)
+                job.log(
+                    "Subtracting plane %d from %d"
+                    % (plane - params["cavity_size"], plane),
+                    3,
+                )
                 # job.log("        Corresponds to index %d from %d" % (sub_plane_idx, plane_idx))
-                init_mov[plane] = init_mov[plane] - init_mov[plane - params["cavity_size"]] * cross_coeff
+                init_mov[plane] = (
+                    init_mov[plane]
+                    - init_mov[plane - params["cavity_size"]] * cross_coeff
+                )
         im3d = init_mov.mean(axis=1)
     else:
         job.log("No crosstalk estimation or subtraction")
@@ -142,6 +172,7 @@ def run_init_pass(job):
 
     if job.params.get("fuse_strips", True):
         xs = jobio.load_roi_start_pix()[1]
+        print(xs)
         if job.params.get("fuse_shift_override", None) is not None:
             fuse_shift = int(job.params["fuse_shift_override"])
             fuse_shifts = None
@@ -166,7 +197,9 @@ def run_init_pass(job):
         "smooth_sigma": params.get("smooth_sigma_reference", 1.15),  # spatial taper width
         "niter": params.get("n_reference_iterations", 8),
         "max_reg_xy_reference": params.get("max_reg_xy_reference", 50),
-        "pc_size": params.get("pc_size", (2, 20, 20)),  # the max size examined in registration
+        "pc_size": params.get(
+            "pc_size", (2, 20, 20)
+        ),  # the max size examined in registration
         "batch_size": params.get("gpu_reference_batch_size", 20),  # keep in gpu RAM
         "3d_reg": params.get("3d_reg", True),  # Default is true
         "plane_to_plane_alignment": params.get(
@@ -174,7 +207,7 @@ def run_init_pass(job):
         ),  # whether to align planes to each other
     }
     if job.params.get("fuse_strips", True):
-        mov_fuse, new_xs, og_xs = ref.fuse_mov(init_mov, fuse_shift, xs)
+        mov_fuse, new_xs, og_xs = ref.fuse_mov(init_mov, fuse_shift, n.sort(xs))
     else:
         mov_fuse = init_mov
         new_xs = [[0, mov_fuse.shape[3]]]
@@ -182,10 +215,19 @@ def run_init_pass(job):
 
     if reference_params["3d_reg"]:
         job.log("Using 3d registration")
-        tvecs, ref_image, all_refs_and_masks, pad_sizes, reference_params, reference_info, shifted_mov = (
-            ref.compute_reference_and_masks_3d(
-                mov_fuse, reference_params, log_cb=job.log, use_GPU=params.get("gpu_reg", True)
-            )
+        (
+            tvecs,
+            ref_image,
+            all_refs_and_masks,
+            pad_sizes,
+            reference_params,
+            reference_info,
+            shifted_mov,
+        ) = ref.compute_reference_and_masks_3d(
+            mov_fuse,
+            reference_params,
+            log_cb=job.log,
+            use_GPU=params.get("gpu_reg", True),
         )
 
         summary_mov_path = os.path.join(job.dirs["summary"], "init_mov.npy")
@@ -219,7 +261,10 @@ def run_init_pass(job):
         job.log("Using 2d registration")
         tvecs, ref_image, ref_padded, all_refs_and_masks, pad_sizes, reference_params = (
             ref.compute_reference_and_masks(
-                mov_fuse, reference_params, log_cb=job.log, use_GPU=params.get("gpu_reg", True)
+                mov_fuse,
+                reference_params,
+                log_cb=job.log,
+                use_GPU=params.get("gpu_reg", True),
             )
         )
 
