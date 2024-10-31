@@ -1,6 +1,11 @@
 import os
 from scipy.interpolate import RectBivariateSpline
-from scipy.ndimage import maximum_filter, gaussian_filter, uniform_filter, percentile_filter
+from scipy.ndimage import (
+    maximum_filter,
+    gaussian_filter,
+    uniform_filter,
+    percentile_filter,
+)
 import numpy as n
 from multiprocessing import Pool
 from . import utils
@@ -34,12 +39,19 @@ def detect_cells(
     vmultiplier = 1  # max(1, nt / magic_number)
     peak_thresh = vmultiplier * peak_thresh
     vmin = vmap.min()
-    log("Starting extraction with peak_thresh: %0.3f and Th2: %0.3f" % (peak_thresh, Th2), 2)
+    log(
+        "Starting extraction with peak_thresh: %0.3f and Th2: %0.3f" % (peak_thresh, Th2),
+        2,
+    )
 
     for iter_idx in range(max_iter):
         med, zz, yy, xx, lam, peak_val = find_top_roi3d(vmap, xy_pix_scale=3)
         if peak_val < peak_thresh:
-            log("Iter %04d: peak is too small (%0.3f) - ending extraction" % (iter_idx, peak_val), 2)
+            log(
+                "Iter %04d: peak is too small (%0.3f) - ending extraction"
+                % (iter_idx, peak_val),
+                2,
+            )
             break
         tproj = patch[:, zz, yy, xx] @ lam
         threshold = min(Th2, n.percentile(tproj, percentile)) if percentile > 0 else Th2
@@ -49,6 +61,9 @@ def detect_cells(
             log("%d/%d active frames" % (len(active_frames), nt), 3)
             if len(active_frames) == 0:
                 log("WARNING: no active frames in roi %d" % iter_idx, 1)
+                log("WILL BREAK")
+                break
+
             zz, yy, xx, lam = iter_extend3d(
                 zz,
                 yy,
@@ -64,6 +79,9 @@ def detect_cells(
             active_frames = n.nonzero(tproj > threshold)[0]
             # print("           active frames after recompute: %d" % len(active_frames))
             npix = len(lam)
+        if len(active_frames) == 0:
+            log("BREAKING")
+            continue
         sub = n.zeros((nt, npix))
         sub[active_frames] = tproj[active_frames, n.newaxis] @ lam[n.newaxis]
         patch[:, zz, yy, xx] -= sub
@@ -74,10 +92,14 @@ def detect_cells(
             # see lines with multiscale_mask where movu is edited in sparsery
             # TODO
             mnew = patch[:, zz, yy, xx]
-            vmap[zz, yy, xx] = ((mnew**2) * n.float32(mnew > threshold)).sum(axis=0) ** 0.5
+            vmap[zz, yy, xx] = ((mnew**2) * n.float32(mnew > threshold)).sum(
+                axis=0
+            ) ** 0.5
         else:
             zzx, yyx, xxx = extend_roi3d(zz, yy, xx, (nz, ny, nx), extend_z=True)
-            zzx, yyx, xxx = extend_roi3d_iter(zzx, yyx, xxx, (nz, ny, nx), n_iters=ext_subtract_iters, extend_z=False)
+            zzx, yyx, xxx = extend_roi3d_iter(
+                zzx, yyx, xxx, (nz, ny, nx), n_iters=ext_subtract_iters, extend_z=False
+            )
             # print(zz)
             # print(zzx)
             vmap[zzx, yyx, xxx] = vmin
@@ -97,7 +119,15 @@ def detect_cells(
         # log("Cell %d activity_thresh %.3f, peak_thresh: %.3f, %d active_frames" % (iter_idx+1, threshold, peak_thresh, len(active_frames)), 2)
         log(
             "Added cell %d at %02d, %03d, %03d, peak: %0.3f, %d frames, %d pixels"
-            % (len(stats), stat["med"][0], stat["med"][1], stat["med"][2], peak_val, len(active_frames), npix),
+            % (
+                len(stats),
+                stat["med"][0],
+                stat["med"][1],
+                stat["med"][2],
+                peak_val,
+                len(active_frames),
+                npix,
+            ),
             3,
         )
         if savepath is not None and iter_idx % 250 == 0 and iter_idx > 0:
@@ -130,7 +160,7 @@ def detect_cells_mp(
     log=default_log,
     max_pix=250,
     recompute_v=False,
-    allow_overlap=True,
+    allow_overlap=False,
     offset=(0, 0, 0),
     savepath=None,
     debug=False,
@@ -166,6 +196,7 @@ def detect_cells_mp(
     stats = []
     log("Loading movie patch to shared memory", 3)
     shmem_patch, shmem_par_patch, patch = utils.create_shmem_from_arr(patch, copy=True)
+    patch_norms = n.sqrt((patch**2).sum(axis=0))
     log("Loaded", 3)
     Th2 = activity_thresh
     vmultiplier = 1
@@ -186,7 +217,10 @@ def detect_cells_mp(
                 log(f"Iter {iter_idx:04d}: peak is too small - ending extraction", 2)
                 break
 
-            log(f"Iter {iter_idx:04d}: running {len(filtered_rois):02d} ROIs in parallel", 3)
+            log(
+                f"Iter {iter_idx:04d}: running {len(filtered_rois):02d} ROIs in parallel",
+                3,
+            )
             roi_idxs = n.arange(len(filtered_rois)) + roi_idx + 1
 
             returns = p.starmap(
@@ -205,12 +239,23 @@ def detect_cells_mp(
                         offset,
                         max_pix,
                         patch_idx,
+                        patch_norms,
                     )
                     for i in range(len(filtered_rois))
                 ],
             )
 
-            process_returns(returns, patch, vmap, stats, allow_overlap, vmin, savepath, log, ext_subtract_iters)
+            process_returns(
+                returns,
+                patch,
+                vmap,
+                stats,
+                allow_overlap,
+                vmin,
+                savepath,
+                log,
+                ext_subtract_iters,
+            )
             roi_idx = len(stats)
 
             if savepath is not None and roi_idx % 250 == 0 and roi_idx > 0:
@@ -237,7 +282,9 @@ def filter_rois(outs, peak_thresh):
     return [out for out in outs if out[-1] >= peak_thresh]
 
 
-def process_returns(returns, patch, vmap, stats, allow_overlap, vmin, savepath, log, ext_subtract_iters):
+def process_returns(
+    returns, patch, vmap, stats, allow_overlap, vmin, savepath, log, ext_subtract_iters
+):
     """
     Process the returns from cell detection workers.
 
@@ -252,16 +299,22 @@ def process_returns(returns, patch, vmap, stats, allow_overlap, vmin, savepath, 
         log (function): Logging function
     """
     for batch_stats, batch_sub in returns:
+        if batch_stats is None and batch_sub is None:
+            continue
         zz, yy, xx = batch_stats["coords_patch"]
         threshold = batch_stats["threshold"]
         patch[:, zz, yy, xx] -= batch_sub
 
-        update_vmap(vmap, patch, zz, yy, xx, threshold, allow_overlap, vmin, ext_subtract_iters)
+        update_vmap(
+            vmap, patch, zz, yy, xx, threshold, allow_overlap, vmin, ext_subtract_iters
+        )
         stats.append(batch_stats)
         log_cell_addition(log, batch_stats, len(stats))
 
 
-def update_vmap(vmap, patch, zz, yy, xx, threshold, allow_overlap, vmin, ext_subtract_iters=0):
+def update_vmap(
+    vmap, patch, zz, yy, xx, threshold, allow_overlap, vmin, ext_subtract_iters=0
+):
     """
     Update the corelatiton map after detecting a cell.
 
@@ -273,13 +326,13 @@ def update_vmap(vmap, patch, zz, yy, xx, threshold, allow_overlap, vmin, ext_sub
         allow_overlap (bool): Whether to allow overlapping ROIs
         vmin (float): Minimum value for vmap
     """
-    nz,ny,nx = vmap.shape
+    nz, ny, nx = vmap.shape
     if allow_overlap:
         mnew = patch[:, zz, yy, xx]
         vmap[zz, yy, xx] = (mnew * n.float32(mnew > threshold)).sum(axis=0) ** 0.5
     else:
         zzx, yyx, xxx = extend_roi3d(zz, yy, xx, vmap.shape, extend_z=True)
-        
+
         zzx, yyx, xxx = extend_roi3d_iter(
             zzx, yyx, xxx, (nz, ny, nx), n_iters=ext_subtract_iters, extend_z=False
         )
@@ -292,6 +345,7 @@ def log_cell_addition(log, batch_stats, stats_len):
 
     Args:
         log (function): Logging function
+
         batch_stats (dict): Statistics of the detected cell
         stats_len (int): Current number of detected cells
     """
@@ -348,6 +402,7 @@ def detect_cells_worker(
     offset,
     max_pix=1000,
     patch_idx=-1,
+    patch_norms=None,
 ):
     """
     Worker function for detecting cells in parallel.
@@ -378,9 +433,19 @@ def detect_cells_worker(
 
     for i in range(roi_ext_iterations):
         if len(active_frames) == 0:
-            default_log(1, "WARNING: no active frames in roi %d" % roi_idx)
-        zz, yy, xx, lam = iter_extend3d(
-            zz, yy, xx, active_frames, patch, extend_thresh=extend_thresh, max_ext_iters=max_ext_iters, max_pix=max_pix
+            default_log("WARNING: no active frames in roi %d (iter %d)" % (roi_idx, i), 1)
+            default_log("RETURNING")
+            return None, None
+        zz, yy, xx, lam = alternate_iter_extend3d(
+            zz,
+            yy,
+            xx,
+            active_frames,
+            patch,
+            extend_thresh=extend_thresh,
+            max_ext_iters=max_ext_iters,
+            max_pix=max_pix,
+            patch_norms=patch_norms,
         )
         tproj = patch[:, zz, yy, xx] @ lam
         active_frames = n.nonzero(tproj > threshold)[0]
@@ -427,13 +492,17 @@ def find_top_roi3d(V1, xy_pix_scale=3, z_pix_scale=1, peak_thresh=None):
     return med, zz, yy, xx, lam, peak_val
 
 
-def find_top_n_rois(V1, n_rois=5, xy_pix_scale=3, z_pix_scale=1, peak_thresh=None, vmin=0):
+def find_top_n_rois(
+    V1, n_rois=5, xy_pix_scale=3, z_pix_scale=1, peak_thresh=None, vmin=0
+):
     saves = []
     bufs = []
     outs = []
     V1 = V1.copy()  # does this break?
     for i in range(n_rois):
-        med, zz, yy, xx, lam, peak_val = find_top_roi3d(V1, xy_pix_scale, z_pix_scale, peak_thresh)
+        med, zz, yy, xx, lam, peak_val = find_top_roi3d(
+            V1, xy_pix_scale, z_pix_scale, peak_thresh
+        )
         if med is None:
             bufs.append(None)
             saves.append(None)
@@ -461,7 +530,10 @@ def add_square3d(zi, yi, xi, shape, xy_pix_scale=3, z_pix_scale=1):
     zz, yy, xx = [vv.flatten() for vv in n.meshgrid(zs, ys, xs)]
 
     # check if each coord is within the possible coordinates
-    valid_pix = n.all([n.all([vv > -1, vv < nv], axis=0) for vv, nv in zip((zz, yy, xx), (nz, ny, nx))], axis=0)
+    valid_pix = n.all(
+        [n.all([vv > -1, vv < nv], axis=0) for vv, nv in zip((zz, yy, xx), (nz, ny, nx))],
+        axis=0,
+    )
 
     zz = zz[valid_pix]
     yy = yy[valid_pix]
@@ -473,27 +545,97 @@ def add_square3d(zi, yi, xi, shape, xy_pix_scale=3, z_pix_scale=1):
     return zz, yy, xx, mask
 
 
+from matplotlib import pyplot as plt
+
+
+def alternate_iter_extend3d(
+    zz,
+    yy,
+    xx,
+    active_frames,
+    mov,
+    verbose=False,
+    extend_thresh=0.001,
+    max_ext_iters=10,
+    extend_z=True,
+    max_pix=10000,
+    patch_norms=None,
+):
+    npix = 0
+    iter_idx = 0
+    mov_act = mov[active_frames]
+    lam = n.ones_like(zz, dtype=float) / (len(zz))
+    # print("Called alternate_iter_extend_3d")
+    while npix < max_pix and iter_idx < max_ext_iters:
+        npix = len(yy)
+        roi_activity = (mov_act[:, zz, yy, xx] * lam).sum(axis=1)
+        roi_activity_normed = roi_activity / n.sqrt((roi_activity**2).sum())
+        zz, yy, xx = extend_roi3d(zz, yy, xx, mov.shape[1:], extend_z=extend_z)
+        candidate_pix_activity = mov_act[:, zz, yy, xx]
+        candidate_norms = patch_norms[zz, yy, xx]
+        # print(candidate_pix_activity.shape)
+        # print(roi_activity_normed)
+        candidate_proj_on_roi = roi_activity_normed @ candidate_pix_activity
+        frac_candidate_variance_on_roi = candidate_proj_on_roi / candidate_norms
+
+        incl_pix = frac_candidate_variance_on_roi > extend_thresh
+
+        zz, yy, xx, fracs = [
+            vv[incl_pix] for vv in [zz, yy, xx, frac_candidate_variance_on_roi]
+        ]
+        lam = fracs - extend_thresh
+        lam /= n.sqrt((lam**2).sum())
+
+        if incl_pix.sum() == 0:
+            if verbose:
+                print("Break - no pixels")
+            break
+        if verbose:
+            print(
+                "Iter %d, %d/%d pix included" % (iter_idx, incl_pix.sum(), len(incl_pix))
+            )
+        if not incl_pix.sum() > npix:
+            if verbose:
+                print("Break - no more growing")
+            break
+        iter_idx += 1
+        # print(candidate_sigma.shape)
+        # plt.hist(corrs)
+        # plt.show()
+
+        # print(candidate_pix_activity.shape)
+        # print("candidates")
+        # print(roi_activity.shape)
+        # plt.plot(roi_activity)
+        # plt.plot(candidate_pix_activity, alpha=0.1)
+        # plt.show()
+        # lam = lam / n.sum(lam**2) ** 0.5
+    return zz, yy, xx, lam
+
+
 def iter_extend3d(
-    zz, yy, xx, active_frames, mov, verbose=False, extend_thresh=0.2, max_ext_iters=10, extend_z=True, max_pix=10000
+    zz,
+    yy,
+    xx,
+    active_frames,
+    mov,
+    verbose=False,
+    extend_thresh=0.2,
+    max_ext_iters=10,
+    extend_z=True,
+    max_pix=10000,
 ):
     # pr = cProfile.Profile()
     # pr.enable()
     npix = 0
     iter_idx = 0
     mov_act = mov[active_frames].mean(axis=0)
-    use_ratio = False
     # lam = n.array([lam0])
     while npix < max_pix and iter_idx < max_ext_iters:
         npix = len(yy)
         zz, yy, xx = extend_roi3d(zz, yy, xx, mov.shape[1:], extend_z=extend_z)
         lam = mov_act[zz, yy, xx]
-        if use_ratio:
-            lam_ratio = mov_ratio[zz, yy, xx]
-            incl_pix = lam_ratio > max(lam_ratio.max() * extend_thresh, 0)
-
-            print("including %d of %d pixels with max %.2f" % (len(incl_pix), len(lam_ratio), lam_ratio.max()))
-        else:
-            incl_pix = lam > max(lam.max() * extend_thresh, 0)
+        incl_pix = lam > max(lam.max() * extend_thresh, 0)
 
         # print("including %d of %d pixels with max lam")
         if incl_pix.sum() == 0:
@@ -502,7 +644,9 @@ def iter_extend3d(
             break
         zz, yy, xx, lam = [vv[incl_pix] for vv in [zz, yy, xx, lam]]
         if verbose:
-            print("Iter %d, %d/%d pix included" % (iter_idx, incl_pix.sum(), len(incl_pix)))
+            print(
+                "Iter %d, %d/%d pix included" % (iter_idx, incl_pix.sum(), len(incl_pix))
+            )
         if not incl_pix.sum() > npix:
             if verbose:
                 print("Break - no more growing")
@@ -556,7 +700,9 @@ def extend_helper(vv_roi, vv_ring, extend_v, nv, v_max_extension=None):
     return n.arange(v_absmin, v_absmax)
 
 
-def create_cell_pix(stats, shape, lam_percentile=70.0, percentile_filter_shape=(3, 25, 25)):
+def create_cell_pix(
+    stats, shape, lam_percentile=70.0, percentile_filter_shape=(3, 25, 25)
+):
     nz, ny, nx = shape
     lam_map = n.zeros((nz, ny, nx))
     roi_map = n.zeros((nz, ny, nx))
@@ -586,7 +732,9 @@ def get_neuropil_mask(
 ):
 
     zz_roi, yy_roi, xx_roi = stat["coords"]
-    zz_ring, yy_ring, xx_ring = extend_roi3d_iter(zz_roi, yy_roi, xx_roi, cell_pix.shape, np_ring_iterations)
+    zz_ring, yy_ring, xx_ring = extend_roi3d_iter(
+        zz_roi, yy_roi, xx_roi, cell_pix.shape, np_ring_iterations
+    )
 
     nz, ny, nx = cell_pix.shape
 
@@ -625,7 +773,11 @@ def get_neuropil_mask(
 def compute_npil_masks_mp_helper(coords, cell_pix_shmem_par, npil_pars, offset):
     shmem, cell_pix = utils.load_shmem(cell_pix_shmem_par)
     npcoords = get_neuropil_mask({"coords": coords}, cell_pix, **npil_pars)
-    npcoords_patch = (npcoords[0] - offset[0], npcoords[1] - offset[1], npcoords[2] - offset[2])
+    npcoords_patch = (
+        npcoords[0] - offset[0],
+        npcoords[1] - offset[1],
+        npcoords[2] - offset[2],
+    )
     shmem.close()
     return (npcoords, npcoords_patch)
 
@@ -637,11 +789,14 @@ def compute_npil_masks_mp(stats, shape, offset=(0, 0, 0), n_proc=8, npil_pars={}
     # TODO: parallelize this (EASY)
     # tic = time.time()
     cell_pix = create_cell_pix(stats, shape)
-    cell_shmem, cell_shmem_par, cell_pix = utils.create_shmem_from_arr(cell_pix, copy=True)
+    cell_shmem, cell_shmem_par, cell_pix = utils.create_shmem_from_arr(
+        cell_pix, copy=True
+    )
     # print(time.time() - tic)
     pool = Pool(n_proc)
     all_np_coords = pool.starmap(
-        compute_npil_masks_mp_helper, [(stat["coords"], cell_shmem_par, npil_pars, offset) for stat in stats]
+        compute_npil_masks_mp_helper,
+        [(stat["coords"], cell_shmem_par, npil_pars, offset) for stat in stats],
     )
     cell_shmem.close()
     cell_shmem.unlink()
@@ -663,7 +818,9 @@ def compute_npil_masks(stats, shape, offset=(0, 0, 0), np_params={}):
     return stats
 
 
-def extract_activity_mp(mov, stats, batchsize_frames=500, log=default_log, offset=None, n_frames=None, nproc=8):
+def extract_activity_mp(
+    mov, stats, batchsize_frames=500, log=default_log, offset=None, n_frames=None, nproc=8
+):
     pass
     # if you run out of memory, reduce batchsize_frames
     # if offset is not None:
@@ -690,7 +847,9 @@ def extract_activity_mp(mov, stats, batchsize_frames=500, log=default_log, offse
         start = batch_idx * batchsize_frames
         end = min(nt, start + batchsize_frames)
         mov_batch = mov[:, start:end].compute()
-        shmem_batch, shmem_par_batch, mov_batch = utils.create_shmem_from_arr(mov_batch, copy=True)
+        shmem_batch, shmem_par_batch, mov_batch = utils.create_shmem_from_arr(
+            mov_batch, copy=True
+        )
         log("Batch size: %.2f GB" % (mov_batch.nbytes / (1024**3),), 4)
         for i in range(ns):
             stat = stats[i]
@@ -785,8 +944,15 @@ def extract_activity(
             lam = stat["lam"] / stat["lam"].sum()
             F_roi[i, start:end] = lam @ mov_batch[zc, :, yc, xc]
             F_neu[i, start:end] = mov_batch[npzc, :, npyc, npxc].mean(axis=0)
-        if (intermediate_save_dir is not None) and (batch_idx > 0) and (batch_idx % batch_save_interval == 0):
-            log("Batch %d: Saving intermediate results to %s" % (batch_idx, intermediate_save_dir))
+        if (
+            (intermediate_save_dir is not None)
+            and (batch_idx > 0)
+            and (batch_idx % batch_save_interval == 0)
+        ):
+            log(
+                "Batch %d: Saving intermediate results to %s"
+                % (batch_idx, intermediate_save_dir)
+            )
             n.save(os.path.join(intermediate_save_dir, "F.npy"), F_roi)
             n.save(os.path.join(intermediate_save_dir, "Fneu.npy"), F_neu)
     return F_roi, F_neu
@@ -828,7 +994,9 @@ def prune_overlapping_cells(stats, dist_thresh=5, lam_overlap_thresh=0.5):
         nx = min(n0, n1)
         frac_intersect = n_intersect / nx
         pair_fracs.append(frac_intersect)
-        max_lam.append(max(lam_intersect_0 / lams[p0].sum(), lam_intersect_1 / lams[p1].sum()))
+        max_lam.append(
+            max(lam_intersect_0 / lams[p0].sum(), lam_intersect_1 / lams[p1].sum())
+        )
     max_lam = n.array(max_lam)
 
     overlap_pairs_flag = max_lam >= lam_overlap_thresh
