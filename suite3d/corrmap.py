@@ -27,7 +27,14 @@ computation_param_names = ["n_proc", "dtype", "t_batch_size"]
 
 
 def calculate_corrmap(
-    mov, params, summary=None, batch_dir=None, save_mov_sub=True, mov_sub_dir=None, iter_limit=None, log=default_log
+    mov,
+    params,
+    summary=None,
+    batch_dir=None,
+    save_mov_sub=True,
+    mov_sub_dir=None,
+    iter_limit=None,
+    log=default_log,
 ):
     """
     Compute the correlation map of a large movie in batches, and save results to disk
@@ -45,7 +52,11 @@ def calculate_corrmap(
         _type_: _description_
     """
     nz, nt, ny, nx = mov.shape
-    log("Computing correlation map of movie with %d frames, volume shape: %d, %d, %d" % (nt, nz, ny, nx), 1)
+    log(
+        "Computing correlation map of movie with %d frames, volume shape: %d, %d, %d"
+        % (nt, nz, ny, nx),
+        1,
+    )
 
     # get two sub-dictionaries of params with relevant parameters
     corr_map_params = get_matching_params(corr_map_param_names, params)
@@ -66,7 +77,9 @@ def calculate_corrmap(
         # and a set of filenames where mov_sub will be saved
         save = True
         batch_dirs = make_batch_paths(batch_dir, n_batches, prefix="batch", dirs=True)
-        mov_sub_paths = make_batch_paths(mov_sub_dir, n_batches, prefix="mov_sub", suffix=".npy", dirs=False)
+        mov_sub_paths = make_batch_paths(
+            mov_sub_dir, n_batches, prefix="mov_sub", suffix=".npy", dirs=False
+        )
 
     # initialize accumulators
     accums = init_corr_map_accumulators((nz, ny, nx), dtype=dtype)
@@ -109,7 +122,12 @@ def calculate_corrmap(
 
 
 def compute_corr_map_batch(
-    mov, corr_map_params=None, computation_params=None, accum=None, summary=None, log=default_log
+    mov,
+    corr_map_params=None,
+    computation_params=None,
+    accum=None,
+    summary=None,
+    log=default_log,
 ):
     # TODO DOCSTRING
 
@@ -121,7 +139,9 @@ def compute_corr_map_batch(
     if corr_map_params is None:
         corr_map_params = default_params.get_matching_default_params(corr_map_param_names)
     if computation_params is None:
-        computation_params = default_params.get_matching_default_params(computation_param_names)
+        computation_params = default_params.get_matching_default_params(
+            computation_param_names
+        )
 
     # load relevant parameters, and convert micron-based params to pixels
     # these parameters relate to algorithm. see default_params.npy for descriptions
@@ -130,7 +150,11 @@ def compute_corr_map_batch(
     temporal_hpf = min(nb, temporal_hpf)
     if nb % temporal_hpf != 0:
         temporal_hpf = int(nb / (n.floor(nb / temporal_hpf)))
-        log("Adjusting temporal hpf to %d to evenly divide %d frames" % (temporal_hpf, nb), 4)
+        log(
+            "Adjusting temporal hpf to %d to evenly divide %d frames"
+            % (temporal_hpf, nb),
+            4,
+        )
 
     npil_filt_type = corr_map_params["npil_filt_type"]
     edge_crop_npix = corr_map_params["edge_crop_npix"]
