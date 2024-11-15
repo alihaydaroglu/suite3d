@@ -6,6 +6,7 @@ from . import default_params
 from . import detection3d as dtu
 from .utils import to_int, default_log, get_matching_params, make_batch_paths
 from . import utils
+import time
 
 
 corr_map_param_names = [
@@ -72,6 +73,8 @@ def calculate_corrmap(
     # prepare the directories to save results into
     if dir is None:
         save = False
+        batch_dirs = None
+        mov_sub_paths = None
     else:
         # make a set of directories to store intermediate results,
         # and a set of filenames where mov_sub will be saved
@@ -85,6 +88,7 @@ def calculate_corrmap(
     accums = init_corr_map_accumulators((nz, ny, nx), dtype=dtype)
 
     for batch_idx in range(n_batches):
+        log("prep", tic=True)
         start_idx = batch_idx * t_batch_size
         end_idx = min(nt, start_idx + t_batch_size)
         log("Running batch %d of %d" % (batch_idx + 1, n_batches), 2)
@@ -98,6 +102,8 @@ def calculate_corrmap(
             log("Not a dask array", 3)
             mov_batch = n.swapaxes(mov_batch, 0, 1).astype(dtype)
         # compute the correlation map for this batch and update accumulators
+        log("prep", toc=True)
+        log("batch", tic=True)
         vmap_batch, mov_sub_batch = compute_corr_map_batch(
             mov_batch,
             corr_map_params,
@@ -106,6 +112,8 @@ def calculate_corrmap(
             summary,
             log,
         )
+        log("batch", toc=True)
+        log("save", tic=True)
         if save:
             # save results to previously created dirs
             save_batch_results(
@@ -115,7 +123,7 @@ def calculate_corrmap(
             )
             if save_mov_sub:
                 n.save(mov_sub_paths[batch_idx], mov_sub_batch)
-
+        log("save", toc=True)
     gc.collect()
     save_batch_results(vmap_batch, accums, batch_dir)
     return vmap_batch
@@ -130,7 +138,7 @@ def compute_corr_map_batch(
     log=default_log,
 ):
     # TODO DOCSTRING
-
+    log("batch_setup", tic=True)
     # get the size of the movie
     nb, nz, ny, nx = mov.shape
 
@@ -195,27 +203,40 @@ def compute_corr_map_batch(
     # nt is the number of frames processed in previous batches
     nt = accum["n_frames_proc"]
 
+    log("batch_setup", toc=True)
     #### correlation map algorithm #####
 
     # set the edges of each plane to 0. Otherwise registration causes artifacts
+    log("batch_edgecrop", tic=True)
     mov = utils.edge_crop_movie(mov, summary, edge_crop_npix)
+    log("batch_edgecrop", toc=True)
 
+    log("accum_meanmeax", tic=True)
     # add the frames from the current batch to accumulated mean,max
     dtu.accumulate_mean(accum["mean_vol"], mov, nt)
     dtu.accumulate_max(accum["max_vol"], mov)
-
+    log("accum_meanmeax", toc=True)
     # a simple high-pass filter by subtracting the rolling mean
-    mov = dtu.hp_rolling_mean_filter(mov, temporal_hpf, copy=False)
 
+    log("batch_rolling_mean_filt", tic=True)
+    mov = dtu.hp_rolling_mean_filter(mov, temporal_hpf, copy=False)
+    log("batch_rolling_mean_filt", toc=True)
     # compute the standard deviation of temporal differences for each voxel
     # (e.g. the "peakiness" of each voxel) and normalize the movie by it
+
+    log("batch_accum_sdmov", tic=True)
+    log("THIS IS A BOTTLENECK - parallelize", 4)
     sdmov = dtu.accumulate_sdmov(
         accum["sdmov_2"],
         mov,
         nt,
     )
+    log("batch_accum_sdmov", toc=True)
+    log("batch_norm_sdmov", tic=True)
     dtu.normalize_movie_by_sdmov(mov, sdmov, sdnorm_exp)
+    log("batch_norm_sdmov", toc=True)
 
+    log("batch_filt_reduce", tic=True)
     vmap_2, mov_sub = dtu.filter_and_reduce_movie(
         mov,
         npil_filt_type,
@@ -227,8 +248,12 @@ def compute_corr_map_batch(
         minibatch_size,
         log,
     )
-    vmap = dtu.accumulate_vmap_2(accum["vmap_2"], vmap_2, nt + nb)
 
+    log("batch_filt_reduce", toc=True)
+
+    log("batch_accum_vmap", tic=True)
+    vmap = dtu.accumulate_vmap_2(accum["vmap_2"], vmap_2, nt + nb)
+    log("batch_accum_vmap", toc=True)
     accum["n_frames_proc"] += nb
 
     return vmap, mov_sub

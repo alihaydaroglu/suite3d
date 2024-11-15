@@ -27,6 +27,9 @@ params = {
     "n_ch_tif": 30,  # number of planes in the recording
     "skip_roi": None,  # if you want to skip one of the mROIs, enter its idx
     "lbm": True,  # whether the data is from light-bead microscopy
+    "faced": False,  # whether data is from FACED microscopy,
+    "faced_nz": None,  # number of z-planes in FACED data
+    "multiplane_2p_use_planes": None,
     ### File I/O ###
     # Notch filter to remove line noise.
     # Should be a dictionary like:  {'f0' : 200, 'Q' : 1}

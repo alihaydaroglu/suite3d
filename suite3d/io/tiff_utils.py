@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 import mrcfile
 from .lbmio import get_meso_rois
 from ..developer import todo, deprecated
+from natsort import natsorted
 
 
 def get_si_params(tif_path):
@@ -39,6 +40,7 @@ def show_tif_all_planes(
     ncols=5,
     same_scale=False,
     vminmax_percentile=(0.5, 99.5),
+    vminmax=None,
     **kwargs,
 ):
     """
@@ -72,29 +74,30 @@ def show_tif_all_planes(
             axs = [axs]
     # make all the images have the same color scale
     if same_scale:
-        for z in range(nz):
-            if z == 0:
-                non_nan = ~n.isnan(img[z])
-                vmin = n.percentile(img[z][non_nan], vminmax_percentile[0])
-                vmax = n.percentile(img[z][non_nan], vminmax_percentile[1])
-            else:
-                non_nan = ~n.isnan(img[z])
-                vmin = min(vmin, n.percentile(img[z][non_nan], vminmax_percentile[0]))
-                vmax = max(vmax, n.percentile(img[z][non_nan], vminmax_percentile[1]))
-
+        if vminmax is None:
+            todo("whats going on here?")
+            for z in range(nz):
+                if z == 0:
+                    non_nan = ~n.isnan(img[z])
+                    vmin = n.percentile(img[z][non_nan], vminmax_percentile[0])
+                    vmax = n.percentile(img[z][non_nan], vminmax_percentile[1])
+                else:
+                    non_nan = ~n.isnan(img[z])
+                    vmin = min(vmin, n.percentile(img[z][non_nan], vminmax_percentile[0]))
+                    vmax = max(vmax, n.percentile(img[z][non_nan], vminmax_percentile[1]))
+            vminmax = (vmin, vmax)
     for row in range(nrows):
         for col in range(ncols):
             plane_no = row * ncols + col
             if plane_no < nz:  # catch empty planes
                 if same_scale:
-                    show_tif(
-                        img[plane_no], ax=axs[row][col], vminmax=(vmin, vmax), **kwargs
-                    )
+                    show_tif(img[plane_no], ax=axs[row][col], vminmax=vminmax, **kwargs)
                 else:
                     show_tif(
                         img[plane_no],
                         ax=axs[row][col],
                         vminmax_percentile=vminmax_percentile,
+                        vminmax=vminmax,
                         **kwargs,
                     )
                 if title is None:
@@ -229,7 +232,7 @@ def show_tif(
         return f, ax, axim
 
 
-def get_tif_paths(dir_path, regex_filter=None, sort=True):
+def get_tif_paths(dir_path, regex_filter=None, sort=True, natsort=False):
     """
     Get a list of absolute paths for all tif files in this directory
 
@@ -251,7 +254,10 @@ def get_tif_paths(dir_path, regex_filter=None, sort=True):
 
     # print(tif_paths)
     if sort:
-        tif_paths = sorted(tif_paths)  # list(n.sort(tif_paths))
+        if natsort:
+            tif_paths = natsorted(tif_paths)
+        else:
+            tif_paths = sorted(tif_paths)  # list(n.sort(tif_paths))
     return tif_paths
 
 

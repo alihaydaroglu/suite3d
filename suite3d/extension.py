@@ -12,6 +12,7 @@ from . import utils
 from scipy.spatial import distance_matrix
 from .utils import default_log
 
+from skimage.filters import threshold_local
 
 def detect_cells(
     patch,
@@ -1015,3 +1016,19 @@ def prune_overlapping_cells(stats, dist_thresh=5, lam_overlap_thresh=0.5):
         if not duplicate_cells[idx]:
             new_stats.append(stat)
     return new_stats, duplicate_cells
+
+
+def thresh_mask_corr_map(im3d, thresh_window_size_pix=51, corrmap_thresh_pct=50):
+    window_size = (thresh_window_size_pix // 2) * 2 + 1
+    nz, ny, nx = im3d.shape
+    out = []
+    for plane_idx in range(nz):
+        img = im3d[plane_idx].copy()
+        minval = n.percentile(img.flatten(), corrmap_thresh_pct)
+        img[img < minval] = minval
+        thresh_local = threshold_local(img, block_size=window_size)
+        masked_img = img.copy()
+        masked_img[img < thresh_local] = img.min()
+        out.append(masked_img - minval)
+    out = n.array(out)
+    return out

@@ -47,6 +47,8 @@ class s3dio:
         """
         if params["lbm"]:
             return self._load_lbm_tifs
+        elif params["faced"]:
+            return self._load_faced_tifs
         else:
             return self._load_scanimage_tifs
 
@@ -74,9 +76,10 @@ class s3dio:
         params = self._update_prms(**parameters)
         _dataloader = self._get_dataloader(params)
         mov_list = _dataloader(paths, params, verbose=verbose, debug=debug)
-
+        # print("LOADED")
         # concatenate movies across time to make a single movie
         mov = n.concatenate(mov_list, axis=1)
+        # print("CONCATENATED")
 
         if verbose:
             size = mov.nbytes / (1024**3)
@@ -174,6 +177,10 @@ class s3dio:
                 tif_file.reshape(frames, len(params["planes"]), py, px), 0, 1
             )
             tif_file = tif_file[params["planes"]]
+            todo("integrate the planes param with this param to make it make sense")
+            if params["multiplane_2p_use_planes"] is not None:
+
+                tif_file = tif_file[params["multiplane_2p_use_planes"]]
 
             if debug:
                 print(
@@ -183,6 +190,18 @@ class s3dio:
 
             mov_list.append(tif_file)
 
+        return mov_list
+
+    def _load_faced_tifs(self, paths, params, verbose=True, debug=False):
+        nz = params["faced_nz"]
+        mov_list = []
+        for tif_path in paths:
+            mov = tifffile.imread(tif_path)
+            ny, nx = mov.shape[-2:]
+            mov = mov.reshape(-1, nz, ny, nx)
+            mov = n.swapaxes(mov, 0, 1).astype(int)
+            self.job.log(f"Loaded movie of size: {mov.shape}")
+            mov_list.append(mov)
         return mov_list
 
     @deprecated_inputs("mp_args is never set to anything except an empty dictionary")
