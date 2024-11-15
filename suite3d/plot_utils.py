@@ -12,7 +12,7 @@ def multiple_timeseries(
     labels=None,
     alphas=None,
     lws=None,
-    zscore=True,
+    do_zscore=True,
     dy=3.0,
     auto_ylim=True,
     ax=None,
@@ -55,7 +55,7 @@ def multiple_timeseries(
         if idx_lims is not None:
             ys = ys[idx_lims[0] : idx_lims[1]]
 
-        if zscore:
+        if do_zscore:
             ys = zscore(ys)
         if filt is not None:
             ys = filt(ys, filt)
