@@ -3,7 +3,11 @@ import os
 import re
 import tifffile
 from matplotlib import pyplot as plt
-import mrcfile
+
+try:
+    import mrcfile
+except:
+    print("No MRCFile")
 from .lbmio import get_meso_rois
 from ..developer import todo, deprecated
 from natsort import natsorted
@@ -112,6 +116,7 @@ def show_tif_all_planes(
 
     if suptitle is not None:
         fig.suptitle(suptitle)
+    return fig, axs
 
 
 def show_tif(

@@ -120,7 +120,7 @@ def run_init_pass(job):
         # job.log("Min pix vals: %s" % str(min_pix_vals.flatten()), 3)
     else:
         min_pix_vals = None
-    if params["subtract_crosstalk"]:
+    if params["subtract_crosstalk"] and params["lbm"]:
         if params["override_crosstalk"] is not None:
             cross_coeff = params["override_crosstalk"]
             job.log("Subtracting crosstalk with forced coefficient %0.3f" % cross_coeff)
@@ -294,7 +294,7 @@ def run_init_pass(job):
     summary_path = os.path.join(job.dirs["summary"], "summary.npy")
     job.log("Saving summary to %s" % summary_path)
     n.save(summary_path, summary)
-    job.show_summary_plots()
+    # job.show_summary_plots()
 
     # TODO either make work using suite3D function or remove?
     # if job.params['generate_sample_registered_bins']:

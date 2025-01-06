@@ -115,6 +115,7 @@ def filter_and_reduce_movie(
     intensity_thresh,
     n_proc=8,
     minibatch_size=20,
+    standard_vmap=True,
     log=default_log,
 ):
     """
@@ -164,9 +165,15 @@ def filter_and_reduce_movie(
     log("dtu_npsub_conv3d", toc=True)
     log("Reducing filtered movie to compute correlation map", 3)
     log("dtu_vmap", tic=True)
-    vmap_2 = get_vmap3d(
-        mov_filt, intensity_thresh, sqrt=False, mean_subtract=False, fix_edges=False
-    )
+
+    if standard_vmap:
+        vmap_2 = get_vmap3d(
+            mov_filt, intensity_thresh, sqrt=False, mean_subtract=False, fix_edges=False
+        )
+    else:
+        log("RUNNING NEW VMAP, 2")
+        vmap_2 = get_vmap3d_cov(mov_filt, mov_sub, thresh=intensity_thresh)
+
     log("dtu_vmap", toc=True)
     # close and free the shared memory arrays
     log("dtu_cleanup", tic=True)
@@ -182,7 +189,22 @@ def filter_and_reduce_movie(
 
 def accumulate_vmap_2(vmap_2, new_vmap_2, ns_total):
     vmap_2 += new_vmap_2
-    vmap = n.sqrt(vmap_2 / ns_total)
+    vmap = n.sqrt(n.maximum(1e-10, vmap_2 / ns_total))
+    return vmap
+
+
+def get_vmap3d_cov(mov1, mov2, thresh=0):
+    if thresh is None:
+        thresh = 0
+    nt, nz, ny, nx = mov1.shape
+    vmap = n.zeros((nz, ny, nx))
+    for tidx in range(nt):
+        active_pix = mov1[tidx] > thresh
+        # print(mov1.shape)
+        # print(mov2.shape)
+        # print(mov1[tidx][active_pix].shape)
+        # print(vmap.shape)
+        vmap[active_pix] += mov1[tidx][active_pix] * mov2[tidx][active_pix]
     return vmap
 
 

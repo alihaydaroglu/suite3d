@@ -3,6 +3,7 @@ import os
 import matplotlib as mpl
 from scipy import stats
 from matplotlib import pyplot as plt
+from scipy.ndimage import gaussian_filter1d
 
 
 def multiple_timeseries(
@@ -21,7 +22,7 @@ def multiple_timeseries(
     lw=1.0,
     alpha=1.0,
     color=None,
-    filt=None,
+    do_filt=None,
     swap_yorder=False,
     ylabel_rot=0,
     dy_offset=0,
@@ -57,8 +58,8 @@ def multiple_timeseries(
 
         if do_zscore:
             ys = zscore(ys)
-        if filt is not None:
-            ys = filt(ys, filt)
+        if do_filt is not None:
+            ys = filt(ys, do_filt)
         if yposs is None:
             ypos = dy * i + dy_offset
             if swap_yorder:
@@ -73,7 +74,7 @@ def multiple_timeseries(
         ax.legend(lines[::-1], labels[::-1], frameon=True, facecolor="white")
     ax.set_yticks(yticks)
     if labels is not None and tick_labels:
-        ax.set_yticklabels(labels, rotation=ylabel_rot)
+        ax.set_yticklabels(labels, rotation=ylabel_rot, va="center")
     else:
         ax.set_yticklabels([""] * len(yticks))
 
@@ -450,7 +451,7 @@ def show_tif(
         if cbar_ori == "vertical":
             cax.set_yticks(
                 [new_args["vmin"], new_args["vmax"]],
-                ["%.2f" % new_args["vmin"], "%.2f" % new_args["vmax"]],
+                ["%.3f" % new_args["vmin"], "%.3f" % new_args["vmax"]],
                 color=cbar_fontcolor,
                 fontsize=9,
             )
@@ -458,7 +459,7 @@ def show_tif(
         if cbar_ori == "horizontal":
             cax.set_xticks(
                 [new_args["vmin"], new_args["vmax"]],
-                ["%.2f" % new_args["vmin"], "%.2f" % new_args["vmax"]],
+                ["%.3f" % new_args["vmin"], "%.3f" % new_args["vmax"]],
                 color=cbar_fontcolor,
                 fontsize=9,
             )

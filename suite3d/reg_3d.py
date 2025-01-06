@@ -10,6 +10,7 @@ from numba import njit
 
 from . import reference_image as ref
 from . import register_gpu as reg
+from . import utils
 
 
 @njit(nogil=True, cache=True)

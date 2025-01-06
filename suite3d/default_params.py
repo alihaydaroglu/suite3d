@@ -51,7 +51,7 @@ params = {
     # make sure the mean image is all positive (add the offsets)
     "enforce_positivity": True,
     # fix the plane shifts for top few planes that might be outside the brain
-    "fix_shallow_plane_shift_estimates": True,
+    "fix_shallow_plane_shift_estimates": False,
     "fix_shallow_plane_shift_esimate_threshold": 20,
     # 'overwrite_plane_shifts: set as a float array of size n_planes x 2 with (y,x) shifts for each plane
     "overwrite_plane_shifts": None,
@@ -165,6 +165,7 @@ params = {
     "cell_filt_z_um": 15,
     # activity threshold before calculating correlation map
     "intensity_thresh": 0.1,
+    "standard_vmap": True,  # use suite2p algorithm for vmap
     # Width of the temporal hpf
     # Should divide t_batch_size evenly
     "temporal_hpf": 200,
