@@ -22,6 +22,7 @@ corr_map_param_names = [
     "fix_vmap_edge_planes",
     "sdnorm_exp",
     "intensity_thresh",
+    "standard_vmap",
 ]
 
 computation_param_names = ["n_proc", "dtype", "t_batch_size"]
@@ -246,7 +247,8 @@ def compute_corr_map_batch(
         intensity_thresh,
         n_processors,
         minibatch_size,
-        log,
+        standard_vmap=corr_map_params["standard_vmap"],
+        log=log,
     )
 
     log("batch_filt_reduce", toc=True)

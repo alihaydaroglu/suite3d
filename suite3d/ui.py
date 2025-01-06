@@ -1,7 +1,6 @@
 import os
 import numpy as n
 from matplotlib import pyplot as plt
-import pyqtgraph as pg
 import copy
 
 
@@ -9,6 +8,10 @@ try:
     import napari
 except:
     print("No Napari")
+try:
+    import pyqtgraph as pg
+except:
+    print("No PyQtGraph")
 
 try:
     from napari._qt.widgets.qt_range_slider_popup import QRangeSliderPopup
@@ -70,8 +73,10 @@ def make_label_vols(stats, shape, lam_max=0.3, iscell=None, cmap="Set3"):
     cell_rgb_vol = n.zeros(shape + (4,))
     if iscell is None:
         iscell = n.ones((len(stats), 2))
+    if len(iscell.shape) > 1:
+        iscell = iscell[:, 0]
     for i in range(len(stats)):
-        if iscell[i, 0]:
+        if iscell[i]:
             cz, cy, cx = coords[i]
             lam = copy.copy(lams[i])
             # print(lam)3

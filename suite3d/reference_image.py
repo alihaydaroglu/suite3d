@@ -537,7 +537,7 @@ def align_planes(mov3D, reference_params):
     """
     Input a (nz, ny, nx) movie and this function will find the planeshifts between z-axis
     """
-
+    # print("FUNC CALL")
     sigma = reference_params["sigma"]
     smooth_sigma = reference_params["smooth_sigma"]
     max_reg_xy = reference_params["max_reg_xy_reference"]
@@ -550,21 +550,28 @@ def align_planes(mov3D, reference_params):
     # set up params
     ncc = max_reg_xy * 2 + 1
     nz, nt, ny, nx = mov3D.shape
+    # print("GOT SHAPE")
     ymaxs = n.zeros((nz, nt), dtype=n.int16)
     xmaxs = n.zeros((nz, nt), dtype=n.int16)
     cmaxs = n.zeros((nz, nt), dtype=n.float32)
     ncc = max_reg_xy * 2 + 1
     phase_corr = n.zeros((nt, ncc, ncc))
 
+    # print("COMPUTING MASKS")
     mult_mask, add_mask = compute_masks3D(mov3D.squeeze(), sigma)
+    # print("DONE")
 
     # turn the input mov into a reference image for registration
     refs_f = np.zeros_like(mov3D)
+    # print("LOOP1")
     for z in range(nz):
+        # print(z)
         refs_f[z] = phasecorr_ref(mov3D[z, :, :].squeeze(), smooth_sigma=smooth_sigma)
+    # return None
 
     # find the shifts between two z planes
     for zidx in range(1, nz):
+        # print(z)
         mov3D[zidx] = reg.clip_and_mask_mov(
             mov3D[zidx],
             None,
@@ -1229,7 +1236,9 @@ def compute_reference_and_masks_3d(
     tvecs = align_planes(mov_cpu.mean(axis=1), reference_params)
 
     # correct bad tvec estimates
-    if reference_params.get("fix_shallow_plane_shift_estimates", True):
+    # print(reference_params)
+    # print(tvecs)
+    if reference_params.get("fix_shallow_plane_shift_estimates", False):
         shallow_plane_thresh = reference_params.get(
             "fix_shallow_plane_shift_esimate_threshold", 20
         )

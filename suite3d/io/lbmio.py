@@ -4,7 +4,8 @@ import time
 import copy
 from multiprocessing import shared_memory, Pool
 from scipy import signal
-import imreg_dft as imreg
+
+# import imreg_dft as imreg
 import json
 from ..developer import deprecated_inputs, todo
 
