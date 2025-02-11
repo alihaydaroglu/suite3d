@@ -63,6 +63,12 @@ def calculate_corrmap(
     # get two sub-dictionaries of params with relevant parameters
     corr_map_params = get_matching_params(corr_map_param_names, params)
     computation_params = get_matching_params(computation_param_names, params)
+    save_dtype_str = params.get("save_dtype", "float32")
+    save_dtype = None
+    if save_dtype_str == "float32":
+        save_dtype = n.float32
+    elif save_dtype_str == "float16":
+        save_dtype = n.float16
 
     # compute how many batches we need to split the movie into
     t_batch_size = computation_params["t_batch_size"]
@@ -123,7 +129,7 @@ def calculate_corrmap(
                 batch_dirs[batch_idx],
             )
             if save_mov_sub:
-                n.save(mov_sub_paths[batch_idx], mov_sub_batch)
+                n.save(mov_sub_paths[batch_idx], mov_sub_batch.astype(save_dtype))
         log("save", toc=True)
     gc.collect()
     save_batch_results(vmap_batch, accums, batch_dir)
@@ -234,7 +240,12 @@ def compute_corr_map_batch(
     )
     log("batch_accum_sdmov", toc=True)
     log("batch_norm_sdmov", tic=True)
-    dtu.normalize_movie_by_sdmov(mov, sdmov, sdnorm_exp)
+    # log(f"Normalizing with sdnorm {sdnorm_exp}")
+    # log(f"SDMOV std {sdmov.std()}, mean {sdmov.mean()}, type {sdmov.dtype}")
+    # log(f"mov mean: {mov.mean()}")
+    mov = dtu.normalize_movie_by_sdmov(mov, sdmov, sdnorm_exp)
+
+    # log(f"mov mean: {mov.mean()}")
     log("batch_norm_sdmov", toc=True)
 
     log("batch_filt_reduce", tic=True)
@@ -257,6 +268,7 @@ def compute_corr_map_batch(
     vmap = dtu.accumulate_vmap_2(accum["vmap_2"], vmap_2, nt + nb)
     log("batch_accum_vmap", toc=True)
     accum["n_frames_proc"] += nb
+    log(f"VMAP std {vmap.std()}, mean {vmap.mean()}, type {vmap.dtype}")
 
     return vmap, mov_sub
 

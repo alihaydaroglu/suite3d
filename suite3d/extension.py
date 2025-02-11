@@ -14,6 +14,7 @@ from .utils import default_log
 
 from skimage.filters import threshold_local
 
+
 def detect_cells(
     patch,
     vmap,
@@ -434,8 +435,14 @@ def detect_cells_worker(
 
     for i in range(roi_ext_iterations):
         if len(active_frames) == 0:
-            default_log("WARNING: no active frames in roi %d (iter %d)" % (roi_idx, i), 1)
-            default_log("RETURNING")
+            default_log("WARNING: no active frames in roi %d (iter %d) - if you keep getting this, increase peak_thresh to be non-zero (e.g. 1e-4)" % (roi_idx, i), 1)
+
+            # print(n.percentile(tproj, 99.5))
+            # print(n.percentile(tproj, 90))
+            # print(n.percentile(tproj, 50))
+            # default_log(f"Thresh: {threshold}, Max: {tproj.max()}")
+            # assert False
+            # default_log("RETURNING")
             return None, None
         zz, yy, xx, lam = alternate_iter_extend3d(
             zz,
@@ -820,7 +827,13 @@ def compute_npil_masks(stats, shape, offset=(0, 0, 0), np_params={}):
 
 
 def extract_activity_mp(
-    mov, stats, batchsize_frames=500, log=default_log, offset=None, n_frames=None, nproc=8
+    mov,
+    stats,
+    batchsize_frames=500,
+    log=default_log,
+    offset=None,
+    n_frames=None,
+    nproc=8,
 ):
     pass
     # if you run out of memory, reduce batchsize_frames

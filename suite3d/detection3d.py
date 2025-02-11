@@ -101,8 +101,8 @@ def normalize_movie_by_sdmov(mov, sdmov, sdnorm_exp=1.0):
     Returns:
         mov: normalized movie (edited inplace)
     """
-    sdmov = sdmov**sdnorm_exp
-    mov /= sdmov
+    sdnorm = sdmov**sdnorm_exp
+    mov /= sdnorm
     return mov
 
 
@@ -235,10 +235,12 @@ def threshold_reduce(
     Vt = np.zeros((Lyp, Lxp), "float32")
     if mean_subtract:
         mov = mov.copy() - mov.mean(axis=0)
-
+    # print(f"Intensity thresh is {intensity_threshold}")
     if intensity_threshold is None:
         intensity_threshold = mov.min()
 
+    # print(f"Intensity thresh is {intensity_threshold}")
+    # print(f"Mov mean is {mov.mean()}")
     for t in range(nbinned):
         Vt += mov[t] ** 2 * (mov[t] > intensity_threshold)
     if sqrt:
@@ -522,12 +524,13 @@ def np_sub_and_conv3d_split_shmem_w(
     # print(time.time() - tic)
     # tic = time.time()
     for idx in idxs:
-        mov_sub[idx] = mov_sub[idx] - (
-            np_filt(
-                mov_sub[idx], np_filt_size, mode=filter_mode, cval=mov_sub[idx].mean()
+        if np_filt is not None:
+            mov_sub[idx] = mov_sub[idx] - (
+                np_filt(
+                    mov_sub[idx], np_filt_size, mode=filter_mode, cval=mov_sub[idx].mean()
+                )
+                / c1
             )
-            / c1
-        )
         mov_filt[idx] = conv_filt_size[-1] * conv_filt(
             mov_sub[idx], conv_filt_size, mode=filter_mode, cval=mov_sub[idx].mean()
         )  # / c2
@@ -553,8 +556,11 @@ def np_sub_and_conv3d_split_shmem(
         np_filt = uniform_filter
     elif np_filt_type == "gaussian":
         np_filt = gaussian_filter
-    else:
+    elif np_filt_type == "none" or np_filt_type is None:
+        c1 = 1
         np_filt = None
+    else:
+        assert False  # np_filt = None
 
     if conv_filt_type == "unif":
         conv_filt = uniform_filter
@@ -562,7 +568,8 @@ def np_sub_and_conv3d_split_shmem(
         conv_filt = gaussian_filter
     else:
         conv_filt = None
-    c1 = np_filt(n.ones((Lz, Ly, Lx)), np_filt_size, mode=filter_mode)
+    if np_filt is not None:
+        c1 = np_filt(n.ones((Lz, Ly, Lx)), np_filt_size, mode=filter_mode)
     c2 = conv_filt(n.ones((Lz, Ly, Lx)), conv_filt_size, mode=filter_mode)
 
     batches = [

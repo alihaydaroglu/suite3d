@@ -38,6 +38,7 @@ params = {
     "fix_fastZ": False,  # if you messed up your ROI z-definitions in scanimage, this is useful
     "num_colors": 1,  # if not lbm data, how many color channels were recorded by scanimage
     "functional_color_channel": 0,  # if not lbm data, which color channel is the functional one
+    "save_dtype": "float16",
     ### Initialization Step ###
     # number of files to use for the initialization step
     # Usually the equivalent of ~1 minute is enough
