@@ -665,6 +665,13 @@ def register_dataset_gpu(
     fix_fastZ = params.get("fix_fastZ", False)
     reg_norm_frames = params.get("reg_norm_frames", True)
     cavity_size = params.get("cavity_size", 15)
+    save_dtype_str = params.get("save_dtype", "float32")
+    nonrigid = params.get("nonrigid", True)
+    save_dtype = None
+    if save_dtype_str == "float32":
+        save_dtype = n.float32
+    elif save_dtype_str == "float16":
+        save_dtype = n.float16
 
     # catch if rmins/rmaxs where not calculate in init_pass
     if rmins is None and rmaxs is None:
@@ -795,31 +802,39 @@ def register_dataset_gpu(
                 "Completed rigid registration in %.2f sec" % (time.time() - tic_rigid), 3
             )
             tic_nonrigid = time.time()
-            ymaxs_nr_gpu, xmaxs_nr_gpu, snrs = reg_gpu.nonrigid_2d_reg_gpu(
-                mov_shifted_gpu,
-                mask_mul_nr[:, :, 0],
-                mask_offset_nr[:, :, 0],
-                ref_nr[:, :, 0],
-                yblocks,
-                xblocks,
-                snr_thresh,
-                NRsm,
-                rmins,
-                rmaxs,
-                max_shift=max_shift_nr,
-                npad=nr_npad,
-                n_smooth_iters=nr_smooth_iters,
-                subpixel=nr_subpixel,
-                log_cb=log_cb,
-            )
-            log_cb("Computed non-rigid shifts in %.2f sec" % (time.time() - tic_rigid), 3)
+            if nonrigid:
+                ymaxs_nr_gpu, xmaxs_nr_gpu, snrs = reg_gpu.nonrigid_2d_reg_gpu(
+                    mov_shifted_gpu,
+                    mask_mul_nr[:, :, 0],
+                    mask_offset_nr[:, :, 0],
+                    ref_nr[:, :, 0],
+                    yblocks,
+                    xblocks,
+                    snr_thresh,
+                    NRsm,
+                    rmins,
+                    rmaxs,
+                    max_shift=max_shift_nr,
+                    npad=nr_npad,
+                    n_smooth_iters=nr_smooth_iters,
+                    subpixel=nr_subpixel,
+                    log_cb=log_cb,
+                )
+                log_cb(
+                    "Computed non-rigid shifts in %.2f sec" % (time.time() - tic_rigid), 3
+                )
 
-            tic_get = time.time()
-            ymaxs_nr_cpu = ymaxs_nr_gpu.get()
-            xmaxs_nr_cpu = xmaxs_nr_gpu.get()
+                tic_get = time.time()
+                ymaxs_nr_cpu = ymaxs_nr_gpu.get()
+                xmaxs_nr_cpu = xmaxs_nr_gpu.get()
+            else:
+                print("NO NONRIGID\n\n\n")
+                tic_get = time.time()
+                xmaxs_nr_cpu = n.zeros_like(ymaxs_rr_gpu)
+                ymaxs_nr_cpu = n.zeros_like(ymaxs_rr_gpu)
+
             ymaxs_rr_cpu = ymaxs_rr_gpu.get()
             xmaxs_rr_cpu = xmaxs_rr_gpu.get()
-
             # print("######\n\nAFter RIGID: 0.5p: %.3f 99.5p: %.3f, Mean: %.3f, Min: %.3f, Max:%.3f" %
             #    (n.percentile(mov_shifted_cpu[:,10],0.5), n.percentile(mov_shifted_cpu[:,10],99.5),
             # mov_shifted_cpu[:,10].mean(), mov_shifted_cpu[:,10].min(),
@@ -853,16 +868,19 @@ def register_dataset_gpu(
             shift_tic = time.time()
             nz = mov_shifted_cpu.shape[1]
             for zidx in range(nz):
-                # print("SHIFITNG: %d" % zidx)
-                # TODO migrate to suite3D?
-                mov_shifted[zidx, idx0:idx1] = nonrigid.transform_data(
-                    mov_shifted_cpu[:, zidx],
-                    nblocks,
-                    xblock=xblocks,
-                    yblock=yblocks,
-                    ymax1=ymaxs_nr_cpu[:, zidx],
-                    xmax1=xmaxs_nr_cpu[:, zidx],
-                )
+                if nonrigid:
+                    # print("SHIFITNG: %d" % zidx)
+                    # TODO migrate to suite3D?
+                    mov_shifted[zidx, idx0:idx1] = nonrigid.transform_data(
+                        mov_shifted_cpu[:, zidx],
+                        nblocks,
+                        xblock=xblocks,
+                        yblock=yblocks,
+                        ymax1=ymaxs_nr_cpu[:, zidx],
+                        xmax1=xmaxs_nr_cpu[:, zidx],
+                    )
+                else:
+                    mov_shifted[zidx, idx0:idx1] = mov_shifted_cpu[:, zidx]
 
             # print("######\n\nAFter NONRIGID: 0.5p: %.3f 99.5p: %.3f, Mean: %.3f, Min: %.3f, Max:%.3f" %
             #        (n.percentile(mov_shifted[10,idx0:idx1],0.5), n.percentile(mov_shifted[10,idx0:idx1],99.5),
@@ -917,7 +935,7 @@ def register_dataset_gpu(
                 % (str(mov_save.shape), reg_data_path),
                 2,
             )
-            n.save(reg_data_path, mov_save)
+            n.save(reg_data_path, mov_save.astype(save_dtype))
             log_cb("Saved in %.2f sec" % (time.time() - save_t), 3)
             file_idx += 1
         n.save(offset_path, all_offsets)
@@ -957,6 +975,12 @@ def register_dataset(
         "convert_plane_ids_to_channel_ids", True
     )
     cavity_size = params.get("cavity_size", 15)
+    save_dtype_str = params.get("save_dtype", "float32")
+    save_dtype = None
+    if save_dtype_str == "float32":
+        save_dtype = n.float32
+    elif save_dtype_str == "float16":
+        save_dtype = n.float16
 
     batches = init_batches(tifs, tif_batch_size, n_tifs_to_analyze)
     n_batches = len(batches)
@@ -1049,7 +1073,7 @@ def register_dataset(
                     % (str(mov[:, i:end_idx].shape), reg_data_path),
                     2,
                 )
-                n.save(reg_data_path, mov[:, i:end_idx])
+                n.save(reg_data_path, mov[:, i:end_idx].astype(save_dtype))
                 file_idx += 1
             n.save(offset_path, all_offsets)
             log_cb("After reg:", level=3, log_mem_usage=True)
@@ -1323,6 +1347,12 @@ def register_dataset_gpu_3d(
     fix_fastZ = params.get("fix_fastZ", False)
     reg_norm_frames = params.get("reg_norm_frames", True)
     cavity_size = params.get("cavity_size", 15)
+    save_dtype_str = params.get("save_dtype", "float32")
+    save_dtype = None
+    if save_dtype_str == "float32":
+        save_dtype = n.float32
+    elif save_dtype_str == "float16":
+        save_dtype = n.float16
 
     # catch if rmins/rmaxs where not calculate in init_pass
     if rmins is None and rmaxs is None:
@@ -1472,7 +1502,7 @@ def register_dataset_gpu_3d(
                 % (str(mov_save.shape), reg_data_path),
                 2,
             )
-            n.save(reg_data_path, mov_save)
+            n.save(reg_data_path, mov_save.astype(save_dtype))
             log_cb("Saved in %.2f sec" % (time.time() - save_t), 3)
 
             metrics_path = os.path.join(

@@ -12,7 +12,11 @@ import itertools
 from multiprocessing import Pool
 import shutil
 from matplotlib import pyplot as plt
-from skimage.io import imread
+
+try:
+    from skimage.io import imread
+except:
+    print("No skimage")
 
 try:
     import psutil
@@ -21,22 +25,26 @@ except:
 
 from suite2p.extraction import dcnv
 
-from . import init_pass
 from . import utils
 from . import lbmio
-from .iter_step import (
-    register_dataset,
-    fuse_and_save_reg_file,
-    calculate_corrmap,
-    calculate_corrmap_from_svd,
-    register_dataset_gpu,
-    register_dataset_gpu_3d,
-)
 
-from . import corrmap
-from . import extension as ext
+try:
+    from . import corrmap
+    from . import svd_utils as svu
+    from . import extension as ext
+    from . import init_pass
+    from .iter_step import (
+        register_dataset,
+        fuse_and_save_reg_file,
+        calculate_corrmap,
+        calculate_corrmap_from_svd,
+        register_dataset_gpu,
+        register_dataset_gpu_3d,
+    )
+except:
+    print("Issues importing compute components")
+
 from .default_params import get_default_params
-from . import svd_utils as svu
 from . import ui
 
 
@@ -751,13 +759,14 @@ class Job:
             comb_params = sweep_summary["comb_params"][comb_idx]
             self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             self.params = comb_params
-            corrmap = self.calculate_corr_map(
+            corrmap_out = self.calculate_corr_map(
                 output_dir_name=comb_dir_name,
                 save_mov_sub=save_mov_sub,
                 mov=mov,
                 iter_limit=iter_limit,
             )
-            results = {"corrmap": corrmap, "output_dir": comb_dir_name}
+            self.log(f"Output mean {corrmap_out.mean()}, std {corrmap_out.std()}")
+            results = {"corrmap": corrmap_out, "output_dir": comb_dir_name}
             if comb_idx == 0:
                 maps = self.load_corr_map_results(comb_dir_name)
                 sweep_summary["mean_img"] = maps["mean_img"]
@@ -765,8 +774,6 @@ class Job:
                 sweep_summary["mean_img"] = maps["mean_img"]
                 sweep_summary["max_img"] = maps["max_img"]
 
-            sweep_summary["results"].append(results)
-            self.save_file("sweep_summary", sweep_summary, path=sweep_dir_path)
             sweep_summary["results"].append(results)
             self.save_file("sweep_summary", sweep_summary, path=sweep_dir_path)
 
@@ -885,10 +892,12 @@ class Job:
         """
 
         # load the results of the correlation map step
-        mov_sub = self.get_subtracted_movie(parent_dir_name=input_dir_name)
+        mov_sub = self.get_subtracted_movie(parent_dir_name=input_dir_name, astype=None)
         maps = self.load_corr_map_results(parent_dir_name=input_dir_name)
         if vmap is None:
             vmap = maps["vmap"]
+        else:
+            maps["vmap"] = vmap
         nt, nz, ny, nx = mov_sub.shape
         if ts is None:
             ts = (0, nt)
@@ -965,6 +974,7 @@ class Job:
                 3,
             )
             mov_patch = mov_patch.compute()
+            mov_patch = mov_patch.astype(n.float32)
             self.log("Loaded", 3)
 
             # prepare the correlation map
@@ -1051,6 +1061,7 @@ class Job:
         results_to_export=None,
         export_frame_counts=True,
         additional_info=None,
+        output_dir_label="",
     ):
         """
         Save the relevant outputs of suite3d in a specified directory for further processing.
@@ -1062,7 +1073,9 @@ class Job:
             results_to_export (list, optional): list of files to export. Defaults to the important ones.
             export_frame_counts (bool, optional): Whether to export the number of frames in each file. Defaults to True.
         """
-        full_export_path = os.path.join(export_path, "s3d-results-%s" % self.job_id)
+        full_export_path = os.path.join(
+            export_path, "s3d-results-%s" % self.job_id + output_dir_label
+        )
         os.makedirs(full_export_path, exist_ok=True)
         self.log("Created dir %s to export results" % full_export_path)
         if results_to_export is None:
@@ -1199,6 +1212,7 @@ class Job:
                 n_frames=n_frames,
                 intermediate_save_dir=save_dir,
                 mov_shape_tfirst=mov_shape_tfirst,
+                log=self.log,
             )
             n.save(os.path.join(save_dir, "F.npy"), F_roi)
             n.save(os.path.join(save_dir, "Fneu.npy"), F_neu)
@@ -1559,7 +1573,10 @@ class Job:
         edge_crop_npix=None,
     ):
         paths = self.get_registered_files(key, filename_filter)
-        mov_reg = utils.npy_to_dask(paths, axis=axis)
+        astype = None
+        if self.params.get("save_dtype", "float32") in ("float16", n.float16):
+            astype = n.float32
+        mov_reg = utils.npy_to_dask(paths, axis=axis, astype=astype)
         if edge_crop:
             mov_reg = self.edge_crop_movie(mov_reg, edge_crop_npix=edge_crop_npix)
 
@@ -1567,12 +1584,21 @@ class Job:
         return mov_reg
 
     def get_subtracted_movie(
-        self, key="mov_sub", parent_dir_name=None, filename_filter="mov_sub"
+        self,
+        key="mov_sub",
+        parent_dir_name=None,
+        filename_filter="mov_sub",
+        astype="auto",
     ):
         if parent_dir_name is not None:
             key = parent_dir_name + "-" + key
+
+        if astype == "auto":
+            if self.params["save_dtype"] == "float16":
+                astype = n.float32
+
         paths = self.get_registered_files(key, filename_filter)
-        self.mov_sub = utils.npy_to_dask(paths, axis=0)
+        self.mov_sub = utils.npy_to_dask(paths, axis=0, astype=astype)
         return self.mov_sub
 
     def edge_crop_movie(self, mov, edge_crop_npix=None):
@@ -1877,7 +1903,7 @@ class Job:
         return f, axs
 
     # TODO add a non-rigid = False so can load rigid-only data
-    def load_registration_results(self, offset_dir="registered_fused_data"):
+    def load_registration_results(self, offset_dir="registered_fused_data", n_files=None):
         offset_files = self.get_registered_files(offset_dir, "offsets")
         metric_Files = self.get_registered_files(offset_dir, "reg_metrics")
         n_offset_files = len(offset_files)
@@ -1892,9 +1918,12 @@ class Job:
         for key in keys:
             results[key] = []
         all_metrics = []
-        for i in range(n_offset_files):
-            metrics = n.load(metric_Files[i], allow_pickle=True)
-            all_metrics.append(metrics)
+        if n_files is None:
+            n_files = n_offset_files
+        for i in range(n_files):
+            if len(metric_Files) > 0:
+                metrics = n.load(metric_Files[i], allow_pickle=True)
+                all_metrics.append(metrics)
             offset = n.load(offset_files[i], allow_pickle=True).item()
             # print(i)
             for key in keys:

@@ -47,7 +47,8 @@ def load_and_stitch_full_tif_mp(
             tiffile.shape,
         )
 
-    rois = get_meso_rois(path, fix_fastZ=fix_fastZ)
+    # print("SKipping " + str(skip_roi))
+    rois = get_meso_rois(path, fix_fastZ=fix_fastZ, skip_roi=skip_roi)
 
     sh_mem = shared_memory.SharedMemory(create=True, size=tiffile.nbytes)
     sh_tif = n.ndarray(tiffile.shape, dtype=tiffile.dtype, buffer=sh_mem.buf)
@@ -219,6 +220,12 @@ def get_meso_rois(
 
     rois = []
     warned = False
+    # print([s["zs"] for s in si_rois])
+    if skip_roi is not None:
+        si_rois.pop(skip_roi)
+        if type(z_imaging) == list:
+            z_imaging.pop(skip_roi)
+    # print([s["zs"] for s in si_rois])
     for roi in si_rois:
         if debug:
             print(roi["zs"])
@@ -231,6 +238,7 @@ def get_meso_rois(
             scanfield = roi["scanfields"][z_match[0]]
 
         roi_dict = {}
+        # print(scanfield)
         roi_dict["uid"] = scanfield["roiUuid"]
         roi_dict["center"] = n.array(scanfield["centerXY"])
         roi_dict["sizeXY"] = n.array(scanfield["sizeXY"])
@@ -240,8 +248,8 @@ def get_meso_rois(
             warned = True
             roi_dict["pixXY"][0] = max_roi_width_pix
         rois.append(roi_dict)
-    if skip_roi is not None:
-        rois.pop(skip_roi)
+    # if skip_roi is not None:
+    # rois.pop(skip_roi)
     return rois
 
 
@@ -294,7 +302,11 @@ def get_roi_start_pix(tif_path, params):
         n_t_ch, n1, n2 = tiffile.shape
         n_ch = params["n_ch_tif"]
         tiffile = tiffile.reshape(int(n_t_ch / n_ch), n_ch, n1, n2)
-    rois = get_meso_rois(tif_path, fix_fastZ=params.get("fix_fastZ", False))
+    rois = get_meso_rois(
+        tif_path,
+        fix_fastZ=params.get("fix_fastZ", False),
+        skip_roi=params.get("skip_roi", None),
+    )
     # print(len(tiffile))
     ims_sample = _split_rois_from_tif(tiffile[:2], rois, ch_id=0)
     if params["skip_roi"] is not None:

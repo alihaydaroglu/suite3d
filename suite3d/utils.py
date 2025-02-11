@@ -20,13 +20,17 @@ from scipy.ndimage import convolve1d
 # import tensorflow as tf
 # from tensorflow.keras.models import load_model
 from itertools import product
-from dask import array as darr
-from skimage.measure import moments
+
+try:
+    from dask import array as darr
+    from skimage.measure import moments
+    from skimage.metrics import normalized_mutual_information
+except:
+    print("Missing some packages")
 from suite2p.registration.nonrigid import make_blocks
 from datetime import datetime
 import pickle
 from multiprocessing import cpu_count
-from skimage.metrics import normalized_mutual_information
 import time
 
 # from . import tiff_utils as tfu
@@ -576,7 +580,7 @@ def pad_crop_movie(mov, centroid, crop_size):
     return mov
 
 
-def npy_to_dask(files, name="", axis=1):
+def npy_to_dask(files, name="", axis=1, astype=None):
     sample_mov = n.load(files[0], mmap_mode="r")
     file_ts = [n.load(f, mmap_mode="r").shape[axis] for f in files]
     nz, nt_sample, ny, nx = sample_mov.shape
@@ -593,6 +597,8 @@ def npy_to_dask(files, name="", axis=1):
     dsk = dict(zip(keys, values))
 
     arr = darr.Array(dsk, name, chunks, dtype)
+    if astype is not None:
+        arr = arr.astype(astype)
 
     return arr
 

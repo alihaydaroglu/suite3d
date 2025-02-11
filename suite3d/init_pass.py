@@ -138,12 +138,12 @@ def run_init_pass(job):
             utils.plot_ct_hist(
                 crosstalk_planes, show_plots=True, save_plots=job.dirs["summary"]
             )
-            utils.ct_gifs(
-                im3d,
-                job.params["cavity_size"],
-                crosstalk_planes,
-                save_plots=job.dirs["summary"],
-            )
+            # utils.ct_gifs(
+            #     im3d,
+            #     job.params["cavity_size"],
+            #     crosstalk_planes,
+            #     save_plots=job.dirs["summary"],
+            # )
 
             job.log("Subtracting with estimated coefficient %0.3f" % cross_coeff)
             if cross_coeff > 0.4 or cross_coeff < 0.01:

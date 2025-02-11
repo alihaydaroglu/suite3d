@@ -5,15 +5,18 @@ except:
 import numpy as n
 import os
 import psutil
-from skimage import io as skio
+
+# from skimage import io as skio
 from multiprocessing import Pool
 import time
 from scipy import signal
 import re
 import tifffile
-import dask.array as darr
+
+# import dask.array as darr
 from itertools import product
-from suite2p.io import lbm as lbmio
+
+# from suite2p.io import lbm as lbmio
 import json
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
