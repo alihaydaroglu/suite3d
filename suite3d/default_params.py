@@ -48,7 +48,7 @@ params = {
     # 'even' or 'random' sampling of init files
     "init_file_sample_method": "even",
     # number of random frames to select from initial files, set None for all
-    "init_n_frames": None,
+    "init_n_frames": 500,
     # make sure the mean image is all positive (add the offsets)
     "enforce_positivity": True,
     # fix the plane shifts for top few planes that might be outside the brain
