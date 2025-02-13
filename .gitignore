@@ -6,3 +6,4 @@ runs/AH012/.ipynb_checkpoints/2024-05-21-5-checkpoint.ipynb
 runs/AH012/2024-05-21-5.ipynb
 runs/AH010/2024-01-16/AH010_2024-01-16-make-plots-and-movies.ipynb
 #  find * -size +50M | cat >> .gitignore
+runs/
