@@ -490,7 +490,7 @@ def np_sub_and_conv3d_shmem(
     elif conv_filt_type == "gaussian":
         conv_filt = gaussian_filter
 
-    c1 = uniform_filter(n.ones((Lz, Ly, Lx)), np_filt_size, mode="constant")
+    c1 = np_filt(n.ones((Lz, Ly, Lx)), np_filt_size, mode="constant")
 
     batches = [
         n.arange(idx, min(nt, idx + batch_size)) for idx in n.arange(0, nt, batch_size)
