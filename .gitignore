@@ -1,3 +1,6 @@
-runs
-dev_nb
+
 *.pyc
+*.nbc
+*.nbi
+#  find * -size +50M | cat >> .gitignore
+runs/*
