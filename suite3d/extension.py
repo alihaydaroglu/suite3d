@@ -435,7 +435,11 @@ def detect_cells_worker(
 
     for i in range(roi_ext_iterations):
         if len(active_frames) == 0:
-            default_log("WARNING: no active frames in roi %d (iter %d) - if you keep getting this, increase peak_thresh to be non-zero (e.g. 1e-4)" % (roi_idx, i), 1)
+            default_log(
+                "WARNING: no active frames in roi %d (iter %d) - if you keep getting this, increase peak_thresh to be non-zero (e.g. 1e-4)"
+                % (roi_idx, i),
+                1,
+            )
 
             # print(n.percentile(tproj, 99.5))
             # print(n.percentile(tproj, 90))
@@ -484,6 +488,13 @@ def binned_mean(mov: n.ndarray, bin_size):
     n_frames, nz, ny, nx = mov.shape
     mov = mov[: (n_frames // bin_size) * bin_size]
     return mov.reshape(-1, bin_size, nz, ny, nx).mean(axis=1)
+
+
+def binned_mean_ax1(mov: n.ndarray, bin_size):
+    """Returns an array with the mean of each bin (of size 'bin_size') along axis 1."""
+    nz, n_frames, ny, nx = mov.shape
+    mov = mov[:, : (n_frames // bin_size) * bin_size]
+    return mov.reshape(nz, -1, bin_size, ny, nx).mean(axis=2)
 
 
 def find_top_roi3d(V1, xy_pix_scale=3, z_pix_scale=1, peak_thresh=None):
@@ -632,6 +643,7 @@ def iter_extend3d(
     max_ext_iters=10,
     extend_z=True,
     max_pix=10000,
+    patch_norms=None,
 ):
     # pr = cProfile.Profile()
     # pr.enable()
@@ -899,6 +911,8 @@ def extract_activity(
     n_frames=None,
     intermediate_save_dir=None,
     mov_shape_tfirst=False,
+    npil_to_roi_npix_ratio=None,
+    min_npil_npix=0,
 ):
     # if you run out of memory, reduce batchsize_frames
     # if offset is not None:
@@ -954,6 +968,21 @@ def extract_activity(
             # else:
             zc, yc, xc = stat["coords"]
             npzc, npyc, npxc = stat["npcoords"]
+            if npil_to_roi_npix_ratio is not None:
+                npix_roi = len(zc)
+                npix_npil = len(npzc)
+                if npix_npil > npix_roi * npil_to_roi_npix_ratio:
+                    n_sample = max(min_npil_npix, int(npix_roi * npil_to_roi_npix_ratio))
+                    if npix_npil < n_sample:
+                        print("Very few npix pixels")
+                        n_sample = npix_npil
+
+                    sample_idxs = n.random.choice(
+                        n.arange(npix_npil), size=n_sample, replace=False
+                    )
+                    npzc = npzc[sample_idxs]
+                    npyc = npyc[sample_idxs]
+                    npxc = npxc[sample_idxs]
 
             lam = stat["lam"] / stat["lam"].sum()
             F_roi[i, start:end] = lam @ mov_batch[zc, :, yc, xc]

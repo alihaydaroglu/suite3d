@@ -116,6 +116,7 @@ def filter_and_reduce_movie(
     n_proc=8,
     minibatch_size=20,
     standard_vmap=True,
+    pool=None,
     log=default_log,
 ):
     """
@@ -138,7 +139,7 @@ def filter_and_reduce_movie(
         vmap_2, mov_sub
     """
 
-    log("Loading movie into shared memory", 3)
+    log(f"Loading movie of size {mov.shape} into shared memory", 3)
     log("dtu_shmem", tic=True)
     # Load a copy of the movie into shared memory, and delete the original
     shmem_mov_sub, shmem_par_mov_sub, mov_sub = utils.create_shmem_from_arr(
@@ -161,6 +162,7 @@ def filter_and_reduce_movie(
         batch_size=minibatch_size,
         np_filt_type=npil_filt_type,
         conv_filt_type=cell_filt_type,
+        pool=pool,
     )
     log("dtu_npsub_conv3d", toc=True)
     log("Reducing filtered movie to compute correlation map", 3)
@@ -517,11 +519,12 @@ filter_mode = "mirror"
 def np_sub_and_conv3d_split_shmem_w(
     sub_par, filt_par, idxs, np_filt_size, conv_filt_size, c1, c2, np_filt, conv_filt
 ):
-    # print(idxs)
     tic = time.time()
     sub_sh, mov_sub = utils.load_shmem(sub_par)
     filt_sh, mov_filt = utils.load_shmem(filt_par)
-    # print(time.time() - tic)
+    # print("Loaded shmem in ", time.time() - tic)
+    # print(f"Started at {tic}, ({time.time() - tic} sec ago) with idxs {idxs}")
+    # print(len(idxs))
     # tic = time.time()
     for idx in idxs:
         if np_filt is not None:
@@ -536,6 +539,7 @@ def np_sub_and_conv3d_split_shmem_w(
         )  # / c2
     sub_sh.close()
     filt_sh.close()
+    # print(f"Finished idxs {idxs}")
     # print("WORKER COMPLETE IN ", time.time() - tic)
 
 
@@ -575,33 +579,57 @@ def np_sub_and_conv3d_split_shmem(
     batches = [
         n.arange(idx, min(nt, idx + batch_size)) for idx in n.arange(0, nt, batch_size)
     ]
-    close = True
+    tic = time.time()
+    # print(f"Starting pool with {n_proc} and minibatch size {batch_size}")
+    close = False
     if pool is None:
+        # print("creating pool")
         pool = multiprocessing.Pool(n_proc)
-        close = False
+        close = True
     # print(f"setup in {time.time() - tic}s")
     # print(batches)
     # print("%d batches, %d batchsize, %d proc" % (len(batches), batch_size, n_proc))
+    worker_params = [
+        (
+            shmem_sub,
+            shmem_filt,
+            b.astype(int),
+            np_filt_size,
+            conv_filt_size,
+            c1,
+            c2,
+            np_filt,
+            conv_filt,
+        )
+        for b in batches
+    ]
     pool.starmap(
         np_sub_and_conv3d_split_shmem_w,
-        [
-            (
-                shmem_sub,
-                shmem_filt,
-                b.astype(int),
-                np_filt_size,
-                conv_filt_size,
-                c1,
-                c2,
-                np_filt,
-                conv_filt,
-            )
-            for b in batches
-        ],
+        worker_params,
     )
     if close:
         pool.close()
         pool.terminate()
+
+    # Use starmap_async
+    # results = pool.starmap_async(
+    #     np_sub_and_conv3d_split_shmem_w,
+    #     worker_params,
+    # )
+
+    # # Wait for results and handle errors (if any)
+    # try:
+    #     results.get()
+    # except Exception as e:
+    #     print(f"An error occurred during starmap_async: {e}")
+    #     raise
+    # finally:
+    #     # Close pool if we created it
+    #     if close:
+    #         print("Closing the pool")
+    #         pool.close()
+    #         pool.join()  # Wait for workers to finish
+    #         print("Pool closed")
 
 
 def np_sub_shmem_w(in_par, idxs, np_filt_size, c1):

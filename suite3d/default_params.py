@@ -185,36 +185,37 @@ params = {
     "n_proc_detect": set_num_processors(16),
     # don't touch this
     "dtype": n.float32,
-    ### Cell detection ###
+    ### Cell segmentation ###
     # threshold above which cell peaks in correlation map are detected
     "peak_thresh": 2.0,
-    # Size and overlap of cell detection patches
+    # Size and overlap of cell segmentation patches
     "patch_size_xy": (120, 120),
     "patch_overlap_xy": (25, 25),
-    # only consider timepoints with values above this threshold for detection
+    # only consider timepoints with values above this threshold for segmentation
     "activity_thresh": 20.0,
-    # only consider timepoints above this percentile for detection. minimum thresh
+    # only consider timepoints above this percentile for segmentation. minimum thresh
     # between this and activity_thresh is used
     "percentile": 99.5,
     # threshold to include a cell in an ROI. Lower to have larger ROIs
     "extend_thresh": 0.2,
-    # less useful parameters for cell detection:
+    # less useful parameters for cell segmentation:
     # number of extension iterations for each ROI. Recommend leaving at 2
     "roi_ext_iterations": 2,
     # number of iterations around a cell to exclude future cells from
     "ext_subtract_iters": 0,
     # maximum number of ROIs that can be found in a patch
     "max_iter": 10000,
-    # Time binning factor for detection
+    # Time binning factor for segmentation
     # if you have many samples per transient, consider increasing
     "detection_timebin": 1,
-    # Crop the movie before detection to only detect on a subset of the movie
+    "segmentation_timebin": 1,
+    # Crop the movie before segmentation to only detect on a subset of the movie
     "detection_time_crop": (None, None),
     # Allow overlap of cells (not functioning, can lead to weirdness)
     "allow_overlap": False,
     # does nothing
     "recompute_v": None,
-    # normalize intensity of vmap planes before detection, not recommended
+    # normalize intensity of vmap planes before segmentation, not recommended
     "normalize_vmap": False,
     # maximum number of pixels in a cell
     "max_pix": 500,
@@ -224,6 +225,8 @@ params = {
     # Deconvolution
     # coefficient to multiply neuropil activity by before subtracting from cell activity
     "npil_coeff": 0.7,
+    "npil_to_roi_npix_ratio": None,
+    "min_npil_npix": 100,
     # S2P deconvolution parameters
     "dcnv_baseline": "maximin",
     "dcnv_win_baseline": 60,

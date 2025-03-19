@@ -961,13 +961,15 @@ class Job:
             mov_patch = mov_sub[
                 ts[0] : ts[1], zs[0] : zs[1], ys[0] : ys[1], xs[0] : xs[1]
             ]
-            if self.params["detection_timebin"] > 1:
+            if self.params["segmentation_timebin"] > 1:
                 self.log(
                     "Binning movie with a factor of %.2f"
-                    % self.params["detection_timebin"],
+                    % self.params["segmentation_timebin"],
                     2,
                 )
-                mov_patch = ext.binned_mean(mov_patch, self.params["detection_timebin"])
+                mov_patch = ext.binned_mean(
+                    mov_patch, self.params["segmentation_timebin"]
+                )
             self.log(
                 "Loading %.2f GB movie to memory, shape: %s "
                 % (mov_patch.nbytes / 1024**3, str(mov_patch.shape)),
@@ -1213,6 +1215,8 @@ class Job:
                 intermediate_save_dir=save_dir,
                 mov_shape_tfirst=mov_shape_tfirst,
                 log=self.log,
+                npil_to_roi_npix_ratio=self.params["npil_to_roi_npix_ratio"],
+                min_npil_npix=self.params["min_npil_npix"],
             )
             n.save(os.path.join(save_dir, "F.npy"), F_roi)
             n.save(os.path.join(save_dir, "Fneu.npy"), F_neu)

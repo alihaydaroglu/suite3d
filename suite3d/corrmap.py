@@ -6,8 +6,9 @@ from . import default_params
 from . import detection3d as dtu
 from .utils import to_int, default_log, get_matching_params, make_batch_paths
 from . import utils
+from . import extension as ext
 import time
-
+import multiprocessing
 
 corr_map_param_names = [
     "voxel_size_um",
@@ -20,6 +21,7 @@ corr_map_param_names = [
     "cell_filt_z_um",
     "cell_filt_xy_um",
     "fix_vmap_edge_planes",
+    "detection_timebin",
     "sdnorm_exp",
     "intensity_thresh",
     "standard_vmap",
@@ -100,6 +102,17 @@ def calculate_corrmap(
         end_idx = min(nt, start_idx + t_batch_size)
         log("Running batch %d of %d" % (batch_idx + 1, n_batches), 2)
         mov_batch = mov[:, start_idx:end_idx]
+
+        log("batch_timebin", tic=True)
+        if corr_map_params.get("detection_timebin", 1) > 1:
+            log(
+                f"Binning with timebin of size {corr_map_params['detection_timebin']:02d}",
+                2,
+            )
+            mov_batch = ext.binned_mean_ax1(
+                mov_batch, corr_map_params["detection_timebin"]
+            )
+        log("batch_timebin", toc=True)
         # change the order to nt, nz, ny, nx
         # first try doing in dask, because mov is probably a dask array
         # if that fails (if mov is not a dask array), do it in numpy
@@ -111,6 +124,9 @@ def calculate_corrmap(
         # compute the correlation map for this batch and update accumulators
         log("prep", toc=True)
         log("batch", tic=True)
+
+        n_processors = computation_params["n_proc"]
+        pool = multiprocessing.Pool(n_processors)
         vmap_batch, mov_sub_batch = compute_corr_map_batch(
             mov_batch,
             corr_map_params,
@@ -118,6 +134,7 @@ def calculate_corrmap(
             accums,
             summary,
             log,
+            pool=pool,
         )
         log("batch", toc=True)
         log("save", tic=True)
@@ -143,6 +160,7 @@ def compute_corr_map_batch(
     accum=None,
     summary=None,
     log=default_log,
+    pool=None,
 ):
     # TODO DOCSTRING
     log("batch_setup", tic=True)
@@ -193,7 +211,7 @@ def compute_corr_map_batch(
     # these parameters relate to computational resources
     n_processors = computation_params["n_proc"]
     dtype = computation_params["dtype"]
-    minibatch_size = int(n.ceil(nb / n_processors))
+    minibatch_size = max(20, int(n.ceil(nb / n_processors)))
 
     # make sure mov is the correct dtype
     if mov.dtype is not dtype:
@@ -260,6 +278,7 @@ def compute_corr_map_batch(
         minibatch_size,
         standard_vmap=corr_map_params["standard_vmap"],
         log=log,
+        pool=pool,
     )
 
     log("batch_filt_reduce", toc=True)
@@ -268,7 +287,7 @@ def compute_corr_map_batch(
     vmap = dtu.accumulate_vmap_2(accum["vmap_2"], vmap_2, nt + nb)
     log("batch_accum_vmap", toc=True)
     accum["n_frames_proc"] += nb
-    log(f"VMAP std {vmap.std()}, mean {vmap.mean()}, type {vmap.dtype}")
+    # log(f"VMAP std {vmap.std()}, mean {vmap.mean()}, type {vmap.dtype}")
 
     return vmap, mov_sub
 
