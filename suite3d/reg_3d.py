@@ -1116,6 +1116,39 @@ def shift_mov_fast(mov, shifts, fill_value=0):
 
     return shifted_mov
 
+@njit(parallel=True, nogil=True, cache=True)
+def shift_mov_z(mov, shifts, fill_value=0):
+    """
+    A fast function, which applies z integer shifts
+
+    Parameters
+    ----------
+    mov : ndarray (nz, nt, ny, nx)
+        Movie to be shifted
+    shifts : ndarray (nt, 3)
+        shifts have (z_shift, y_shift, x_shift) for each frame
+    fill_value : float, optional
+        the value to fill the overlaped empty voxels, by default 0
+
+    Returns
+    -------
+    ndarray
+        The shifted movie
+    """
+    shifted_mov = np.zeros_like(mov)
+    __, nt, __, __ = mov.shape
+    for t in range(nt):
+        shift = shifts[t, :]
+
+        # add the 4 cases where one of the shifts is0
+        if shift[0] > 0:  # +
+            shifted_mov[:shift[0], t, :, :] = fill_value
+            shifted_mov[shift[0]:, t, :, :] = mov[:-shift[0], t, :, :]
+        if shift[0] < 0:  # -
+            shifted_mov[shift[0]:, t, :, :] = fill_value
+            shifted_mov[:shift[0], t, :, :] = mov[-shift[0]:, t, :, :]
+
+    return shifted_mov
 
 # dev function for finding translation between two 3d images
 def register_2_images(img1, img2, pc_size):

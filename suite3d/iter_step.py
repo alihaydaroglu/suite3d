@@ -1348,6 +1348,8 @@ def register_dataset_gpu_3d(
     reg_norm_frames = params.get("reg_norm_frames", True)
     cavity_size = params.get("cavity_size", 15)
     save_dtype_str = params.get("save_dtype", "float32")
+    apply_z_shift = params.get("apply_z_shift", False)
+    
     save_dtype = None
     if save_dtype_str == "float32":
         save_dtype = n.float32
@@ -1471,7 +1473,11 @@ def register_dataset_gpu_3d(
         # shift entire abtch on cpu at once
         # log this info
         mov_shifted = reg_3d.shift_mov_fast(mov_cpu, -int_shift)
-        # TODO: add optional zshift here
+
+        if apply_z_shift:
+            # if there is at least one 
+            if n.max(int_shift[0]) > 1:
+                mov_shifted = reg_3d.shift_mov_z(mov_shifted, int_shift)
         log_cb(f"Shifted the mov in: {time.time() - time_shift}s")
 
         # NOTE changed this so gets int_shifts + sub_pixel shifts etc

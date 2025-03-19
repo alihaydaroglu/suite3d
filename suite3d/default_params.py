@@ -105,6 +105,7 @@ params = {
     "gpu_reference_batch_size": 20,
     # parameters from suite2p
     "nonrigid": True,
+    "apply_z_shift": False, 
     "smooth_sigma": 1.15,
     "maxregshift": 0.15,
     "reg_filter_pcorr": 1,
