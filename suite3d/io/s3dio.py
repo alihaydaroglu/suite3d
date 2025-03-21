@@ -76,10 +76,8 @@ class s3dio:
         params = self._update_prms(**parameters)
         _dataloader = self._get_dataloader(params)
         mov_list = _dataloader(paths, params, verbose=verbose, debug=debug)
-        # print("LOADED")
         # concatenate movies across time to make a single movie
         mov = n.concatenate(mov_list, axis=1)
-        # print("CONCATENATED")
 
         if verbose:
             size = mov.nbytes / (1024**3)
@@ -116,10 +114,7 @@ class s3dio:
         Returns:
             mov (ndarray): the loaded tiff data with shape (planes, frames, y-pixels, x-pixels)
         """
-        todo(
-            "The lbm loader filters across the slow y-axis (?), should we do something similar here?"
-        )
-        todo("Performance may be improved by using multithreaded operations.")
+        todo("Should we filter across the slow y-axis like the lbm loader?")
 
         if any([p < 0 or p > params["n_ch_tif"] for p in params["planes"]]):
             raise ValueError(
@@ -152,45 +147,49 @@ class s3dio:
                 # times with different functional color channels and then combine the results however you see fit.
                 tif_file = n.take(tif_file, params["functional_color_channel"], axis=1)
 
-            assert (
-                tif_file.ndim == 3
-            ), "tiff file (potentially post color_channel selection) is not 3D, expecting (frames, y-pixels, x-pixels)"
-
-            t, py, px = tif_file.shape
-            frames = t // params["n_ch_tif"]
-            if frames * params["n_ch_tif"] != t:
-                if verbose:
-                    extra_planes = t % params["n_ch_tif"]
-                    self.job.log(
-                        "Standard 2P Warning: number of planes does not divide into number of tiff images, dropping %d frames"
-                        % extra_planes
-                    )
-
-                # handle the possibility of uneven plane number by removing extra frames
-                tif_file = tif_file[: frames * params["n_ch_tif"]]
-                t = frames * len(params["planes"])
-
-            assert (
-                frames * len(params["planes"]) == t
-            ), "number of planes does not divide into number of tiff images"
-            tif_file = n.swapaxes(
-                tif_file.reshape(frames, len(params["planes"]), py, px), 0, 1
-            )
-            tif_file = tif_file[params["planes"]]
-            todo("integrate the planes param with this param to make it make sense")
-            if params["multiplane_2p_use_planes"] is not None:
-
-                tif_file = tif_file[params["multiplane_2p_use_planes"]]
-
-            if debug:
-                print(
-                    f"loaded tif_file has shape: {tif_file.shape}, corresponding to [planes, frames, y-pixels, x-pixels]"
+            if tif_file.ndim != 3:
+                raise ValueError(
+                    f"tiff file is not 3D, expecting (num_frames_not_volume!, y-pixels, x-pixels), but it has shape {tif_file.shape}"
                 )
+            
+            if debug:
                 print(f":Loading time up to tiff #{itif+1}: {time.time() - tic:.4f} s")
 
             mov_list.append(tif_file)
 
-        return mov_list
+        # Concatenate the movies on temporal axis
+        full_movie = n.concatenate(mov_list, axis=0)
+
+        # Check if the number of planes divides into the number of tiff files
+        # (Standard 2P data can have some volumes separated across tiff files since
+        # each plane isn't imaged simultaneously, so we need to handle this case)
+        t, py, px = full_movie.shape
+        frames = t // params["n_ch_tif"]
+        if frames * params["n_ch_tif"] != t:
+            if verbose:
+                extra_planes = t % params["n_ch_tif"]
+                self.job.log(
+                    "Standard 2P Warning: number of planes does not divide into number of tiff images, dropping %d frames"
+                    % extra_planes
+                )
+
+            # handle the possibility of uneven plane number by removing extra frames
+            # since suite3d requires full volumes for each frame
+            full_movie = full_movie[: frames * params["n_ch_tif"]]
+            t = frames * len(params["planes"])
+
+        # Reshape the movie to have dimensions (frames, planes, y-pixels, x-pixels)
+        full_movie = n.swapaxes(full_movie.reshape(frames, len(params["planes"]), py, px), 0, 1)
+
+        # Filter out planes to analyze
+        full_movie = full_movie[params["planes"]]
+        todo("integrate the planes param with this param to make it make sense")
+        if params["multiplane_2p_use_planes"] is not None:
+            full_movie = full_movie[params["multiplane_2p_use_planes"]]
+
+        # Return full movie in a list because load_data expects a list of movies
+        return [full_movie]
+    
 
     def _load_faced_tifs(self, paths, params, verbose=True, debug=False):
         nz = params["faced_nz"]
