@@ -116,7 +116,7 @@ class s3dio:
         """
         todo("Should we filter across the slow y-axis like the lbm loader?")
 
-        if any([p < 0 or p > params["n_ch_tif"] for p in params["planes"]]):
+        if any([p < 0 or p >= params["n_ch_tif"] for p in params["planes"]]):
             raise ValueError(
                 f"Planes must be in range 0-{params['n_ch_tif']}, but it's set to: {params['planes']}"
             )
@@ -176,14 +176,12 @@ class s3dio:
             # handle the possibility of uneven plane number by removing extra frames
             # since suite3d requires full volumes for each frame
             full_movie = full_movie[: frames * params["n_ch_tif"]]
-            t = frames * len(params["planes"])
+            t = frames * params["n_ch_tif"]
 
-        # Reshape the movie to have dimensions (frames, planes, y-pixels, x-pixels)
-        full_movie = n.swapaxes(full_movie.reshape(frames, len(params["planes"]), py, px), 0, 1)
+        # Reshape the movie to have dimensions (planes, frames, y-pixels, x-pixels)
+        full_movie = n.swapaxes(full_movie.reshape(frames, params["n_ch_tif"], py, px), 0, 1)
 
         # Filter out planes to analyze
-        full_movie = full_movie[params["planes"]]
-        todo("integrate the planes param with this param to make it make sense")
         if params["multiplane_2p_use_planes"] is not None:
             full_movie = full_movie[params["multiplane_2p_use_planes"]]
 
