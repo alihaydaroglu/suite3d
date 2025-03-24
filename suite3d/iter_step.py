@@ -7,6 +7,7 @@ from dask import array as darr
 import time
 from suite2p.registration import register
 from suite2p.registration import nonrigid
+from suite2p.registration.nonrigid import transform_data
 
 # from . import deepinterp as dp
 
@@ -871,7 +872,7 @@ def register_dataset_gpu(
                 if nonrigid:
                     # print("SHIFITNG: %d" % zidx)
                     # TODO migrate to suite3D?
-                    mov_shifted[zidx, idx0:idx1] = nonrigid.transform_data(
+                    mov_shifted[zidx, idx0:idx1] = transform_data(
                         mov_shifted_cpu[:, zidx],
                         nblocks,
                         xblock=xblocks,
