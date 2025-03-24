@@ -874,7 +874,9 @@ def get_reference_img_cpu(
             refs_f[z] = phasecorr_ref(refImg[z, :, :].squeeze(), smooth_sigma=1.15)
 
         # mask is applied in rigid_2d_reg_cpu
-        tmp, ymax[iter], xmax[iter], cmax[iter] = reg.rigid_2d_reg_cpu(
+        # this will only return mov_shifted, ymaxs, xmaxs
+        # tmp, ymax[iter], xmax[iter], cmax[iter] = reg.rigid_2d_reg_cpu(
+        tmp, ymax[iter], xmax[iter] = reg.rigid_2d_reg_cpu(
             frames,
             mult_mask,
             add_mask,
