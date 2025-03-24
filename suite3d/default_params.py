@@ -95,7 +95,7 @@ params = {
     # reference image paramaters
     "percent_contribute": 0.9,
     # percentage of frames which contribute to the reference image
-    "block_size": (128, 128),
+    "block_size": (128, 128),  # if you have lots of non-rigid movement, consider (64, 64)
     # size of a non-rigid block
     "sigma_reference": (1.45, 0),
     "smooth_sigma_reference": 1.15,
