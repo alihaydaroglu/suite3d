@@ -6,7 +6,7 @@ from scipy.ndimage import uniform_filter
 from dask import array as darr
 import time
 from suite2p.registration import register
-from suite2p.registration import suite2p_nonrigid
+from suite2p.registration import nonrigid as suite2p_nonrigid
 
 # from . import deepinterp as dp
 
