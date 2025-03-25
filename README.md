@@ -1,9 +1,11 @@
 ## Installation
+If the cloning line doesn't work, try: git clone --recurse-submodules https://github.com/alihaydaroglu/suite3d
+
 ```
-git clone --recurse-submodules git@github.com:alihaydaroglu/s2p-lbm.git
+git clone --recurse-submodules git@github.com:alihaydaroglu/suite3d.git
 conda env create -f environment.yml
-conda activate s2p-lbm
-cd suite2p
+conda activate suite3d-gpu
+cd suite3d
 pip install -e .
 ```
 If installation gets stuck around "Solving Environment", you should use libmamba ([explanation](https://conda.github.io/conda-libmamba-solver/libmamba-vs-classic/)), install it using the [instructions here](https://www.anaconda.com/blog/a-faster-conda-for-a-growing-community). Also, set the conda channel priority to be strict: `conda config --set channel_priority strict`. It's important that you don't forget the `-e` in the pip command, this allows the suite2p installation to be editable.
@@ -22,7 +24,7 @@ Then, run the Demo notebook.
 If you want to only visualize results on your local laptop, you can install a lightweight script that doesn't have any of the computational dependencies. 
 
 ```
-git clone --recurse-submodules git@github.com:alihaydaroglu/s2p-lbm.git
+git clone --recurse-submodules git@github.com:alihaydaroglu/suite3d.git
 conda create -y -n s3d-vis -c conda-forge python=3.9
 conda activate s3d-vis
 pip install "napari[pyqt5]"
