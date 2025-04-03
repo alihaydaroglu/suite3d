@@ -838,16 +838,19 @@ def get_reference_img_cpu(
         The first dimension is iteration number, the second is plane number. The value is the frames
         used for the reference iamge in that iteration and plane.
     """
-    ncc = max_reg_xy * 2 + 1
+    ncc = max_reg_xy * 2 + 1 # unused?
+
+    refImg = init_ref_3d(frames)
+    nz, ny, nx = refImg.shape
+
+    refImg = init_ref_3d(frames)
+    nz, ny, nx = refImg.shape
 
     # Allows rmins/rmaxs to be None, need as list of None
     if rmins is None and rmaxs is None:
         rmins = [None for i in range(nz)]
         rmaxs = [None for i in range(nz)]
 
-    refImg = init_ref_3d(frames)
-
-    nz, ny, nx = refImg.shape
     # Get the computed masks, once.. as its the same for thesame shape of array.. save time...
     # mask_offset need toupdate to refimg, so cal seeratley
     mult_mask, add_mask = compute_masks3D(refImg, sigma)
@@ -874,7 +877,9 @@ def get_reference_img_cpu(
             refs_f[z] = phasecorr_ref(refImg[z, :, :].squeeze(), smooth_sigma=1.15)
 
         # mask is applied in rigid_2d_reg_cpu
-        tmp, ymax[iter], xmax[iter], cmax[iter] = reg.rigid_2d_reg_cpu(
+        # this will only return mov_shifted, ymaxs, xmaxs
+        # tmp, ymax[iter], xmax[iter], cmax[iter] = reg.rigid_2d_reg_cpu(
+        tmp, ymax[iter], xmax[iter] = reg.rigid_2d_reg_cpu(
             frames,
             mult_mask,
             add_mask,

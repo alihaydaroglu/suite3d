@@ -76,10 +76,8 @@ class s3dio:
         params = self._update_prms(**parameters)
         _dataloader = self._get_dataloader(params)
         mov_list = _dataloader(paths, params, verbose=verbose, debug=debug)
-        # print("LOADED")
         # concatenate movies across time to make a single movie
         mov = n.concatenate(mov_list, axis=1)
-        # print("CONCATENATED")
 
         if verbose:
             size = mov.nbytes / (1024**3)
@@ -116,82 +114,125 @@ class s3dio:
         Returns:
             mov (ndarray): the loaded tiff data with shape (planes, frames, y-pixels, x-pixels)
         """
-        todo(
-            "The lbm loader filters across the slow y-axis (?), should we do something similar here?"
-        )
-        todo("Performance may be improved by using multithreaded operations.")
-
-        if any([p < 0 or p > params["n_ch_tif"] for p in params["planes"]]):
-            raise ValueError(
-                f"Planes must be in range 0-{params['n_ch_tif']}, but it's set to: {params['planes']}"
-            )
-
-        tic = time.time()
-
-        mov_list = []
-        for itif, tif_path in enumerate(paths):
-            if verbose:
-                self.job.log(f"Loading tiff {itif+1}/{len(paths)}: {tif_path}", 2)
-
-            tif_file = tifffile.imread(tif_path)
+        def filter_color_channel(mov):
             if params["num_colors"] > 1:
                 # TODO: make sure that tiffs are 3d when num_colors==1
                 # get functional channel from multi-channel tiff
-                if len(tif_file.shape) != 4:
+                if len(mov.shape) != 4:
                     raise ValueError(
                         f"tiff file is {tif_file.ndim}D instead of 4D, expecting (frames, colors, y-pixels, x-pixels)"
                     )
-                if tif_file.shape[1] != params["num_colors"]:
+                if mov.shape[1] != params["num_colors"]:
                     raise ValueError(
-                        f"tiffs have {tif_file.shape[1]} color channels, expecting {params['num_colors']}"
+                        f"tiffs have {mov.shape[1]} color channels, expecting {params['num_colors']}"
                     )
 
                 # in general, imaging is only done with one functional color channel, so we take that one and ignore the others
                 # if anyone is using multiple functional color channels, they need to modify the code themselves or raise an
                 # issue to ask for this feature to be implemented. A simple work around is to run the suite3d pipeline multiple
                 # times with different functional color channels and then combine the results however you see fit.
-                tif_file = n.take(tif_file, params["functional_color_channel"], axis=1)
+                mov = n.take(mov, params["functional_color_channel"], axis=1)
+            return mov
 
-            assert (
-                tif_file.ndim == 3
-            ), "tiff file (potentially post color_channel selection) is not 3D, expecting (frames, y-pixels, x-pixels)"
+        todo("Should we filter across the slow y-axis like the lbm loader?")
 
-            t, py, px = tif_file.shape
-            frames = t // params["n_ch_tif"]
-            if frames * params["n_ch_tif"] != t:
-                if verbose:
-                    extra_planes = t % params["n_ch_tif"]
-                    self.job.log(
-                        "Standard 2P Warning: number of planes does not divide into number of tiff images, dropping %d frames"
-                        % extra_planes
-                    )
-
-                # handle the possibility of uneven plane number by removing extra frames
-                tif_file = tif_file[: frames * params["n_ch_tif"]]
-                t = frames * len(params["planes"])
-
-            assert (
-                frames * len(params["planes"]) == t
-            ), "number of planes does not divide into number of tiff images"
-            tif_file = n.swapaxes(
-                tif_file.reshape(frames, len(params["planes"]), py, px), 0, 1
+        if any([p < 0 or p >= params["n_ch_tif"] for p in params["planes"]]):
+            raise ValueError(
+                f"Planes must be in range 0-{params['n_ch_tif']}, but it's set to: {params['planes']}"
             )
-            tif_file = tif_file[params["planes"]]
-            todo("integrate the planes param with this param to make it make sense")
-            if params["multiplane_2p_use_planes"] is not None:
 
-                tif_file = tif_file[params["multiplane_2p_use_planes"]]
+        # Check preregistration
+        required_preregistration_params = ["frame_counts", "extra_frames", "previous_tif"]
+        for param in required_preregistration_params:
+            if param not in params:
+                raise ValueError(f"{param} not found in params -- preregister_tifs() must be called before loading tiffs!")
 
-            if debug:
-                print(
-                    f"loaded tif_file has shape: {tif_file.shape}, corresponding to [planes, frames, y-pixels, x-pixels]"
+        tic = time.time()
+
+        mov_list = []
+        mov_extra_frames = {}
+        for itif, tif_path in enumerate(paths):
+            if verbose:
+                self.job.log(f"Loading tiff {itif+1}/{len(paths)}: {tif_path}", 2)
+
+            if tif_path not in params["frame_counts"] or tif_path not in params["extra_frames"] or tif_path not in params["previous_tif"]:
+                raise ValueError(f"tif_path {tif_path} not found in frame_counts, extra_frames, or previous_tif - did the list of tifs change somehow?")
+            
+            # Load current tif file
+            tif_file = filter_color_channel(tifffile.imread(tif_path))
+            
+            # Check if frames match expected number of frames
+            expected_frames = params["frame_counts"][tif_path]
+            if tif_file.shape[0] != expected_frames:
+                raise ValueError(
+                    f"tif_path {tif_path} has {tif_file.shape[0]} frames, but preregister_tifs() detected {expected_frames} frames."
+                    "This may be caused by using preregister_tifs() in safe_mode=False which is fast but error prone." 
+                    "Please set tif_preregistration_safe_mode=True in your params and try again."
+                    "If that still doesn't work, then either the files have changed or there is inconcsistency in the tif structure!"
                 )
+
+            # Get the number of frames in previous tifs
+            c_prev_tif = params["previous_tif"][tif_path]
+            frames_from_previous = params["extra_frames"][c_prev_tif] if c_prev_tif else 0
+
+            if frames_from_previous > 0:
+                # We need to load the previous tif file and add it's extra frames
+                if c_prev_tif in mov_extra_frames:
+                    # This means we already loaded it and collected the extra frames
+                    frames_from_previous = mov_extra_frames[c_prev_tif]
+                else:
+                    # We need to load the previous tif file and collect the extra frames
+                    prev_tif_file = tifffile.imread(c_prev_tif)
+                    frames_from_previous = filter_color_channel(prev_tif_file[-frames_from_previous:])
+
+                tif_file = n.concatenate([frames_from_previous, tif_file], axis=0)
+
+            # Now that we've added previous frames if necessary, we can remove final frames
+            n_frames_total = tif_file.shape[0]
+            check_extra_frames = n_frames_total % params["n_ch_tif"]
+            extra_frames_expected = params["extra_frames"][tif_path]
+            if check_extra_frames != extra_frames_expected:
+                raise ValueError(f"tif_path {tif_path} has {check_extra_frames} extra frames, but preregister_tifs() detected {extra_frames_expected} frames.")
+            
+            # Remove extra frames and cache them for later if needed
+            if extra_frames_expected > 0:   
+                extra_frames = tif_file[-extra_frames_expected:]
+                mov_extra_frames[tif_path] = extra_frames
+
+                # Only keep a full volume of frames
+                tif_file = tif_file[:-extra_frames_expected]
+
+            if tif_file.ndim != 3:
+                raise ValueError(
+                    f"tiff file is not 3D, expecting (num_frames_not_volume!, y-pixels, x-pixels), but it has shape {tif_file.shape}"
+                )
+            
+            if debug:
                 print(f":Loading time up to tiff #{itif+1}: {time.time() - tic:.4f} s")
+
+            # Do a final check that the tif matches volumes
+            t, py, px = tif_file.shape
+            volumes = t // params["n_ch_tif"]
+            if volumes * params["n_ch_tif"] != t:
+                raise ValueError(
+                    f"tif_path {tif_path} has {t} frames which still doesn't divide evenly into volumes ({t%params['n_ch_tif']} frames left over)."
+                    "This may be caused by using preregister_tifs() in safe_mode=False which is fast but error prone."  
+                    "Please set tif_preregistration_safe_mode=True in your params and try again."
+                    "If that still doesn't work, then either the files have changed or there is inconcsistency in the tif structure!"
+                )
+
+            # Reshape the movie to have dimensions (planes, frames, y-pixels, x-pixels)
+            tif_file = n.swapaxes(tif_file.reshape(volumes, params["n_ch_tif"], py, px), 0, 1)
+
+            # Filter out planes to analyze
+            if params["multiplane_2p_use_planes"] is not None:
+                tif_file = tif_file[params["multiplane_2p_use_planes"]]
 
             mov_list.append(tif_file)
 
+        # Return mov_list of the current batch
         return mov_list
-
+    
     def _load_faced_tifs(self, paths, params, verbose=True, debug=False):
         nz = params["faced_nz"]
         mov_list = []

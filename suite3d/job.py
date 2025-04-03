@@ -27,6 +27,7 @@ from suite3d import dcnv
 
 from . import utils
 from . import lbmio
+from .io import get_frame_counts
 
 try:
     from . import corrmap
@@ -97,12 +98,43 @@ class Job:
             assert tifs is not None, "Must provide tiff files"
             self.params["tifs"] = tifs
             self.tifs = tifs
+            self.preregister_tifs()
             self.save_params()
+
         else:
             self.job_dir = os.path.join(root_dir, "s3d-%s" % job_id)
             self.load_dirs()
             self.load_params(params_path=params_path)
             self.tifs = self.params.get("tifs", [])
+
+    def preregister_tifs(self):
+        """
+        Preregister tifs to get the number of frames in each tif.
+
+        This is required for standard 2P data where the number of frames
+        in each tif may not divide evenly into the number of planes per
+        volume.
+        """
+        if not self.params["lbm"] and not self.params["faced"]:
+            frame_counts = get_frame_counts(self.tifs, safe_mode=self.params["tif_preregistration_safe_mode"])
+            extra_frames = {}
+            previous_tif = {}
+            for i, tif in enumerate(self.tifs):
+                c_frames = frame_counts[tif]
+                if i > 0:
+                    # Add link to previous tif and add extra frames from previous tif
+                    previous_tif[tif] = self.tifs[i - 1]
+                    c_frames = c_frames + extra_frames[previous_tif[tif]]
+                else:
+                    previous_tif[tif] = None
+                
+                # Remainder of current tifs frames by n_ch_tif gives the number of extra frames
+                extra_frames[tif] = c_frames % self.params["n_ch_tif"]
+        
+            # Add frame counts, extra frames, and previous tif to the params for use in s3dio loading
+            self.params["frame_counts"] = frame_counts
+            self.params["extra_frames"] = extra_frames
+            self.params["previous_tif"] = previous_tif
 
     def copy_parent_job(self, parent_job, copy_dirs=(), symlink=False):
         """
@@ -560,7 +592,6 @@ class Job:
 
         if mov is None:
             mov = self.get_registered_movie("registered_fused_data", "fused")
-            mov = self.get_registered_movie("registered_fused_data", "fused")
 
         self.save_params(copy_dir=corr_map_dir)
         self.corrmap = corrmap.calculate_corrmap(
@@ -579,10 +610,7 @@ class Job:
     def load_corr_map_results(self, parent_dir_name=None):
         files = ["max_img.npy", "mean_img.npy", "vmap.npy"]
         corrmap_dir_tag = "corrmap"
-        files = ["max_img.npy", "mean_img.npy", "vmap.npy"]
-        corrmap_dir_tag = "corrmap"
         if parent_dir_name is not None:
-            corrmap_dir_tag = parent_dir_name + "-corrmap"
             corrmap_dir_tag = parent_dir_name + "-corrmap"
         results = {}
         for file in files:
@@ -721,9 +749,6 @@ class Job:
             comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
             comb_params = sweep_summary["comb_params"][comb_idx]
             self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
-            comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
-            comb_params = sweep_summary["comb_params"][comb_idx]
-            self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             self.params = comb_params
             corrmap_out = self.calculate_corr_map(
                 output_dir_name=comb_dir_name,
@@ -778,21 +803,16 @@ class Job:
             params_to_sweep, sweep_name, all_combinations=all_combinations
         )
         sweep_summary["sweep_type"] = "segmentation"
-        sweep_dir_path = sweep_summary["sweep_dir_path"]
         sweep_summary["results"] = []
-        combinations = sweep_summary["combinations"]
         sweep_summary["sweep_type"] = "segmentation"
         sweep_dir_path = sweep_summary["sweep_dir_path"]
         sweep_summary["results"] = []
         combinations = sweep_summary["combinations"]
         n_combs = len(combinations)
         for comb_idx in range(n_combs):
-            comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
-            comb_params = sweep_summary["comb_params"][comb_idx]
             self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
             comb_params = sweep_summary["comb_params"][comb_idx]
-            self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             self.params = comb_params
             output_dir = self.segment_rois(
                 output_dir_name=comb_dir_name,
@@ -977,13 +997,6 @@ class Job:
             parent_dir_name=segmentation_dir_tag,
             info_use_idx=None,
         )
-        rois_dir_path = self.combine_patches(
-            patches_to_segment,
-            rois_dir_path,
-            parent_dir_name=segmentation_dir_tag,
-            info_use_idx=None,
-        )
-
         return rois_dir_path
 
     def compute_npil_masks(self, stats_dir):
