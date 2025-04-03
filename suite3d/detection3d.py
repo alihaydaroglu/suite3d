@@ -11,7 +11,7 @@ from scipy.ndimage import maximum_filter, gaussian_filter, uniform_filter
 from . import utils
 from .utils import default_log
 
-# This file is adapted from the original suite2p, many functions are substantially the same
+# This file is adapted from the original suite2p (Stringer & Pachitariu et al)
 
 
 def accumulate_mean(mean, batch, ns_previous, sample_axis=0):

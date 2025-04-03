@@ -484,7 +484,7 @@ def detect_cells_worker(
 
 def binned_mean(mov: n.ndarray, bin_size):
     """Returns an array with the mean of each time bin (of size 'bin_size')."""
-    # from suite2p/binary
+    # adaptdet from suite2p/binary
     n_frames, nz, ny, nx = mov.shape
     mov = mov[: (n_frames // bin_size) * bin_size]
     return mov.reshape(-1, bin_size, nz, ny, nx).mean(axis=1)

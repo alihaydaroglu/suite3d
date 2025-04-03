@@ -23,7 +23,7 @@ try:
 except:
     print("No psutil")
 
-from suite2p.extraction import dcnv
+from suite3d import dcnv
 
 from . import utils
 from . import lbmio
@@ -36,8 +36,6 @@ try:
     from .iter_step import (
         register_dataset,
         fuse_and_save_reg_file,
-        calculate_corrmap,
-        calculate_corrmap_from_svd,
         register_dataset_gpu,
         register_dataset_gpu_3d,
     )
@@ -533,38 +531,6 @@ class Job:
                 register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log)
             else:
                 register_dataset(self, tifs, params, self.dirs, summary, self.log)
-
-    def register_gpu(self, tifs=None, max_gpu_batches=None):
-        params = self.params
-        summary = self.load_summary()
-        save_dir = self.make_new_dir("registered_fused_data")
-        if tifs is None:
-            tifs = self.tifs
-        register_dataset_gpu(
-            self,
-            tifs,
-            params,
-            self.dirs,
-            summary,
-            self.log,
-            max_gpu_batches=max_gpu_batches,
-        )
-
-    def register_gpu_3d(self, tifs=None, max_gpu_batches=None):
-        params = self.params
-        summary = self.load_summary()
-        save_dir = self.make_new_dir("registered_fused_data")
-        if tifs is None:
-            tifs = self.tifs
-        register_dataset_gpu_3d(
-            self,
-            tifs,
-            params,
-            self.dirs,
-            summary,
-            self.log,
-            max_gpu_batches=max_gpu_batches,
-        )
 
     def calculate_corr_map(
         self,
@@ -1944,83 +1910,6 @@ class Job:
         summary = self.load_summary()
         return summary["plane_shifts"]
 
-    def calculate_corr_map_old(
-        self,
-        mov=None,
-        save=True,
-        return_mov_filt=False,
-        crop=None,
-        svd_info=None,
-        iter_limit=None,
-        parent_dir=None,
-        update_main_params=True,
-        svs=None,
-        us=None,
-    ):
-        self.save_params(copy_dir_tag=parent_dir, update_main_params=update_main_params)
-        if self.summary is None:
-            self.load_summary()
-        mov_sub_dir_tag = "mov_sub"
-        iter_dir_tag = "iters"
-        if parent_dir is not None:
-            mov_sub_dir_tag = parent_dir + "-" + mov_sub_dir_tag
-            iter_dir_tag = parent_dir + "-iters"
-            iter_dir = self.make_new_dir(
-                "iters", parent_dir_name=parent_dir, dir_tag=iter_dir_tag
-            )
-        mov_sub_dir = self.make_new_dir(
-            "mov_sub", parent_dir_name=parent_dir, dir_tag=mov_sub_dir_tag
-        )
-        n.save(os.path.join(mov_sub_dir, "params.npy"), self.params)
-        self.log("Saving mov_sub to %s" % mov_sub_dir)
-        if svd_info is not None:
-            mov = svd_info
-            self.log("Using SVD shortcut, loading entire V matrix to memory")
-            self.log(
-                "WARNING: if you encounter very large RAM usage during this run, use mov=svd_info instead of svd_info=svd_info. If it persists, reduce your batchsizes"
-            )
-            out = calculate_corrmap_from_svd(
-                svd_info,
-                params=self.params,
-                log_cb=self.log,
-                iter_limit=iter_limit,
-                svs=svs,
-                us=us,
-                dirs=self.dirs,
-                iter_dir_tag=iter_dir_tag,
-                mov_sub_dir_tag=mov_sub_dir_tag,
-                summary=self.summary,
-            )
-        else:
-            if mov is None:
-                mov = self.get_registered_movie(
-                    "registered_fused_data", "fused", edge_crop=False
-                )
-            if crop is not None and svd_info is None:
-                assert svd_info is None, "cant crop with svd - easy fix"
-                self.params["detection_crop"] = crop
-                self.save_params(copy_dir_tag="mov_sub", update_main_params=False)
-                mov = mov[
-                    crop[0][0] : crop[0][1],
-                    :,
-                    crop[1][0] : crop[1][1],
-                    crop[2][0] : crop[2][1],
-                ]
-                self.log("Cropped movie to shape: %s" % str(mov.shape))
-            vmap, mean_img, max_img = calculate_corrmap(
-                mov,
-                self.params,
-                self.dirs,
-                self.log,
-                return_mov_filt=return_mov_filt,
-                save=save,
-                iter_limit=iter_limit,
-                iter_dir_tag=iter_dir_tag,
-                mov_sub_dir_tag=mov_sub_dir_tag,
-                summary=self.summary,
-            )
-
-        return (vmap, mean_img, max_img), mov_sub_dir, self.dirs[iter_dir_tag]
 
     def get_cwd(self):
         print(os.getcwd())

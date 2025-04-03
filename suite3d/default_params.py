@@ -167,7 +167,7 @@ params = {
     "cell_filt_z_um": 15,
     # activity threshold before calculating correlation map
     "intensity_thresh": 0.1,
-    "standard_vmap": True,  # use suite2p algorithm for vmap
+    "standard_vmap": True,  # use suite2p-inspired algorithm for vmap
     # Width of the temporal hpf
     # Should divide t_batch_size evenly
     "temporal_hpf": 200,

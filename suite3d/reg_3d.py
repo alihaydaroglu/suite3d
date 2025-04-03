@@ -1140,7 +1140,6 @@ def shift_mov_z(mov, shifts, fill_value=0):
     for t in range(nt):
         shift = shifts[t, :]
 
-        # add the 4 cases where one of the shifts is0
         if shift[0] > 0:  # +
             shifted_mov[:shift[0], t, :, :] = fill_value
             shifted_mov[shift[0]:, t, :, :] = mov[:-shift[0], t, :, :]
