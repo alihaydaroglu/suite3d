@@ -626,7 +626,6 @@ class Job:
 
         if mov is None:
             mov = self.get_registered_movie("registered_fused_data", "fused")
-            mov = self.get_registered_movie("registered_fused_data", "fused")
 
         self.save_params(copy_dir=corr_map_dir)
         self.corrmap = corrmap.calculate_corrmap(
@@ -645,10 +644,7 @@ class Job:
     def load_corr_map_results(self, parent_dir_name=None):
         files = ["max_img.npy", "mean_img.npy", "vmap.npy"]
         corrmap_dir_tag = "corrmap"
-        files = ["max_img.npy", "mean_img.npy", "vmap.npy"]
-        corrmap_dir_tag = "corrmap"
         if parent_dir_name is not None:
-            corrmap_dir_tag = parent_dir_name + "-corrmap"
             corrmap_dir_tag = parent_dir_name + "-corrmap"
         results = {}
         for file in files:
@@ -787,9 +783,6 @@ class Job:
             comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
             comb_params = sweep_summary["comb_params"][comb_idx]
             self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
-            comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
-            comb_params = sweep_summary["comb_params"][comb_idx]
-            self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             self.params = comb_params
             corrmap_out = self.calculate_corr_map(
                 output_dir_name=comb_dir_name,
@@ -844,21 +837,16 @@ class Job:
             params_to_sweep, sweep_name, all_combinations=all_combinations
         )
         sweep_summary["sweep_type"] = "segmentation"
-        sweep_dir_path = sweep_summary["sweep_dir_path"]
         sweep_summary["results"] = []
-        combinations = sweep_summary["combinations"]
         sweep_summary["sweep_type"] = "segmentation"
         sweep_dir_path = sweep_summary["sweep_dir_path"]
         sweep_summary["results"] = []
         combinations = sweep_summary["combinations"]
         n_combs = len(combinations)
         for comb_idx in range(n_combs):
-            comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
-            comb_params = sweep_summary["comb_params"][comb_idx]
             self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
             comb_params = sweep_summary["comb_params"][comb_idx]
-            self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             self.params = comb_params
             output_dir = self.segment_rois(
                 output_dir_name=comb_dir_name,
@@ -1043,13 +1031,6 @@ class Job:
             parent_dir_name=segmentation_dir_tag,
             info_use_idx=None,
         )
-        rois_dir_path = self.combine_patches(
-            patches_to_segment,
-            rois_dir_path,
-            parent_dir_name=segmentation_dir_tag,
-            info_use_idx=None,
-        )
-
         return rois_dir_path
 
     def compute_npil_masks(self, stats_dir):

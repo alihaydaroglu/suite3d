@@ -975,6 +975,11 @@ def estimate_crosstalk(
     time_init = time.time()
 
     nz = im3d.shape[0]  # if you are not ussing all pleans from the second caivty
+
+    if nz <= cavity_size:
+        raise ValueError("Number of z-planes must be greater than or equal to cavity_size."
+                         " Check init-pass parameters `cavity_size`.")
+
     n_second_cavity_planes = nz - cavity_size
 
     steps = n.arange(0, max_test_ct, step_dist)

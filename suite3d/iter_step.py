@@ -871,6 +871,7 @@ def register_dataset_gpu(
                 if nonrigid:
                     # print("SHIFITNG: %d" % zidx)
                     # TODO migrate to suite3D?
+
                     mov_shifted[zidx, idx0:idx1] = suite2p_nonrigid.transform_data(
                         mov_shifted_cpu[:, zidx],
                         nblocks,
