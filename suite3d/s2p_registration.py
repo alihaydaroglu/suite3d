@@ -5,6 +5,7 @@ from numba import vectorize, complex64
 from mkl_fft import fft2, ifft2
 from functools import lru_cache
 
+from typing import Tuple
 
 #############################################
 # 
@@ -166,7 +167,7 @@ def phasecorr(data, cfRefImg, maxregshift, smooth_sigma_time) -> Tuple[int, int,
             )
         )
     
-    cc = temporal_smooth(cc, smooth_sigma_time) if smooth_sigma_time > 0 else cc
+    cc = gaussian_filter1d(cc, smooth_sigma_time,axis=0) if smooth_sigma_time > 0 else cc
 
     ymax, xmax = np.zeros(data.shape[0], np.int32), np.zeros(data.shape[0], np.int32)
     for t in np.arange(data.shape[0]):
@@ -413,7 +414,26 @@ def mat_upsample(lpad: int, subpixel: int = 10):
     Kmat = np.linalg.inv(kernelD(lar, lar)) @ kernelD(lar, larUP)
     return Kmat, nup
 
+def kernelD(xs: np.ndarray, ys: np.ndarray, sigL: float = 0.85) -> np.ndarray:
+    """
+    Gaussian kernel from xs (1D array) to ys (1D array), with the "sigL" smoothing width for up-sampling kernels, (best between 0.5 and 1.0)
 
+    Parameters
+    ----------
+    xs:
+    ys
+    sigL
+
+    Returns
+    -------
+
+    """
+    xs0, xs1 = np.meshgrid(xs, xs)
+    ys0, ys1 = np.meshgrid(ys, ys)
+    dxs = xs0.reshape(-1, 1) - ys0.reshape(1, -1)
+    dys = xs1.reshape(-1, 1) - ys1.reshape(1, -1)
+    K = np.exp(-(dxs**2 + dys**2) / (2 * sigL**2))
+    return K
 
 def nr_phasecorr(data: np.ndarray, maskMul, maskOffset, cfRefImg, snr_thresh, NRsm, xblock, yblock, maxregshiftNR, subpixel: int = 10, lpad: int = 3,):
     """

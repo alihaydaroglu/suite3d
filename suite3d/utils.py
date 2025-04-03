@@ -26,7 +26,6 @@ try:
     from skimage.metrics import normalized_mutual_information
 except:
     print("Missing some packages")
-from suite2p.registration.nonrigid import make_blocks
 from datetime import datetime
 import pickle
 from multiprocessing import cpu_count

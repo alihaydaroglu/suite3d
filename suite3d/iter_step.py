@@ -768,6 +768,7 @@ def calculate_corrmap_from_svd(
     svs=None,
     us=None,
 ):
+    assert False, "this is currently broken"
     t_batch_size = params["t_batch_size"]
     temporal_hpf = min(t_batch_size, params["temporal_hpf"])
     if t_batch_size % temporal_hpf != 0:

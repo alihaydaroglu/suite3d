@@ -100,7 +100,7 @@ def detect_cells(
         else:
             zzx, yyx, xxx = extend_roi3d(zz, yy, xx, (nz, ny, nx), extend_z=True)
             zzx, yyx, xxx = extend_roi3d_iter(
-                zzx, yyx, xxx, (nz, ny, nx), n_iters=ext_subtract_iters, extend_z=False
+                zzx, yyx, xxx, (nz, ny, nx), n_iters=0, extend_z=False
             )
             # print(zz)
             # print(zzx)
