@@ -35,7 +35,7 @@ try:
     from . import extension as ext
     from . import init_pass
     from .iter_step import (
-        register_dataset,
+        register_dataset_s2p,
         fuse_and_save_reg_file,
         register_dataset_gpu,
         register_dataset_gpu_3d,
@@ -562,7 +562,7 @@ class Job:
             if do_gpu_reg:
                 register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log)
             else:
-                register_dataset(self, tifs, params, self.dirs, summary, self.log)
+                register_dataset_s2p(self, tifs, params, self.dirs, summary, self.log)
 
     def calculate_corr_map(
         self,

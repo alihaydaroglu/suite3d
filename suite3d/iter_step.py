@@ -5,9 +5,9 @@ from multiprocessing import shared_memory, Pool
 from scipy.ndimage import uniform_filter
 from dask import array as darr
 import time
-from suite2p.registration import register
-from suite2p.registration import nonrigid as suite2p_nonrigid
 
+
+from .s2p_registration import nonrigid_transform_data, register_frames
 # from . import deepinterp as dp
 
 from . import detection3d as det3d
@@ -63,7 +63,7 @@ def register_mov(
     }
     for plane_idx in range(nz):
         log_cb("Registering plane %d" % plane_idx, 2)
-        mov3d[plane_idx], ym, xm, cm, ym1, xm1, cm1 = register.register_frames(
+        mov3d[plane_idx], ym, xm, cm, ym1, xm1, cm1 = register_frames(
             refAndMasks=refs_and_masks[plane_idx],
             frames=mov3d[plane_idx],
             ops=all_ops[plane_idx],
@@ -272,19 +272,11 @@ def register_dataset_gpu(
     reference_params = summary["reference_params"]
     rmins = reference_params.get("plane_mins", None)
     rmaxs = reference_params.get("plane_maxs", None)
-    snr_thresh = 1.2  # TODO add values to a default params dictionary
+    snr_thresh = params.get("snr_thresh", 1.2)  # TODO add values to a default params dictionary
     NRsm = reference_params["NRsm"]
     yblocks, xblocks = reference_params["yblock"], reference_params["xblock"]
     nblocks = reference_params["nblocks"]
 
-    # from old code
-    # all_ops            = summary['all_ops']
-    # rmins = n.array([op['rmin'] for op in all_ops])
-    # rmaxs = n.array([op['rmax'] for op in all_ops])
-    # snr_thresh = all_ops[0]['snr_thresh']
-    # NRsm = all_ops[0]['NRsm'].astype(n.float32)
-    # yblocks, xblocks = all_ops[0]['yblock'], all_ops[0]['xblock']
-    # nblocks = all_ops[0]['nblocks']
 
     mask_mul, mask_offset, ref_2ds = n.stack([r[:3] for r in refs_and_masks], axis=1)
     mask_mul_nr, mask_offset_nr, ref_nr = n.stack([r[3:] for r in refs_and_masks], axis=1)
@@ -522,7 +514,7 @@ def register_dataset_gpu(
                     # print("SHIFITNG: %d" % zidx)
                     # TODO migrate to suite3D?
 
-                    mov_shifted[zidx, idx0:idx1] = suite2p_nonrigid.transform_data(
+                    mov_shifted[zidx, idx0:idx1] = nonrigid_transform_data(
                         mov_shifted_cpu[:, zidx],
                         nblocks,
                         xblock=xblocks,
@@ -594,7 +586,7 @@ def register_dataset_gpu(
         log_cb("After full batch saving:", level=3, log_mem_usage=True)
 
 
-def register_dataset(
+def register_dataset_s2p(
     job, tifs, params, dirs, summary, log_cb=default_log, start_batch_idx=0
 ):
     jobio = s3dio(job)
@@ -626,13 +618,33 @@ def register_dataset(
         "convert_plane_ids_to_channel_ids", True
     )
     cavity_size = params.get("cavity_size", 15)
+    nonrigid = params.get("nonrigid", True)
     save_dtype_str = params.get("save_dtype", "float32")
     save_dtype = None
     if save_dtype_str == "float32":
         save_dtype = n.float32
     elif save_dtype_str == "float16":
         save_dtype = n.float16
-
+    reference_params = summary["reference_params"]    
+    rmins = reference_params.get("plane_mins", None)
+    rmaxs = reference_params.get("plane_maxs", None)
+    if all_ops is None:
+        all_ops = []
+        for i in range(ref_img_3d.shape[0]):
+            op = {}
+            op['smooth_sigma_time'] = params.get('smooth_sigma_time', 0)
+            op['nonrigid'] = params.get('nonrigid', True)
+            if rmins is not None and rmaxs is not None:
+                op['norm_frames'] = False
+                op['rmin'] = rmins[i]
+                op['rmax'] = rmaxs[i]
+            op['snr_thresh'] = params.get("snr_thresh", 1.2)  
+            op['NRsm'] = reference_params["NRsm"]
+            op['yblocks'], op['xblocks'] = reference_params["yblock"], reference_params["xblock"]
+            op['nblocks'] = reference_params["nblocks"]    
+            op['maxregshiftNR'] = params.get("max_shift_nr", 3)
+            all_ops.append(op)
+        
     batches = init_batches(tifs, tif_batch_size, n_tifs_to_analyze)
     n_batches = len(batches)
     log_cb(
@@ -948,14 +960,6 @@ def register_dataset_gpu_3d(
     # quality metrics on
     top_pix = qm.choose_top_pix(ref_img_3d)
 
-    # from old code
-    # all_ops            = summary['all_ops']
-    # rmins = n.array([op['rmin'] for op in all_ops])
-    # rmaxs = n.array([op['rmax'] for op in all_ops])
-    # snr_thresh = all_ops[0]['snr_thresh']
-    # NRsm = all_ops[0]['NRsm'].astype(n.float32)
-    # yblocks, xblocks = all_ops[0]['yblock'], all_ops[0]['xblock']
-    # nblocks = all_ops[0]['nblocks']
 
     # NOTE TODO the current mask_mul etc is uncropped, so currently calculated here but should be changed in reference_image.py
     # when updating to full 3D

@@ -13,7 +13,6 @@ try:
 except:
     print("No Imreg DFT")
 from multiprocessing import Pool, shared_memory
-from suite2p import default_ops
 from scipy.ndimage import gaussian_filter1d
 from scipy.ndimage import convolve1d
 
@@ -162,22 +161,6 @@ def get_shifted_plane_bounds(plane_shifts, ny, nx, ypad, xpad):
         x_lefts.append(x_left)
         x_rights.append(x_right)
     return n.array(y_tops), n.array(y_bottoms), n.array(x_lefts), n.array(x_rights)
-
-
-def make_blocks_3d(nz, ny, nx, block_shape, z_overlap=True):
-    ybls, xbls, (n_y_bls, n_x_bls), __, __ = make_blocks(
-        ny, nx, block_size=block_shape[1:]
-    )
-    z_bl_starts = n.arange(0, nz - int(z_overlap), block_shape[0] - int(z_overlap))
-    zbls = n.stack([z_bl_starts, z_bl_starts + block_shape[0]], axis=1)
-    zbls[zbls > nz] = nz
-    n_z_bls = len(zbls)
-    grid_shape = (n_z_bls, n_y_bls, n_x_bls)
-    ybls = n.concatenate([ybls] * n_z_bls)
-    xbls = n.concatenate([xbls] * n_z_bls)
-    zbls = n.stack([zbls] * (n_y_bls * n_x_bls), axis=1).reshape(-1, 2)
-
-    return zbls, ybls, xbls, grid_shape
 
 
 @deprecated("Only used in register_movie(), which is deprecated.")
@@ -427,89 +410,6 @@ def register_movie(mov3d, tvecs=None, save_path=None, n_shift_proc=10):
     sh_mem.unlink()
 
     return mov_reg_ret
-
-
-def build_ops(save_path, recording_params, other_params):
-    ops = default_ops()
-    # files
-    ops["fast_disk"] = []
-    ops["delete_bin"] = False
-    ops["look_one_level_down"] = True
-    ops["mesoscan"] = False
-    ops["save_path0"] = save_path
-    ops["save_folder"] = []
-    ops["move_bin"] = (
-        False  # if 1, and fast_disk is different than save_disk, binary file is moved to save_disk
-    )
-    ops["combined"] = True
-
-    # recording params
-    ops["nplanes"] = recording_params.get("nplanes", 1)
-    ops["nchannels"] = recording_params.get("nchannels", 1)
-    ops["tau"] = recording_params.get("tau", 1.33)
-    ops["fs"] = recording_params.get("fs", "fs")
-    ops["aspect"] = recording_params.get("aspect", 1.0)
-    # um/pixels in X / um/pixels in Y (for correct aspect ratio in GUI ONLY)
-
-    # bidirectional phase offset correction
-    ops["do_bidiphase"] = False
-
-    # registration
-    ops["do_registration"] = 1  # 2 forces re-registration
-    ops["two_step_registration"] = False
-    ops["nonrigid"] = True
-    ops["reg_tif"] = True
-
-    # cell detection
-    ops["roidetect"] = True
-    ops["spikedetect"] = True
-    ops["sparse_mode"] = (
-        True  # not clear what this does? something about extracting sparsely active cells activities
-    )
-    ops["connected"] = (
-        True  # whether or not to require ROIs to be fully connected (set to 0 for dendrites/boutons)
-    )
-    ops["threshold scaling"] = 5.0
-    ops["max_overlap"] = 0.75
-    ops["high_pass"] = (
-        100  # running mean subtraction across time with window of size 'high_pass'. Values of less than 10 are
-    )
-    # recommended for 1P data where there are often large full-field changes in brightness.
-    ops["smooth_masks"] = (
-        True  # whether to smooth masks in final pass of cell detection. This is useful especially if you are in a high noise regime.
-    )
-    ops["max_iterations"] = 20
-    ops["nbinned"] = 5000  # maximum number of binned frames to use for ROI detection.
-
-    # signal extraction
-    ops["min_neuropil_pixels"] = 350
-    ops["inner_neuropil_radius"] = 2
-
-    # spike deconvolution
-    # We neuropil-correct the trace Fout = F - ops['neucoeff'] * Fneu,
-    # and then baseline-correct these traces with an ops['baseline'] filter, and then detect spikes.
-    ops["neucoeff"] = 0.7
-
-    # filtering the data with a Gaussian of width ops['sig_baseline'] * ops['fs'],
-    # then minimum filtering with a window of ops['win_baseline'] * ops['fs'], and then maximum filtering with the same window.
-    ops["baseline"] = "maximin"
-    ops["win_baseline"] = 60.0  # window for maximin filter in seconds
-    ops["sig_baseline"] = 10.0  # window for gaussian filter in seconds
-
-    # # filtering with a Gaussian of width ops['sig_baseline'] * ops['fs'] and then taking the minimum
-    # ops['baseline'] = 'constant'
-    # ops['sig_baseline'] = 10.0 # window for gaussian filter in seconds
-
-    # # constant baseline by taking the ops['prctile_baseline'] percentile of the trace
-    # ops['baseline'] = 'constant_percentile'
-    # ops['prctile_baseline'] = 8
-
-    for k, v in other_params.items():
-        ops[k] = v
-        print("Setting %s: %s" % (str(k), str(v)))
-
-    return ops
-
 
 def create_shmem(shmem_params):
     shmem = shared_memory.SharedMemory(create=True, size=shmem_params["nbytes"])

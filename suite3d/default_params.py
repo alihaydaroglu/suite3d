@@ -113,7 +113,9 @@ params = {
     "nonrigid": True,
     "apply_z_shift": False, 
     "smooth_sigma": 1.15,
-    "maxregshift": 0.15,
+    "snr_thresh" : 1.2, #SNR threshold for nonrigid registration (2D)
+    "maxregshift": 0.15,# only used in 2D, CPU registration (suite2p)
+    "smooth_sigma_time" : 0, # only used in 2D, CPU registration (suite2p)
     "reg_filter_pcorr": 1,
     "reg_norm_frames": True,  # clip frames during registration
     # At the end of initalization, register and save an example bin

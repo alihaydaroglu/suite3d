@@ -7,7 +7,6 @@ from skimage import io as skio
 from multiprocessing import Pool
 import time
 from scipy import signal
-from suite2p.io import lbm as lbmio
 from matplotlib import pyplot as plt
 import matplotlib.animation as animation
 from .tiff_utils import show_tif
@@ -75,103 +74,6 @@ def show_tif_all_planes(img, figsize = (8,6), title = None, suptitle = None, nco
     if suptitle is not None:
         fig.suptitle(suptitle)
 
-
-@deprecated("Not used anywhere, and it doesn't include the planes argument in the call to load_and_stitch_tifs")
-def separate_planes_and_save(save_path, tif_paths, channels,
-                             ram_fraction=0.5, ram_cap_bytes=None,
-                             max_out_file_size_gb=3.0, tifs_per_file=None,
-                             n_proc_saving=12, crop=None, dir_per_plane=True,
-                             filt=None, filt_params=None, total_n_channels = 30):
-
-    n_planes = len(channels)
-    n_tifs = len(tif_paths)
-    ram_cap = ram_cap_bytes
-
-    # 1 block = 1 input file
-    block_size = os.path.getsize(tif_paths[0])
-    block_size_per_plane = block_size / total_n_channels
-    block_size_loaded = n_planes * block_size_per_plane
-
-    # empirically it seems like when the process is running it uses
-    # 1.5x more ram than the total of the files (for copying etc.)
-    extra_ram_factor = 1.5
-
-    if filt_params is not None:
-        filt = signal.iirnotch(
-            filt_params['f0'], filt_params['Q'], filt_params['line_freq'])
-
-    if tifs_per_file is None:
-        free_ram = dict(psutil.virtual_memory()._asdict())['available']
-        use_ram = free_ram * (ram_fraction / extra_ram_factor)
-        if ram_cap is not None:
-            use_ram = max(ram_cap, use_ram)
-        print("Capping at %.2f GB of %.2f GB available RAM" %
-              (use_ram//(1024**3), free_ram//(1024**3)))
-
-        max_n_blocks_per_file = max_out_file_size_gb * \
-            (1024**3) // block_size_per_plane
-        max_n_blocks_loaded = use_ram // block_size_loaded
-
-        n_blocks = min(max_n_blocks_loaded, max_n_blocks_per_file)
-
-    else:
-        print("Warning: No RAM capping!")
-        n_blocks = tifs_per_file
-
-    print("Loading %d files at a time, %d channels, for a total of %.2f GB" %
-          (n_blocks, n_planes, n_blocks * block_size_loaded / 1024**3))
-    print("Saving %d output files at a time, %.2f GB each for a total of %.2f GB" %
-          (n_planes, block_size_per_plane * n_blocks / 1024**3, n_planes * block_size_per_plane * n_blocks / 1024**3, ))
-
-    n_iters = int(n.ceil(n_tifs / n_blocks))
-
-    if not os.path.isdir(save_path):
-        os.makedirs(save_path)
-
-    tif_idx = 0
-    for iter_idx in range(n_iters):
-        print("\nIteration %d / %d " % (iter_idx, n_iters))
-        tic_load = time.time()
-        mov = lbmio.load_and_stitch_tifs(tif_paths[tif_idx:tif_idx+int(n_blocks)], verbose=True, channels=channels,
-                                       filt=filt)
-        if crop is not None:
-            print("Cropping...")
-            print(mov.shape)
-            y0, y1, x0, x1 = crop
-            mov = mov[:, :, y0:y1, x0:x1]
-            print(mov.shape)
-        toc_load = time.time()
-        print("    Loaded %d files in %.2fs" %
-              (len(tif_paths[tif_idx:tif_idx+int(n_blocks)]), toc_load-tic_load))
-
-        # PARALLELIZE THIS
-        print("    Saving all planes to %s ..." % save_path)
-        tic_save = time.time()
-        if n_proc_saving == 1:
-            for plane_idx in range(n_planes):
-                filename = 'plane%02d-%05d.tif' % (plane_idx, iter_idx)
-                if dir_per_plane:
-                    plane_dir = os.path.join(
-                        save_path, 'plane%02d' % plane_idx)
-                    os.makedirs(plane_dir, exist_ok=True)
-                else:
-                    plane_dir = save_path
-                filepath = os.path.join(plane_dir, filename)
-                skio.imsave(filepath, mov[plane_idx])
-        else:
-            p = Pool(processes=n_proc_saving)
-            if dir_per_plane:
-                for plane_idx in range(n_planes):
-                    os.makedirs(os.path.join(save_path, 'plane%02d' %
-                                plane_idx), exist_ok=True)
-                output = p.starmap(save_plane_worker, [(os.path.join(save_path, 'plane%02d' % plane_idx, 'plane%02d-%05d.tif' % (plane_idx, iter_idx)), mov[plane_idx])
-                                                       for plane_idx in range(n_planes)])
-            else:
-                output = p.starmap(save_plane_worker, [(os.path.join(save_path, 'plane%02d-%05d.tif' % (plane_idx, iter_idx)), mov[plane_idx])
-                                                       for plane_idx in range(n_planes)])
-        toc_save = time.time()
-        print("    Saved %d files in %.2fs" % (n_planes, toc_save-tic_save))
-        tif_idx += int(n_blocks)
 
 @deprecated("Only used in separate_planes_and_save, which is also deprecated")
 def save_plane_worker(filepath, mov):
