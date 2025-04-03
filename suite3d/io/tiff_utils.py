@@ -257,7 +257,6 @@ def get_tif_paths(dir_path, regex_filter=None, sort=True, natsort=False):
                 tif_paths_filtered.append(tif_path)
         tif_paths = tif_paths_filtered
 
-    # print(tif_paths)
     if sort:
         if natsort:
             tif_paths = natsorted(tif_paths)
@@ -302,6 +301,26 @@ def get_fastZ(tif_path):
             return float(line.split(" ")[-1])
     return None
 
+
+def get_frame_counts(tif_paths, safe_mode=False):
+    """Measure the number of frames in a list of tif files.
+    
+    In safe mode, the number of frames is determined by reading the tif files into memory
+    and explictly measuring the shape. In unsafe mode (default), the number of frames of
+    the first tif is used to calculate a conversion factor from the number of bytes to the
+    number of frames and this conversion factor is used to estimate the number of frames in
+    each tif, which is much faster but has the potential to fail!
+    """
+    tif_frames = {}
+    if safe_mode:
+        for tf in tif_paths:
+            tif_frames[tf] = tifffile.imread(tf).shape[0]
+    else:
+        first_tif_num_frames = tifffile.imread(tif_paths[0]).shape[0]
+        bytes_to_frames = float(first_tif_num_frames) / os.path.getsize(tif_paths[0])
+        for tf in tif_paths:
+            tif_frames[tf] = int(n.round(os.path.getsize(tf) * bytes_to_frames))
+    return tif_frames
 
 @deprecated("Only used in old demos")
 def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
