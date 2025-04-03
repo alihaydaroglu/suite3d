@@ -29,7 +29,13 @@ params = {
     "lbm": True,  # whether the data is from light-bead microscopy
     "faced": False,  # whether data is from FACED microscopy,
     "faced_nz": None,  # number of z-planes in FACED data
-    "multiplane_2p_use_planes": None,
+    "multiplane_2p_use_planes": None, # Which planes to analyze in multiplane 2P data (this will only be applied if lbm=False and faced=False)
+    # If True, to use safe mode for tif preregistration (slower but more reliable) -- only used if lbm=False and faced=False
+    # In standard 2P data the number of planes in each tif might not divide evenly into the number of planes in the recording
+    # so we need to preregister the tifs to figure out a loading strategy. 
+    # The safe_mode loads all tifs to check their size, which is slow but reliable. safe_mode=False will guess the size in a way that we think
+    # always works, so you should try this first and only use safe_mode=True if you run into problems. (Error messages are clear about this).
+    "tif_preregistration_safe_mode": False, 
     ### File I/O ###
     # Notch filter to remove line noise.
     # Should be a dictionary like:  {'f0' : 200, 'Q' : 1}

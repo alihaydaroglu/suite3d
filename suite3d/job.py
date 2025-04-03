@@ -27,6 +27,7 @@ from suite2p.extraction import dcnv
 
 from . import utils
 from . import lbmio
+from .io import get_frame_counts
 
 try:
     from . import corrmap
@@ -99,12 +100,43 @@ class Job:
             assert tifs is not None, "Must provide tiff files"
             self.params["tifs"] = tifs
             self.tifs = tifs
+            self.preregister_tifs()
             self.save_params()
+
         else:
             self.job_dir = os.path.join(root_dir, "s3d-%s" % job_id)
             self.load_dirs()
             self.load_params(params_path=params_path)
             self.tifs = self.params.get("tifs", [])
+
+    def preregister_tifs(self):
+        """
+        Preregister tifs to get the number of frames in each tif.
+
+        This is required for standard 2P data where the number of frames
+        in each tif may not divide evenly into the number of planes per
+        volume.
+        """
+        if not self.params["lbm"] and not self.params["faced"]:
+            frame_counts = get_frame_counts(self.tifs, safe_mode=self.params["tif_preregistration_safe_mode"])
+            extra_frames = {}
+            previous_tif = {}
+            for i, tif in enumerate(self.tifs):
+                c_frames = frame_counts[tif]
+                if i > 0:
+                    # Add link to previous tif and add extra frames from previous tif
+                    previous_tif[tif] = self.tifs[i - 1]
+                    c_frames = c_frames + extra_frames[previous_tif[tif]]
+                else:
+                    previous_tif[tif] = None
+                
+                # Remainder of current tifs frames by n_ch_tif gives the number of extra frames
+                extra_frames[tif] = c_frames % self.params["n_ch_tif"]
+        
+            # Add frame counts, extra frames, and previous tif to the params for use in s3dio loading
+            self.params["frame_counts"] = frame_counts
+            self.params["extra_frames"] = extra_frames
+            self.params["previous_tif"] = previous_tif
 
     def copy_parent_job(self, parent_job, copy_dirs=(), symlink=False):
         """

@@ -843,6 +843,9 @@ def get_reference_img_cpu(
     refImg = init_ref_3d(frames)
     nz, ny, nx = refImg.shape
 
+    refImg = init_ref_3d(frames)
+    nz, ny, nx = refImg.shape
+
     # Allows rmins/rmaxs to be None, need as list of None
     if rmins is None and rmaxs is None:
         rmins = [None for i in range(nz)]
