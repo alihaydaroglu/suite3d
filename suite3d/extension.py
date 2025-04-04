@@ -165,6 +165,7 @@ def detect_cells_mp(
     allow_overlap=False,
     offset=(0, 0, 0),
     savepath=None,
+    extension_func = 'corr',
     debug=False,
     patch_idx=-1,
     **kwargs,
@@ -242,6 +243,7 @@ def detect_cells_mp(
                         max_pix,
                         patch_idx,
                         patch_norms,
+                        extension_func,
                     )
                     for i in range(len(filtered_rois))
                 ],
@@ -405,7 +407,8 @@ def detect_cells_worker(
     max_pix=1000,
     patch_idx=-1,
     patch_norms=None,
-):
+    extension_func = 'corr', # corr or proj
+    ):
     """
     Worker function for detecting cells in parallel.
 
@@ -431,12 +434,17 @@ def detect_cells_worker(
     tproj = patch[:, zz, yy, xx] @ lam
     threshold = min(Th2, n.percentile(tproj, percentile)) if percentile > 0 else Th2
 
+    if extension_func == 'corr':
+        extfunc = alternate_iter_extend3d
+    else:
+        extfunc = iter_extend3d
+
     active_frames = n.nonzero(tproj > threshold)[0]
 
     for i in range(roi_ext_iterations):
         if len(active_frames) == 0:
             default_log(
-                "WARNING: no active frames in roi %d (iter %d) - if you keep getting this, increase peak_thresh to be non-zero (e.g. 1e-4)"
+                "WARNING: no active frames in roi %d (iter %d) - if you keep getting this, increase peak_thresh, reduce percentile, or use a longer movie"
                 % (roi_idx, i),
                 1,
             )
@@ -448,7 +456,7 @@ def detect_cells_worker(
             # assert False
             # default_log("RETURNING")
             return None, None
-        zz, yy, xx, lam = alternate_iter_extend3d(
+        zz, yy, xx, lam = extfunc(
             zz,
             yy,
             xx,

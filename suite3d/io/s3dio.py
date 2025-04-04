@@ -115,12 +115,15 @@ class s3dio:
             mov (ndarray): the loaded tiff data with shape (planes, frames, y-pixels, x-pixels)
         """
         def filter_color_channel(mov):
+            # print(mov.shape)
             if params["num_colors"] > 1:
                 # TODO: make sure that tiffs are 3d when num_colors==1
                 # get functional channel from multi-channel tiff
+                mov = mov.reshape(-1, params['num_colors'], *mov.shape[1:])
+                # print(mov.shape)
                 if len(mov.shape) != 4:
                     raise ValueError(
-                        f"tiff file is {tif_file.ndim}D instead of 4D, expecting (frames, colors, y-pixels, x-pixels)"
+                        f"tiff file is {mov.ndim}D instead of 4D, expecting (frames, colors, y-pixels, x-pixels)"
                     )
                 if mov.shape[1] != params["num_colors"]:
                     raise ValueError(
@@ -134,7 +137,7 @@ class s3dio:
                 mov = n.take(mov, params["functional_color_channel"], axis=1)
             return mov
 
-        todo("Should we filter across the slow y-axis like the lbm loader?")
+        # todo("Should we filter across the slow y-axis like the lbm loader?")
 
         if any([p < 0 or p >= params["n_ch_tif"] for p in params["planes"]]):
             raise ValueError(

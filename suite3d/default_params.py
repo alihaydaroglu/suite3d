@@ -70,7 +70,7 @@ params = {
     "override_crosstalk": None,
     # Percentile: only consider pixels above this percentile when
     # fitting the crosstalk coefficient
-    "crosstalk_percentile": 99.5,
+    "crosstalk_percentile": 99.0,
     # "smoothing" when estimating the crosstalk coefficient
     "crosstalk_sigma": 0.01,
     # number of planes per cavity, so plane 0 will be subtracted from plane 0 + cavity_size
@@ -96,8 +96,8 @@ params = {
     "nr_smooth_iters": 2,
     # 3d registration params
     "pc_size": n.asarray((2, 40, 40)),  # ~ max_reg_zyx
-    "3d_reg": False,  # Use the new 3d registration fucntions
-    "gpu_reg": False,
+    "3d_reg": True,  # Use the new 3d registration fucntions
+    "gpu_reg": True,
     # reference image paramaters
     "percent_contribute": 0.9,
     # percentage of frames which contribute to the reference image
@@ -110,7 +110,7 @@ params = {
     # max value in x/y which a plane can be shifted for the reference
     "gpu_reference_batch_size": 20,
     # parameters from suite2p
-    "nonrigid": True,
+    "nonrigid": False,
     "apply_z_shift": False, 
     "smooth_sigma": 1.15,
     "snr_thresh" : 1.2, #SNR threshold for nonrigid registration (2D)
@@ -161,18 +161,18 @@ params = {
     # number of svd components to use in reconstruction is n_svd_comp
     # strength of normalization, 1.0 is standard. reduce below 1.0 (to ~0.8) if you see bright
     # blood vessels etc. in the correlation map
-    "sdnorm_exp": 1.0,
+    "sdnorm_exp": 0.9,
     # crop the edges of each plane by this many pixels before computing the corr map
     # this removes some registration-related artifacts
     "edge_crop_npix": 7,
     # Type (gaussian, unif) and xy/z extents of neuropil filter in pixels
     "npil_filt_type": "unif",
-    "npil_filt_xy_um": 70.0,
+    "npil_filt_xy_um": 100.0,
     "npil_filt_z_um": 15.0,
     # Type and xy/z extents of the cell detection filter in pixels
-    "cell_filt_type": "unif",
-    "cell_filt_xy_um": 10,
-    "cell_filt_z_um": 15,
+    "cell_filt_type": "gaussian",
+    "cell_filt_xy_um": 5,
+    "cell_filt_z_um": 10,
     # activity threshold before calculating correlation map
     "intensity_thresh": 0.1,
     "standard_vmap": True,  # use suite2p-inspired algorithm for vmap
@@ -184,7 +184,7 @@ params = {
     "fix_vmap_edge_planes": False,
     # number of time points to process at each iteration
     # should be a multiple of temporal_hpf
-    "t_batch_size": 200,
+    "t_batch_size": 800,
     # less important batchsize parameter for internal computations
     # for efficiency, should be t_batch_size / n_proc_corr
     "mproc_batchsize": 25,
@@ -196,17 +196,23 @@ params = {
     "dtype": n.float32,
     ### Cell segmentation ###
     # threshold above which cell peaks in correlation map are detected
-    "peak_thresh": 2.0,
+    # reduce to find more cells (possibly noisier)
+    "peak_thresh": 0.1, 
+    # compare projection or correlation of pixels before extending ROI
+    # if corr, set extend_thresh around 0.05, 
+    # if proj set extend_thresh around 0.2
+    # corr doesn't work well if your movie is very short
+    'extend_func' : 'corr', # "corr" or "proj"
     # Size and overlap of cell segmentation patches
-    "patch_size_xy": (120, 120),
+    "patch_size_xy": (150, 150),
     "patch_overlap_xy": (25, 25),
     # only consider timepoints with values above this threshold for segmentation
-    "activity_thresh": 20.0,
+    "activity_thresh": 5.0,
     # only consider timepoints above this percentile for segmentation. minimum thresh
     # between this and activity_thresh is used
-    "percentile": 99.5,
+    "percentile": 95.0,
     # threshold to include a cell in an ROI. Lower to have larger ROIs
-    "extend_thresh": 0.2,
+    "extend_thresh": 0.05,
     # less useful parameters for cell segmentation:
     # number of extension iterations for each ROI. Recommend leaving at 2
     "roi_ext_iterations": 2,
@@ -214,15 +220,20 @@ params = {
     "ext_subtract_iters": 0,
     # maximum number of ROIs that can be found in a patch
     "max_iter": 10000,
-    # Time binning factor for segmentation
-    # if you have many samples per transient, consider increasing
-    "detection_timebin": 1,
+    # Time binning factor for detection
+    "detection_timebin": None,
+    # time bin factor for segmentation (better leave as 1 and play with detection_timebin)
     "segmentation_timebin": 1,
     # Crop the movie before segmentation to only detect on a subset of the movie
     "detection_time_crop": (None, None),
+
+    'local_thresh': True,
+    'local_thresh_window_pix': 51,
+    'local_thresh_pct': 50,
+
     # Allow overlap of cells (not functioning, can lead to weirdness)
     "allow_overlap": False,
-    # does nothing
+    # does nothing for now
     "recompute_v": None,
     # normalize intensity of vmap planes before segmentation, not recommended
     "normalize_vmap": False,

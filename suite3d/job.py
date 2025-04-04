@@ -117,6 +117,9 @@ class Job:
         """
         if not self.params["lbm"] and not self.params["faced"]:
             frame_counts = get_frame_counts(self.tifs, safe_mode=self.params["tif_preregistration_safe_mode"])
+            if self.params.get('num_colors',1) > 1:
+                for k in frame_counts.keys():
+                    frame_counts[k] /= self.params.get('num_colors')
             extra_frames = {}
             previous_tif = {}
             for i, tif in enumerate(self.tifs):
@@ -590,6 +593,10 @@ class Job:
             corr_map_dir = self.make_new_dir("corrmap", parent_dir_name=output_dir_name)
             mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
 
+        if self.params.get('detection_timebin') is None:
+            self.params['detection_timebin'] = int(n.round(self.params['fs'] / (self.params['tau'])))
+            self.log("Updated detection_timebin to %d based on framerate and tau" % self.params['detection_timebin'])
+
         if mov is None:
             mov = self.get_registered_movie("registered_fused_data", "fused")
 
@@ -881,9 +888,18 @@ class Job:
         mov_sub = self.get_subtracted_movie(parent_dir_name=input_dir_name, astype=None)
         maps = self.load_corr_map_results(parent_dir_name=input_dir_name)
         if vmap is None:
-            vmap = maps["vmap"]
+            local_thresh = self.params.get('local_thresh', True)
+            local_thresh_window_pix = self.params.get('local_thresh_window_pix', 51)
+            local_thresh_pct = self.params.get('local_thresh_pct', 51)
+            if local_thresh:
+                vmap = ext.thresh_mask_corr_map(maps['vmap'], local_thresh_window_pix, local_thresh_pct)
+                maps['vmap_raw'] = vmap
+                maps['vmap'] = vmap 
+            else:
+                vmap = maps['vmap']
         else:
             maps["vmap"] = vmap
+
         nt, nz, ny, nx = mov_sub.shape
         if ts is None:
             ts = (0, nt)
@@ -999,7 +1015,9 @@ class Job:
         )
         return rois_dir_path
 
-    def compute_npil_masks(self, stats_dir):
+    def compute_npil_masks(self, stats_dir=None):
+        if stats_dir is None:
+            stats_dir = self.dirs['rois']
         info = n.load(os.path.join(stats_dir, "info.npy"), allow_pickle=True).item()
         stats = n.load(os.path.join(stats_dir, "stats.npy"), allow_pickle=True)
         nz, ny, nx = info["vmap"].shape
@@ -1096,7 +1114,7 @@ class Job:
 
     def extract_and_deconvolve(
         self,
-        patch_idx=0,
+        patch_idx=None,
         mov=None,
         batchsize_frames=500,
         stats=None,
@@ -1112,12 +1130,15 @@ class Job:
         mov_shape_tfirst=False,
     ):
         self.save_params()
-        if stats_dir is None:
+        if stats_dir is None and patch_idx is not None:
             stats_dir = self.get_patch_dir(patch_idx, parent_dir_name=parent_dir_name)
             stats, info = self.get_detected_cells(
                 patch_idx, parent_dir_name=parent_dir_name
             )
             offset = (info["zs"], info["ys"], info["xs"])
+        elif stats_dir is None:
+            stats_dir = self.dirs['rois']
+            stats = n.load(os.path.join(stats_dir, "stats.npy"), allow_pickle=True)
         else:
             if stats is not None:
                 if "stats.npy" not in os.listdir(stats_dir):

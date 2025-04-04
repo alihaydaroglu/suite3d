@@ -319,8 +319,8 @@ def get_roi_start_pix(tif_path, params):
         return_full=False,
     )
 
-    print(rois)
-    print(roi_start_pix_x)
+
+
     return roi_start_pix_y, roi_start_pix_x
 
 

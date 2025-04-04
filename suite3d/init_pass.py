@@ -135,9 +135,9 @@ def run_init_pass(job):
             crosstalk_planes, cross_coeff, ct_info = utils.estimate_crosstalk(
                 im3d, job.params["cavity_size"]
             )
-            utils.plot_ct_hist(
-                crosstalk_planes, show_plots=True, save_plots=job.dirs["summary"]
-            )
+            # utils.plot_ct_hist(
+            #     crosstalk_planes, show_plots=True, save_plots=job.dirs["summary"]
+            # )
             # utils.ct_gifs(
             #     im3d,
             #     job.params["cavity_size"],
@@ -172,7 +172,6 @@ def run_init_pass(job):
 
     if job.params.get("fuse_strips", True):
         xs = jobio.load_roi_start_pix()[1]
-        print(xs)
         if job.params.get("fuse_shift_override", None) is not None:
             fuse_shift = int(job.params["fuse_shift_override"])
             fuse_shifts = None

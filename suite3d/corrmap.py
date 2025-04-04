@@ -104,6 +104,7 @@ def calculate_corrmap(
         mov_batch = mov[:, start_idx:end_idx]
 
         log("batch_timebin", tic=True)
+        
         if corr_map_params.get("detection_timebin", 1) > 1:
             log(
                 f"Binning with timebin of size {corr_map_params['detection_timebin']:02d}",

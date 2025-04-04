@@ -10,7 +10,6 @@ import tifffile
 import imreg_dft as imreg
 import json
 import psutil
-from . import tiff_utils as tfu
 import tracemalloc
 from .utils import default_log
 from .developer import deprecated_inputs
