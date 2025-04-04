@@ -7,8 +7,7 @@ import zarr
 import time
 from scipy import ndimage
 
-def default_log(string, *args, **kwargs): 
-    print(string)
+from .utils import default_log
 
 
 def block_and_svd(mov_reg, n_comp, block_shape= (1, 128, 128), block_overlaps=(0, 18, 18),

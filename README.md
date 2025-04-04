@@ -3,11 +3,13 @@
 Suite3D is a volumetric cell detection algorithm, generally applicable to any type of multi-plane functional 2p imaging where you see cells on multiple planes. For an overview of the algorithms, [see our recent preprint](https://www.biorxiv.org/content/10.1101/2025.03.26.645628v1). Note that the algorithms are still in an "early beta" phase, and you might run into a few kinks - please reach out to Ali (ali.haydaroglu.20@ucl.ac.uk, or by creating issues on this repository) and I'll be happy to help you get up and running. 
 
 ## Installation
+If the cloning line doesn't work, try: git clone --recurse-submodules https://github.com/alihaydaroglu/suite3d
+
 ```
-git clone --recurse-submodules git@github.com:alihaydaroglu/s2p-lbm.git
+git clone --recurse-submodules git@github.com:alihaydaroglu/suite3d.git
 conda env create -f environment.yml
-conda activate s2p-lbm
-cd suite2p
+conda activate suite3d-gpu
+cd suite3d
 pip install -e .
 ```
 If installation gets stuck around "Solving Environment", you should use libmamba ([explanation](https://conda.github.io/conda-libmamba-solver/libmamba-vs-classic/)), install it using the [instructions here](https://www.anaconda.com/blog/a-faster-conda-for-a-growing-community). Also, set the conda channel priority to be strict: `conda config --set channel_priority strict`. It's important that you don't forget the `-e` in the pip command, this allows the suite2p installation to be editable.
@@ -26,7 +28,7 @@ Then, run the Demo notebook.
 If you want to only visualize results on your local laptop, you can install a lightweight script that doesn't have any of the computational dependencies. 
 
 ```
-git clone --recurse-submodules git@github.com:alihaydaroglu/s2p-lbm.git
+git clone --recurse-submodules git@github.com:alihaydaroglu/suite3d.git
 conda create -y -n s3d-vis -c conda-forge python=3.9
 conda activate s3d-vis
 pip install "napari[pyqt5]"
