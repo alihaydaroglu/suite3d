@@ -27,7 +27,7 @@ dependencies:
     - torch>=1.7.1
     - natsort
     - rastermap>0.1.0
-    - tifffile
+    - tifffile>=2021.3.4
     - scanimage-tiff-reader>=1.4.1
     - importlib-metadata
     - paramiko
