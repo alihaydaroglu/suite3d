@@ -116,10 +116,7 @@ class Job:
         volume.
         """
         if not self.params["lbm"] and not self.params["faced"]:
-            frame_counts = get_frame_counts(self.tifs, safe_mode=self.params["tif_preregistration_safe_mode"])
-            if self.params.get('num_colors',1) > 1:
-                for k in frame_counts.keys():
-                    frame_counts[k] /= self.params.get('num_colors')
+            frame_counts = get_frame_counts(self.tifs, safe_mode=self.params["tif_preregistration_safe_mode"], num_cols = self.params.get('num_colors', 1))
             extra_frames = {}
             previous_tif = {}
             for i, tif in enumerate(self.tifs):
