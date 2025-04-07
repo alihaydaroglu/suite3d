@@ -118,10 +118,7 @@ class s3dio:
             if params["num_colors"] > 1:
                 # TODO: make sure that tiffs are 3d when num_colors==1
                 # get functional channel from multi-channel tiff
-                
-                if len(mov.shape) == 3:
-                    mov = mov.reshape(-1, params['num_colors'], mov.shape[-2:],mov.shape[-1:])
-                elif len(mov.shape) != 4:
+                if len(mov.shape) != 4:
                     raise ValueError(
                         f"tiff file is {mov.ndim}D instead of 4D, expecting (frames, colors, y-pixels, x-pixels)"
                     )

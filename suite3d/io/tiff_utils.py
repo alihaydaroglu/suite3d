@@ -102,7 +102,7 @@ def get_fastZ(tif_path):
     return None
 
 
-def get_frame_counts(tif_paths, safe_mode=False, num_cols = None):
+def get_frame_counts(tif_paths, safe_mode=False):
     """Measure the number of frames in a list of tif files.
     
     In safe mode, the number of frames is determined by reading the tif files into memory
@@ -114,19 +114,9 @@ def get_frame_counts(tif_paths, safe_mode=False, num_cols = None):
     tif_frames = {}
     if safe_mode:
         for tf in tif_paths:
-            tf_shape = tifffile.imread(tf).shape
-            if num_cols is not None and len(tf_shape) == 3:
-                # in some versions of tifffile, a 4d stack (frames, colors, y, x) will be loaded as 3D
-                tf_shape = [tf_shape[0] // num_cols, num_cols, tf_shape[1], tf_shape[2]]
-            tif_frames[tf] = tf_shape[0]
-
+            tif_frames[tf] = tifffile.imread(tf).shape[0]
     else:
-        tf_shape = tifffile.imread(tif_paths[0]).shape
-        if num_cols is not None and len(tf_shape) == 3:
-            tf_shape = [tf_shape[0] // num_cols, num_cols, tf_shape[1], tf_shape[2]]
-
-
-        first_tif_num_frames = tf_shape[0]
+        first_tif_num_frames = tifffile.imread(tif_paths[0]).shape[0]
         bytes_to_frames = float(first_tif_num_frames) / os.path.getsize(tif_paths[0])
         for tf in tif_paths:
             tif_frames[tf] = int(n.round(os.path.getsize(tf) * bytes_to_frames))
