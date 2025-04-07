@@ -1,3 +1,7 @@
+## Overview
+
+Suite3D is a volumetric cell detection algorithm, generally applicable to any type of multi-plane functional 2p imaging where you see cells on multiple planes. For an overview of the algorithms, [see our recent preprint](https://www.biorxiv.org/content/10.1101/2025.03.26.645628v1). Note that the algorithms are still in an "early beta" phase, and you might run into a few kinks - please reach out to Ali (ali.haydaroglu.20@ucl.ac.uk, or by creating issues on this repository) and I'll be happy to help you get up and running. 
+
 ## Installation
 If the cloning line doesn't work, try: git clone --recurse-submodules https://github.com/alihaydaroglu/suite3d
 
@@ -36,4 +40,4 @@ conda install -c conda-forge matplotlib
 There is a Dockerfile in this repo that successfully builds (`docker build - < Dockerfile`). I don't know anything about Docker, but I would love to have this successfully run in a container. If you manage to get that working let me know! Ideally, this would also include some sort of X host to run napari (https://napari.org/stable/howtos/docker.html#base-napari-image), presumably there is a way to merge the napari-xpra docker image into this one to make that work. 
 
 ## Sample Data
-The sample tiff files will be online shortly! Just need to figure out a place to host them.
+Demo data coming shortly! 
