@@ -26,7 +26,14 @@ dependencies = [
     "paramiko",
     "pynwb",
     "sbxreader",
-    "imreg-dft-nw"
+    "imreg-dft-nw",
+    "ipython",
+    "jupyterlab",
+    "jupyter_rfb",
+    "PyQt5",
+    "pyqtgraph",
+    "napari",
+    "scikit-image",
 ]
 
 [dependency-groups]
