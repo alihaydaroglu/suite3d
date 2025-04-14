@@ -40,8 +40,10 @@ try:
         register_dataset_gpu,
         register_dataset_gpu_3d,
     )
-except:
-    print("Issues importing compute components")
+except Exception as e:
+    print("Issues importing compute components. \n")
+    print("")
+    print(f"{e}")
 
 from .default_params import get_default_params
 from . import ui
