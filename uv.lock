@@ -1742,6 +1742,22 @@ wheels = [
 ]
 
 [[package]]
+name = "mkl-service"
+version = "2.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mkl" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/9a/8b5475b8fe92087c30f393b06406d4dcc726bfef6de9aab46377f5e5fc87/mkl_service-2.4.2-0-cp310-cp310-manylinux_2_28_x86_64.whl", hash = "sha256:74cbf9be46b42f099417e92ea806ae2d480dc978dd1f0ec391eccdc3846912ad", size = 77783 },
+    { url = "https://files.pythonhosted.org/packages/62/f1/eb369dd4ac94261db3e59e1b79effab7ed6076291ba8c01034e59b1a8fbf/mkl_service-2.4.2-0-cp310-cp310-win_amd64.whl", hash = "sha256:aabbf5ec4d18bde9893a08121ceb17e1c28b4c39b72f88eb0cedbb897e2fc882", size = 61119 },
+    { url = "https://files.pythonhosted.org/packages/cb/1b/5fc3bf764be6395962bffd646a39e40da745413e580b76afd49d47e483da/mkl_service-2.4.2-0-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:e6cae93deb10b5e0b6fed44996cd20bb5c78420b9e1c741e18bcc20d99e2519e", size = 77889 },
+    { url = "https://files.pythonhosted.org/packages/73/17/1a6f5e398076262dd5221d541b8aaeb0a45f9f4f0fa84af064eca915d5c4/mkl_service-2.4.2-0-cp311-cp311-win_amd64.whl", hash = "sha256:2e67d7477a595b43af89ef5af288be45e53ff934dfcd230e011e392a7d980bd1", size = 61142 },
+    { url = "https://files.pythonhosted.org/packages/a7/25/bec8f6415e3e3f96336c8215e708812419b1ceacc2f498803d2c49d6e73a/mkl_service-2.4.2-0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:d6c46e525babf5514c5ab7b8568a81865f107142c276228416c6057b4e332928", size = 79033 },
+    { url = "https://files.pythonhosted.org/packages/a3/a4/4bdab72605e82a3bfe40c7fc416a46e1fe6f523c76e195f0973345d77cc6/mkl_service-2.4.2-0-cp312-cp312-win_amd64.whl", hash = "sha256:3c4127d97ab3b9ea5e25292c3bc42108006083e7c2f8eb83025648104cdac7be", size = 61591 },
+]
+
+[[package]]
 name = "mpmath"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3563,6 +3579,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "mkl" },
     { name = "mkl-fft" },
+    { name = "mkl-service" },
     { name = "napari" },
     { name = "natsort" },
     { name = "paramiko" },
@@ -3598,8 +3615,9 @@ requires-dist = [
     { name = "jupyter-rfb" },
     { name = "jupyterlab" },
     { name = "matplotlib", specifier = ">=3.10.1" },
-    { name = "mkl" },
+    { name = "mkl", specifier = ">=2025.1.0" },
     { name = "mkl-fft", specifier = ">=1.3.13" },
+    { name = "mkl-service", specifier = ">=2.4.2" },
     { name = "napari" },
     { name = "natsort" },
     { name = "paramiko" },
