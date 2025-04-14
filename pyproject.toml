@@ -11,7 +11,7 @@ requires-python = ">=3.10, <=3.12"
 keywords = ["Pipeline", "Numpy", "Microscopy", "ScanImage", "Suite2p", "Volumetric"]
 license = { text = "BSD-3-Clause" }
 urls = { homepage = "https://github.com/alihaydaroglu/suite3d" }
-scripts = { s3d = "suite3d:__main__:main"}
+scripts = { s3d = "suite3d.__main__:main"}
 dependencies = [
     "dask>=2025.3.0",
     "mkl-fft>=1.3.13",
