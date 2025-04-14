@@ -67,7 +67,7 @@ def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_dir: str 
 
         params = get_params(tifs)
         if not params:
-            raise ValueError(f"Issue creating params for {tif_path}")
+            raise ValueError(f"Issue creating params for {tif_dir}")
 
         return Job(job_dir, job_id, create=True, overwrite=True, verbosity=3, tifs=tifs, params=params)
 
