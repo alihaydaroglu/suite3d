@@ -27,7 +27,7 @@ def get_params(tifs):
         'block_size': [128, 128],
     }
 
-def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_dir: str | os.PathLike | None):
+def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_dir: str | os.PathLike | None=None):
     """
     Given a directory and a job_id, return a Job object or create a new job if one does not exist.
 
@@ -55,6 +55,7 @@ def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_dir: str 
         print(f"{job_path} does not exist, creating")
 
         if tif_dir:
+            print(tif_dir)
             tifs = io.get_tif_paths(str(tif_dir))
         else:
             raise ValueError(f"{job_path} does not exist, and {tif_dir} does not exist."
@@ -96,7 +97,7 @@ def view_data(im_full):
 @click.option('--job-id', prompt='Enter job ID', default='demo', help='Job ID to load or create.')
 @click.option(
     '--tif-dir',
-    prompt='If creating a new job, enter the full path to where these tifs are located. If loading a job, leave empty.',
+    prompt='Full path to raw ScanImage tiff files (leave empty if loading a job)',
     default='',
     help='Path to raw ScanImage tifs.'
 )
@@ -105,10 +106,16 @@ def view_data(im_full):
 @click.option('--correlate', is_flag=True, help='Calculate correlation map.')
 @click.option('--detect', is_flag=True, help='Run detection.')
 def main(job_dir, job_id, tif_dir, init, register, correlate, detect):
-    # All missing options are prompted due to the prompt parameter.
+    job_dir = Path(job_dir).resolve().expanduser()
+    tif_dir = tif_dir.strip() or None
     job = get_job(job_dir, job_id, tif_dir)
-    im_full = run_job(job, init, register, correlate, detect)
-    view_data(im_full)
+    print(job)
+    print((init, register, correlate, detect))
+    res = run_job(job, init, register, correlate, detect)
+    if res:
+        print("Success!")
+    else:
+        print("Failed!")
 
 if __name__ == "__main__":
     main()
