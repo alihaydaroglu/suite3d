@@ -162,4 +162,9 @@ def main(job_dir, job_id, tif_dir, init, register, correlate, detect):
         print("Failed!")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import pdb
+        pdb.post_mortem()
+        raise
