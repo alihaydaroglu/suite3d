@@ -27,7 +27,7 @@ def get_params(tifs):
         'block_size': [128, 128],
     }
 
-def get_job(job_dir, job_id):
+def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_dir: str | os.PathLike | None):
     """
     Given a directory and a job_id, return a Job object or create a new job if one does not exist.
 
@@ -39,28 +39,39 @@ def get_job(job_dir, job_id):
     job_id : str, int
         str name for the job, to be appended as f"s3d-{job_id}"
 
+    tif_dir : str, os.PathLike, optional
+        Path to raw tifs if creating a new job.
+
     Returns
     -------
     Job
         Object containing parameters, directories and function entrypoints to the pipeline.
     """
-    fpath = Path(job_dir)
-    job_path = fpath / f"s3d-{job_id}"
+    job_dir = Path(job_dir)
+    job_path = job_dir / f"s3d-{job_id}"
 
     # find existing job
     if not job_path.exists():
-        tif_path = fpath.joinpath("raw")
-        tifs = io.get_tif_paths(str(tif_path))
+        print(f"{job_path} does not exist, creating")
+
+        if tif_dir:
+            tifs = io.get_tif_paths(str(tif_dir))
+        else:
+            raise ValueError(f"{job_path} does not exist, and {tif_dir} does not exist."
+                             f"To create a new job, pass tif_dir=path/to/tifs")
 
         # make sure there are valid tifs, and no errors fetching params
         if not tifs:
-            raise FileNotFoundError(f"No tifs found in {str(tif_path)}")
+            raise FileNotFoundError(f"No tifs found in {tif_dir}")
+
         params = get_params(tifs)
         if not params:
-            raise ValueError(f"There was an issue creating params for {str(tif_path)}")
-        return Job(job_path, job_id, create=True, overwrite=True, verbosity=3, tifs=tifs, params=params)
+            raise ValueError(f"Issue creating params for {tif_path}")
+
+        return Job(job_dir, job_id, create=True, overwrite=True, verbosity=3, tifs=tifs, params=params)
+
     # otherwise, load the job
-    return Job(str(job_path), job_id, create=False, overwrite=False)
+    return Job(job_dir, job_id, create=False, overwrite=False)
 
 def run_job(job, do_init, do_register, do_correlate, do_detect):
     if do_init:
@@ -81,14 +92,21 @@ def view_data(im_full):
     napari.run()
 
 @click.command()
-@click.option('--job-dir', required=False, help='Base directory to hold jobs.')
-@click.option('--job-id', required=False, default='demo', help='Job ID to load or create.')
+@click.option('--job-dir', prompt='Enter base job directory', help='Base directory to hold jobs.')
+@click.option('--job-id', prompt='Enter job ID', default='demo', help='Job ID to load or create.')
+@click.option(
+    '--tif-dir',
+    prompt='If creating a new job, enter the full path to where these tifs are located. If loading a job, leave empty.',
+    default='',
+    help='Path to raw ScanImage tifs.'
+)
 @click.option('--init', is_flag=True, help='Run initialization pass.')
 @click.option('--register', is_flag=True, help='Run registration.')
 @click.option('--correlate', is_flag=True, help='Calculate correlation map.')
 @click.option('--detect', is_flag=True, help='Run detection.')
-def main(job_dir, job_id, init, register, correlate, detect):
-    job = get_job(job_dir, job_id)
+def main(job_dir, job_id, tif_dir, init, register, correlate, detect):
+    # All missing options are prompted due to the prompt parameter.
+    job = get_job(job_dir, job_id, tif_dir)
     im_full = run_job(job, init, register, correlate, detect)
     view_data(im_full)
 
