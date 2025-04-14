@@ -30,12 +30,13 @@ dependencies = [
     "ipython",
     "jupyterlab",
     "jupyter_rfb",
-    "PyQt5",
+    "pyqt5==5.15.11",
     "pyqtgraph",
     "napari",
     "scikit-image",
     "dask-image",
     "cupy",
+    "pyqt5-qt5==5.15.2",
 ]
 
 [dependency-groups]
