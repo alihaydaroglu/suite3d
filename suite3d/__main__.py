@@ -27,15 +27,40 @@ def get_params(tifs):
         'block_size': [128, 128],
     }
 
-def get_job(base_dir, job_id):
-    fpath = Path(base_dir)
-    job_path = fpath.joinpath("results")
-    tif_path = fpath.joinpath("raw")
-    tifs = io.get_tif_paths(str(tif_path))
-    params = get_params(tifs)
-    if job_path.exists():
-        return Job(str(job_path), job_id, create=False, overwrite=False)
-    return Job(str(job_path), job_id, create=True, overwrite=True, verbosity=3, tifs=tifs, params=params)
+def get_job(job_dir, job_id):
+    """
+    Given a directory and a job_id, return a Job object or create a new job if one does not exist.
+
+    Parameters
+    ----------
+    job_dir : str, os.PathLike
+        Path to the directory containing the job-id directory.
+
+    job_id : str, int
+        str name for the job, to be appended as f"s3d-{job_id}"
+
+    Returns
+    -------
+    Job
+        Object containing parameters, directories and function entrypoints to the pipeline.
+    """
+    fpath = Path(job_dir)
+    job_path = fpath / f"s3d-{job_id}"
+
+    # find existing job
+    if not job_path.exists():
+        tif_path = fpath.joinpath("raw")
+        tifs = io.get_tif_paths(str(tif_path))
+
+        # make sure there are valid tifs, and no errors fetching params
+        if not tifs:
+            raise FileNotFoundError(f"No tifs found in {str(tif_path)}")
+        params = get_params(tifs)
+        if not params:
+            raise ValueError(f"There was an issue creating params for {str(tif_path)}")
+        return Job(job_path, job_id, create=True, overwrite=True, verbosity=3, tifs=tifs, params=params)
+    # otherwise, load the job
+    return Job(str(job_path), job_id, create=False, overwrite=False)
 
 def run_job(job, do_init, do_register, do_correlate, do_detect):
     if do_init:
