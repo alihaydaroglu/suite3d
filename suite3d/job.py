@@ -7,6 +7,7 @@ import os
 import copy
 import time
 import sys
+from pathlib import Path
 import numpy as n
 import itertools
 from multiprocessing import Pool
@@ -52,8 +53,8 @@ from . import ui
 class Job:
     def __init__(
         self,
-        root_dir,
-        job_id,
+        root_dir: str | Path,
+        job_id: str,
         params=None,
         tifs=None,
         overwrite=False,
@@ -66,7 +67,7 @@ class Job:
     ):
         """Create a Job object that is a wrapper to manage files, current state, log etc.
         Args:
-            root_dir (str): Root directory in which job directory will be created
+            root_dir (str or pathlib.Path): Root directory in which job directory will be created
             job_id (str): Unique name for the job directory
             params (dict): Job parameters (see examples)
             tifs (list) : list of full paths to tif files to be used
@@ -77,6 +78,8 @@ class Job:
             copy_parent_symlink (bool) : if copying dirs, you can optionally symlink them
             verbosity (int, optional): Verbosity level. 0: critical only, 1: info, 2: debug. Defaults to 1.
         """
+        if isinstance(root_dir, Path):
+            root_dir = str(root_dir)
 
         self.verbosity = verbosity
         self.job_id = job_id
