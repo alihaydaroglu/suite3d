@@ -115,16 +115,53 @@ def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_list: str
     # otherwise, load the job
     return Job(job_dir, job_id, create=False, overwrite=False)
 
+
 def run_job(job, do_init, do_register, do_correlate, do_detect):
-    if do_init:
-        job.run_init_pass()
-    if do_register:
-        job.register()
-    if do_correlate:
-        job.calculate_corr_map()
-    if do_detect:
-        job.detect_cells()
-    return job.get_registered_movie()
+    results = {
+        "init": None,
+        "register": None,
+        "correlate": None,
+        "detect": None,
+        "registered_movie": None,
+    }
+    try:
+        if do_init:
+            job.run_init_pass()
+            results["init"] = True
+        else:
+            results["init"] = False
+    except Exception:
+        results["init"] = False
+
+    try:
+        if do_register:
+            job.register()
+            results["register"] = True
+        else:
+            results["register"] = False
+    except Exception:
+        results["register"] = False
+
+    try:
+        if do_correlate:
+            job.calculate_corr_map()
+            results["correlate"] = True
+        else:
+            results["correlate"] = False
+    except Exception:
+        results["correlate"] = False
+
+    try:
+        if do_detect:
+            job.detect_cells()
+            results["detect"] = True
+        else:
+            results["detect"] = False
+    except Exception:
+        results["detect"] = False
+
+    return results
+
 
 def view_data(im_full):
     crop = ((0, 13), (130, 445), (10, 440))
