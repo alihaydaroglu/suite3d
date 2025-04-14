@@ -7,7 +7,6 @@ import napari
 from suite3d.job import Job
 from suite3d import ui
 from suite3d import io
-from suite3d import tiff_utils as tfu
 os.chdir(os.path.dirname(os.path.abspath("")))
 
 
@@ -47,13 +46,15 @@ def main():
 
     tifs = list(fpath.joinpath("green").glob("*.tif*"))
     job = Job(job_path, 'v1', create=True, overwrite=True, verbosity = 2, tifs=tifs, params=params)
-    job.run_init_pass()
-    job.register_gpu()
+    # job.run_init_pass()
+    # job.register_gpu()
     # job.register()
     # job.params['n_skip'] = job.load_summary()['fuse_shift']
     # job.fuse_registered_movie()
-    print(job.params)
+    return job
 
 
 if __name__ == '__main__':
-    main()
+    job = main()
+    print(job)
+    x=2

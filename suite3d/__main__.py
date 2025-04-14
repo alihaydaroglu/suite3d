@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-
 import click
 import numpy as np
 import napari
@@ -28,17 +27,25 @@ def get_params(tifs):
         'block_size': [128, 128],
     }
 
-def get_job(base_dir):
+def get_job(base_dir, job_id):
     fpath = Path(base_dir)
     job_path = fpath.joinpath("results")
     tif_path = fpath.joinpath("raw")
     tifs = io.get_tif_paths(str(tif_path))
     params = get_params(tifs)
-    return Job(job_path, 'v1', create=True, overwrite=True, verbosity=3, tifs=tifs, params=params)
+    if job_path.exists():
+        return Job(str(job_path), job_id, create=False, overwrite=False)
+    return Job(str(job_path), job_id, create=True, overwrite=True, verbosity=3, tifs=tifs, params=params)
 
-def run_job(job):
-    job.run_init_pass()
-    job.register()
+def run_job(job, do_init, do_register, do_correlate, do_detect):
+    if do_init:
+        job.run_init_pass()
+    if do_register:
+        job.register()
+    if do_correlate:
+        job.calculate_corr_map()
+    if do_detect:
+        job.detect_cells()
     return job.get_registered_movie()
 
 def view_data(im_full):
@@ -49,20 +56,15 @@ def view_data(im_full):
     napari.run()
 
 @click.command()
-@click.option(
-    '--job-dir',
-    prompt='Base directory for a job, not including the `job_id` string.',
-    help='Base directory to hold jobs by job_id.'
-)
-@click.option(
-    '--job-id',
-    prompt='Directory ID to name this job.',
-    default='TEST',
-    help='Job ID to load or create.'
-)
-def main(job_dir):
-    job = get_job(job_dir)
-    im_full = run_job(job)
+@click.option('--job-dir', required=False, help='Base directory to hold jobs.')
+@click.option('--job-id', required=False, default='demo', help='Job ID to load or create.')
+@click.option('--init', is_flag=True, help='Run initialization pass.')
+@click.option('--register', is_flag=True, help='Run registration.')
+@click.option('--correlate', is_flag=True, help='Calculate correlation map.')
+@click.option('--detect', is_flag=True, help='Run detection.')
+def main(job_dir, job_id, init, register, correlate, detect):
+    job = get_job(job_dir, job_id)
+    im_full = run_job(job, init, register, correlate, detect)
     view_data(im_full)
 
 if __name__ == "__main__":
