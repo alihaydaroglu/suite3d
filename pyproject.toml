@@ -41,11 +41,15 @@ dependencies = [
     "mkl-service>=2.4.2",
 ]
 
+[project.optional-dependencies]
+mrc = [
+    "mrcfile",
+] 
+
 [dependency-groups]
 dev = [
     "pytest>=7.4.4",
     "ruff>=0.6.1",
-    "lazygit"
 ]
 
 [tool.uv]
