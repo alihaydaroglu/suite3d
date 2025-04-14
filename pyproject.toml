@@ -7,7 +7,7 @@ name = "suite3d"
 description = "Fast, volumetric cell detection. In development."
 version = "0.0.1"
 readme = "README.md"
-requires-python = ">=3.10, <=3.12"
+requires-python = ">=3.10, <3.13"
 keywords = ["Pipeline", "Numpy", "Microscopy", "ScanImage", "Suite2p", "Volumetric"]
 license = { text = "BSD-3-Clause" }
 urls = { homepage = "https://github.com/alihaydaroglu/suite3d" }
