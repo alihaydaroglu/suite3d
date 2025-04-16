@@ -10,6 +10,7 @@ os.chdir(os.path.dirname(os.path.abspath("")))
 os.environ["SUITE3D_DEVELOPER"] = "true"
 
 def get_params():
+    """Chat GPT, just a copy of defaults for development"""
 
     # basic imaging
     params = {
@@ -56,23 +57,6 @@ def get_params():
 
     return params
 
-def get_params(tifs):
-    return {
-        'fs': io.get_vol_rate(tifs[0]),
-        'cavity_size': 1,
-        'planes': np.arange(14),
-        'n_ch_tif': 14,
-        'max_reg_xy_reference': 140,
-        'tau': 1.3,
-        'lbm': True,
-        'fuse_strips': True,
-        'subtract_crosstalk': False,
-        '3d_reg': True,
-        'gpu_reg': True,
-        'voxel_size_um': (17, 2, 2),
-        'intensity_thresh': 0.1,
-        'block_size': [128, 128],
-    }
 
 def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_list: str | os.PathLike | None=None):
     """
@@ -110,7 +94,7 @@ def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_list: str
         # make sure there are valid tifs, and no errors fetching params
         if not isinstance(tif_list, list):
             raise ValueError(f"Argument tif_list should be a list of filepaths, got {type(tif_list)}")
-        return Job(job_dir, job_id, create=True, overwrite=True, verbosity=3, tifs=tifs, params=get_params())
+        return Job(job_dir, job_id, create=True, overwrite=True, verbosity=3, tifs=tif_list, params=get_params())
 
     # otherwise, load the job
     return Job(job_dir, job_id, create=False, overwrite=False)
@@ -176,7 +160,7 @@ def view_data(im_full):
 @click.option(
     '--tif-dir',
     prompt='Full path to raw ScanImage tiff files (leave empty if loading a job)',
-    default=None,
+    default='',
     help='Path to raw ScanImage tifs.'
 )
 @click.option('--init', is_flag=True, help='Run initialization pass.')
@@ -185,7 +169,7 @@ def view_data(im_full):
 @click.option('--detect', is_flag=True, help='Run detection.')
 def main(job_dir, job_id, tif_dir, init, register, correlate, detect):
     job_dir = Path(job_dir).resolve().expanduser()
-    if tif_dir is not None:
+    if tif_dir:
         tif_list = io.get_tif_paths(tif_dir)
     else:
         tif_list = None
@@ -193,15 +177,7 @@ def main(job_dir, job_id, tif_dir, init, register, correlate, detect):
     job = get_job(job_dir, job_id, tif_list)
     job.params.update({"fs": io.get_vol_rate(job.tifs[0])})
     res = run_job(job, init, register, correlate, detect)
-    if res:
-        print("Success!")
-    else:
-        print("Failed!")
+    print(res)
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        import pdb
-        pdb.post_mortem()
-        raise
+    main()
