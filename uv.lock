@@ -3563,6 +3563,7 @@ mrc = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "ipykernel" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -3601,6 +3602,7 @@ provides-extras = ["mrc"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "ipykernel", specifier = ">=6.29.5" },
     { name = "pytest", specifier = ">=7.4.4" },
     { name = "ruff", specifier = ">=0.6.1" },
 ]
