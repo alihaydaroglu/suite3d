@@ -27,7 +27,7 @@ def get_params():
         "cell_filt_xy_um": 5.0,        # cell detection filter size in xy (microns)
         "npil_filt_xy_um": 3.0,        # neuropil filter size in xy (microns)
         "cell_filt_z_um": 18,          # cell detection filter size in z (microns)
-        "npil_filt_z": 2.5,            # neuropil filter size in z (microns)
+        "npil_filt_z_um": 2.5,            # neuropil filter size in z (microns)
     })
 
     # Normalization & Thresholding
@@ -39,7 +39,7 @@ def get_params():
     # Compute & Batch Parameters
     params.update({
         "t_batch_size": 300,         # number of frames to compute per iteration
-        "n_proc_corr": 12,           # number of processors for correlation map calculation
+        "n_proc_corr": 1,           # number of processors for correlation map calculation
         "mproc_batchsize": 5,        # frames per smaller batch within the larger batch
         "n_init_files": 1,           # number of TIFFs used for initialization
     })
