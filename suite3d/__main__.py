@@ -123,17 +123,20 @@ def run_job(job, do_init, do_register, do_correlate, do_segment):
             location = f"{tb.filename}:{tb.lineno} in {tb.name}"
             results["errors"][stage_name] = f"{type(e).__name__}: {e} (at {location})"
             results[stage_name] = False
+            return False
+        return True
 
-    if do_init:
-        run_stage("init", job.run_init_pass)
-    if do_register:
-        run_stage("register", job.register)
-    if do_correlate:
-        run_stage("correlate", job.calculate_corr_map)
-    if do_segment:
-        run_stage("segment", job.segment_rois)
+    if do_init and not run_stage("init", job.run_init_pass):
+        return results
+    if do_register and not run_stage("register", job.register):
+        return results
+    if do_correlate and not run_stage("correlate", job.calculate_corr_map):
+        return results
+    if do_segment and not run_stage("segment", job.segment_rois):
+        return results
 
     return results
+
 
 
 def view_data(im_full):
