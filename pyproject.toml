@@ -48,6 +48,7 @@ mrc = [
 
 [dependency-groups]
 dev = [
+    "ipykernel>=6.29.5",
     "pytest>=7.4.4",
     "ruff>=0.6.1",
 ]
