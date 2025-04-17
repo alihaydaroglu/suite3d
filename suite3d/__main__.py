@@ -1,4 +1,5 @@
 import os
+import traceback
 from pathlib import Path
 import click
 import numpy as np
@@ -19,6 +20,7 @@ def get_params():
         "planes": np.arange(14),         # planes to analyze (0-based indexing)
         "n_ch_tif": 14,                  # number of channels/planes in each TIFF
         "cavity_size": 1,
+        "planes": np.arange(14),
     }
 
     # Filtering Parameters (Cell detection & Neuropil subtraction)
@@ -35,7 +37,7 @@ def get_params():
     params.update({
         "sdnorm_exp": 0.8,          # normalization exponent for correlation map
         "intensity_thresh": 0.7,      # threshold for the normalized, filtered movie
-        "ext_thresh": 0.15,
+        "extend_thresh": 0.15,
     })
 
     # Compute & Batch Parameters
@@ -53,10 +55,9 @@ def get_params():
         "override_crosstalk": None,  # override for crosstalk subtraction
         "gpu_reg_batchsize": 10,     # batch size for GPU registration
         "max_rigid_shift_pix": 250,  # maximum rigid shift (in pixels) allowed during registration
-        "max_num_pixels": 250,  # maximum rigid shift (in pixels) allowed during registration
+        "max_pix": 2500,             # set this very high and forget about it
         "3d_reg": True,              # perform 3D registration
         "gpu_reg": True,             # use GPU acceleration for registration
-        "max_px": 2000,             # make this really high and forget about it
     })
 
     return params
@@ -112,44 +113,27 @@ def run_job(job, do_init, do_register, do_correlate, do_segment):
         "segment": None,
         "errors": {},
     }
-    try:
-        if do_init:
-            job.run_init_pass()
-            results["init"] = True
-        else:
-            results["init"] = False
-    except Exception as e:
-        results["errors"]["init"] = e
 
-    try:
-        if do_register:
-            job.register()
-            results["register"] = True
-        else:
-            results["register"] = False
-    except Exception as e:
-        results["errors"]["register"] = e
+    def run_stage(stage_name, fn):
+        try:
+            fn()
+            results[stage_name] = True
+        except Exception as e:
+            tb = traceback.extract_tb(e.__traceback__)[-1]
+            location = f"{tb.filename}:{tb.lineno} in {tb.name}"
+            results["errors"][stage_name] = f"{type(e).__name__}: {e} (at {location})"
+            results[stage_name] = False
 
-    try:
-        if do_correlate:
-            job.calculate_corr_map()
-            results["correlate"] = True
-        else:
-            results["correlate"] = False
-    except Exception as e:
-        results["errors"]["correlate"] = e
-
-    try:
-        if do_segment:
-            job.segment_rois()
-            results["segment"] = True
-        else:
-            results["segment"] = False
-    except Exception as e:
-        results["errors"]["segment"] = e
+    if do_init:
+        run_stage("init", job.run_init_pass)
+    if do_register:
+        run_stage("register", job.register)
+    if do_correlate:
+        run_stage("correlate", job.calculate_corr_map)
+    if do_segment:
+        run_stage("segment", job.segment_rois)
 
     return results
-
 
 
 def view_data(im_full):
@@ -158,10 +142,6 @@ def view_data(im_full):
     viewer = napari.Viewer(ndisplay=3)
     viewer.add_image(cropped, name='Imaging Data', scale=(1, 8, 1, 1), rendering='mip')
     napari.run()
-
-
-def debug_function(job):
-    pass
 
 
 @click.command()
@@ -178,8 +158,7 @@ def debug_function(job):
 @click.option('--correlate', is_flag=True, help='Calculate correlation map.')
 @click.option('--segment', is_flag=True, help='Run segmentation.')
 @click.option('--all', is_flag=True, help='Run full pipeline.')
-@click.option('--debug', is_flag=True, help='Run a debug function.')
-def main(job_dir, job_id, tif_dir, init, register, correlate, segment, all, debug=False):
+def main(job_dir, job_id, tif_dir, init, register, correlate, segment, all):
     job_dir = Path(job_dir).resolve().expanduser()
     if tif_dir:
         tif_list = io.get_tif_paths(tif_dir)
@@ -191,8 +170,7 @@ def main(job_dir, job_id, tif_dir, init, register, correlate, segment, all, debu
 
     job = get_job(job_dir, job_id, tif_list)
     job.params.update({"fs": io.get_vol_rate(job.tifs[0])})
-    if debug:
-        debug_function(job)
+
     if all:
         init, register, correlate, segment = True, True, True, True
     res = run_job(job, init, register, correlate, segment)
