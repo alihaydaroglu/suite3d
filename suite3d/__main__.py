@@ -18,6 +18,7 @@ def get_params():
         "voxel_size_um": (17, 2, 2),     # size of a voxel in microns (z, y, x)
         "planes": np.arange(14),         # planes to analyze (0-based indexing)
         "n_ch_tif": 14,                  # number of channels/planes in each TIFF
+        "cavity_size": 1,
     }
 
     # Filtering Parameters (Cell detection & Neuropil subtraction)
@@ -195,7 +196,14 @@ def main(job_dir, job_id, tif_dir, init, register, correlate, segment, all, debu
     if all:
         init, register, correlate, segment = True, True, True, True
     res = run_job(job, init, register, correlate, segment)
-    print(res)
+
+    if res["errors"]:
+        print("\nErrors occurred:")
+        for stage, err in res["errors"].items():
+            print(f"- {stage}: {repr(err)}")
+    else:
+        print("Pipeline ran successfully.")
+        print(res)
 
 if __name__ == "__main__":
     main()
