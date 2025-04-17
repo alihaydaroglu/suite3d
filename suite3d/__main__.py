@@ -82,7 +82,7 @@ def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_list: str
     job_path = job_dir / f"s3d-{job_id}"
 
     # find existing job
-    if not job_path.exists():
+    if not job_path.exists() or not job_path.joinpath("params.npy").exists():
         print(f"{job_path} does not exist, creating")
 
         if tif_list:
