@@ -33,7 +33,8 @@ def get_params():
     # Normalization & Thresholding
     params.update({
         "sdnorm_exp": 0.8,          # normalization exponent for correlation map
-        "intensity_thresh": 1,      # threshold for the normalized, filtered movie
+        "intensity_thresh": 0.7,      # threshold for the normalized, filtered movie
+        "ext_thresh": 0.15,
     })
 
     # Compute & Batch Parameters
@@ -50,9 +51,11 @@ def get_params():
         "init_n_frames": None,       # number of frames to use for initialization (None = use defaults)
         "override_crosstalk": None,  # override for crosstalk subtraction
         "gpu_reg_batchsize": 10,     # batch size for GPU registration
-        "max_rigid_shift_pix": 150,  # maximum rigid shift (in pixels) allowed during registration
+        "max_rigid_shift_pix": 250,  # maximum rigid shift (in pixels) allowed during registration
+        "max_num_pixels": 250,  # maximum rigid shift (in pixels) allowed during registration
         "3d_reg": True,              # perform 3D registration
         "gpu_reg": True,             # use GPU acceleration for registration
+        "max_px": 2000,             # make this really high and forget about it
     })
 
     return params
@@ -106,6 +109,7 @@ def run_job(job, do_init, do_register, do_correlate, do_segment):
         "register": None,
         "correlate": None,
         "segment": None,
+        "errors": {},
     }
     try:
         if do_init:
@@ -113,8 +117,8 @@ def run_job(job, do_init, do_register, do_correlate, do_segment):
             results["init"] = True
         else:
             results["init"] = False
-    except Exception:
-        results["init"] = False
+    except Exception as e:
+        results["errors"]["init"] = e
 
     try:
         if do_register:
@@ -122,8 +126,8 @@ def run_job(job, do_init, do_register, do_correlate, do_segment):
             results["register"] = True
         else:
             results["register"] = False
-    except Exception:
-        results["register"] = False
+    except Exception as e:
+        results["errors"]["register"] = e
 
     try:
         if do_correlate:
@@ -131,8 +135,8 @@ def run_job(job, do_init, do_register, do_correlate, do_segment):
             results["correlate"] = True
         else:
             results["correlate"] = False
-    except Exception:
-        results["correlate"] = False
+    except Exception as e:
+        results["errors"]["correlate"] = e
 
     try:
         if do_segment:
@@ -140,10 +144,11 @@ def run_job(job, do_init, do_register, do_correlate, do_segment):
             results["segment"] = True
         else:
             results["segment"] = False
-    except Exception:
-        results["segment"] = False
+    except Exception as e:
+        results["errors"]["segment"] = e
 
     return results
+
 
 
 def view_data(im_full):
@@ -171,11 +176,15 @@ def debug_function(job):
 @click.option('--register', is_flag=True, help='Run registration.')
 @click.option('--correlate', is_flag=True, help='Calculate correlation map.')
 @click.option('--segment', is_flag=True, help='Run segmentation.')
+@click.option('--all', is_flag=True, help='Run full pipeline.')
 @click.option('--debug', is_flag=True, help='Run a debug function.')
-def main(job_dir, job_id, tif_dir, init, register, correlate, segment, debug=False):
+def main(job_dir, job_id, tif_dir, init, register, correlate, segment, all, debug=False):
     job_dir = Path(job_dir).resolve().expanduser()
     if tif_dir:
         tif_list = io.get_tif_paths(tif_dir)
+        if not tif_list:
+            print(f"No files found in the tif-dir {tif_dir}.")
+            return None
     else:
         tif_list = None
 
@@ -183,6 +192,8 @@ def main(job_dir, job_id, tif_dir, init, register, correlate, segment, debug=Fal
     job.params.update({"fs": io.get_vol_rate(job.tifs[0])})
     if debug:
         debug_function(job)
+    if all:
+        init, register, correlate, segment = True, True, True, True
     res = run_job(job, init, register, correlate, segment)
     print(res)
 
