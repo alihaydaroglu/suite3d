@@ -100,13 +100,12 @@ def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_list: str
     return Job(job_dir, job_id, create=False, overwrite=False)
 
 
-def run_job(job, do_init, do_register, do_correlate, do_detect):
+def run_job(job, do_init, do_register, do_correlate, do_segment):
     results = {
         "init": None,
         "register": None,
         "correlate": None,
-        "detect": None,
-        "registered_movie": None,
+        "segment": None,
     }
     try:
         if do_init:
@@ -136,13 +135,13 @@ def run_job(job, do_init, do_register, do_correlate, do_detect):
         results["correlate"] = False
 
     try:
-        if do_detect:
-            job.detect_cells()
-            results["detect"] = True
+        if do_segment:
+            job.segment_rois()
+            results["segment"] = True
         else:
-            results["detect"] = False
+            results["segment"] = False
     except Exception:
-        results["detect"] = False
+        results["segment"] = False
 
     return results
 
@@ -153,6 +152,11 @@ def view_data(im_full):
     viewer = napari.Viewer(ndisplay=3)
     viewer.add_image(cropped, name='Imaging Data', scale=(1, 8, 1, 1), rendering='mip')
     napari.run()
+
+
+def debug_function(job):
+    pass
+
 
 @click.command()
 @click.option('--job-dir', prompt='Enter base job directory', help='Base directory to hold jobs.')
@@ -166,8 +170,9 @@ def view_data(im_full):
 @click.option('--init', is_flag=True, help='Run initialization pass.')
 @click.option('--register', is_flag=True, help='Run registration.')
 @click.option('--correlate', is_flag=True, help='Calculate correlation map.')
-@click.option('--detect', is_flag=True, help='Run detection.')
-def main(job_dir, job_id, tif_dir, init, register, correlate, detect):
+@click.option('--segment', is_flag=True, help='Run segmentation.')
+@click.option('--debug', is_flag=True, help='Run a debug function.')
+def main(job_dir, job_id, tif_dir, init, register, correlate, segment, debug=False):
     job_dir = Path(job_dir).resolve().expanduser()
     if tif_dir:
         tif_list = io.get_tif_paths(tif_dir)
@@ -176,7 +181,9 @@ def main(job_dir, job_id, tif_dir, init, register, correlate, detect):
 
     job = get_job(job_dir, job_id, tif_list)
     job.params.update({"fs": io.get_vol_rate(job.tifs[0])})
-    res = run_job(job, init, register, correlate, detect)
+    if debug:
+        debug_function(job)
+    res = run_job(job, init, register, correlate, segment)
     print(res)
 
 if __name__ == "__main__":
