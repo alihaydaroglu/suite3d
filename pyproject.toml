@@ -40,6 +40,7 @@ dependencies = [
     "pyqt5-qt5==5.15.2",
     "mkl>=2025.1.0",
     "mkl-service>=2.4.2",
+    "mbo_utilities",
 ]
 
 [project.optional-dependencies]
@@ -71,7 +72,9 @@ dev = [
 [tool.uv]
 default-groups = "all"
 
-# [tool.uv.sources]
+[tool.uv.sources]
+mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "master" }
+
 
 [tool.setuptools.packages.find]
 where = ["."]
