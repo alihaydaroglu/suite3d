@@ -21,6 +21,7 @@ def get_params():
         "n_ch_tif": 14,                  # number of channels/planes in each TIFF
         "cavity_size": 1,
         "planes": np.arange(14),
+        "lbm": True,
     }
 
     # Filtering Parameters (Cell detection & Neuropil subtraction)
@@ -38,6 +39,7 @@ def get_params():
         "sdnorm_exp": 0.8,          # normalization exponent for correlation map
         "intensity_thresh": 0.7,      # threshold for the normalized, filtered movie
         "extend_thresh": 0.15,
+        "detection_timebin": 25,
     })
 
     # Compute & Batch Parameters
@@ -86,24 +88,19 @@ def get_job(job_dir: str | os.PathLike, job_id: str | os.PathLike, tif_list: str
     job_dir = Path(job_dir)
     job_path = job_dir / f"s3d-{job_id}"
 
-    # find existing job
-    if not job_path.exists() or not job_path.joinpath("params.npy").exists():
-        print(f"{job_path} does not exist, creating")
-
-        if tif_list:
-            print(tif_list)
-        else:
-            raise ValueError(f"{job_path} does not exist, must provide valid {tif_list}."
-                             f"To create a new job, pass tif_list=path/to/tifs")
-
-        # make sure there are valid tifs, and no errors fetching params
-        if not isinstance(tif_list, list):
-            raise ValueError(f"Argument tif_list should be a list of filepaths, got {type(tif_list)}")
+    # If tif_list is passed, force recreation
+    if tif_list:
+        print(f"Forcing new job creation at {job_path}")
+        if job_path.exists():
+            import shutil
+            shutil.rmtree(job_path)
         return Job(job_dir, job_id, create=True, overwrite=True, verbosity=3, tifs=tif_list, params=get_params())
 
-    # otherwise, load the job
-    return Job(job_dir, job_id, create=False, overwrite=False)
+    # Otherwise load existing job
+    if not job_path.exists() or not job_path.joinpath("params.npy").exists():
+        raise ValueError(f"{job_path} does not exist and no --tif-dir provided to create it.")
 
+    return Job(job_dir, job_id, create=False, overwrite=False)
 
 def run_job(job, do_init, do_register, do_correlate, do_segment):
     results = {
