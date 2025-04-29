@@ -39,6 +39,7 @@ try:
         fuse_and_save_reg_file,
         register_dataset_gpu,
         register_dataset_gpu_3d,
+        register_dataset_gpu_from_existing_shifts,
     )
 except:
     print("Issues importing compute components")
@@ -479,6 +480,15 @@ class Job:
         self.log("Launching initial pass", 0)
         init_pass.run_init_pass(self)
 
+        if self.params["process_structural_channel"]:
+            if self.params["lbm"]:
+                print("Structural detection not implemented for LBM data!")
+            elif self.params["faced"]:
+                print("Structural detection not implemented for FACED data!")
+            else:
+                self.log("Launching initial pass for structural channel", 0)
+                init_pass.run_init_pass(self, structural=True)
+
     def copy_init_pass_from_job(self, old_job):
         n.save(os.path.join(self.dirs["summary"], "summary.npy"), old_job.load_summary())
         self.summary = old_job.summary
@@ -487,14 +497,17 @@ class Job:
         n.save(os.path.join(self.dirs["summary"], "summary.npy"), summary_old_job)
         self.summary = summary_old_job
 
-    def load_summary(self):
+    def load_summary(self, structural=False):
         """
         Load the results of the init_pass
 
         Returns:
             dict: dictionary containing reference images, plane shifts, etc.
         """
-        summary_path = os.path.join(self.dirs["summary"], "summary.npy")
+        if structural:
+            summary_path = os.path.join(self.dirs["summary"], "summary_structural.npy")
+        else:
+            summary_path = os.path.join(self.dirs["summary"], "summary.npy")
         summary = n.load(summary_path, allow_pickle=True).item()
         self.summary = summary
         return summary
@@ -541,11 +554,11 @@ class Job:
         """
         self.make_new_dir("registered_fused_data")
         params = self.params
-        summary = self.load_summary()
-        self.save_params(params=params, copy_dir_tag="registered_fused_data")
-
         if tifs is None:
             tifs = self.tifs
+            
+        summary = self.load_summary()
+        self.save_params(params=params, copy_dir_tag="registered_fused_data")
 
         do_3d_reg = params.get("3d_reg", False)
         do_gpu_reg = params.get("gpu_reg", False)
@@ -563,6 +576,26 @@ class Job:
                 register_dataset_gpu(self, tifs, params, self.dirs, summary, self.log)
             else:
                 register_dataset_s2p(self, tifs, params, self.dirs, summary, self.log)
+
+        if params["process_structural_channel"]:
+            if params["lbm"] or params["faced"]:
+                print("Structural registration not implemented for LBM or FACED data! Skipping structural registration...")
+            elif params["3d_reg"] or not params["gpu_reg"]:
+                print("Structural registration only implemented for 2D-GPU registration at the moment! Skipping structural registration...")
+            else:
+                self.log("Launching registration for structural channel", 0)
+                summary = self.load_summary(structural=True)
+                register_dataset_gpu_from_existing_shifts(self, tifs, params, self.dirs, summary, self.log, structural=True)
+
+                ref_img_3d_structural = n.mean(self.get_registered_movie("registered_fused_data", "fused", structural=True), axis=1)
+                n.save(os.path.join(self.dirs["summary"], "ref_img_3d_structural.npy"), ref_img_3d_structural)
+                
+                if params["clear_registered_structural_data"]:
+                    self.log("Clearing registered structural data", 0)
+                    for file in os.listdir(self.dirs["registered_fused_data"]):
+                        if "structural" in file:
+                            print(f"Removing {file}")
+                            os.remove(os.path.join(self.dirs["registered_fused_data"], file))
 
     def calculate_corr_map(
         self,
@@ -1369,7 +1402,11 @@ class Job:
         return traces
 
     def get_registered_files(
-        self, key="registered_fused_data", filename_filter="fused", sort=True
+        self,
+        key="registered_fused_data",
+        filename_filter="fused",
+        sort=True,
+        structural=False,
     ):
         all_files = os.listdir(self.dirs[key])
         reg_files = [
@@ -1377,6 +1414,10 @@ class Job:
             for x in all_files
             if x.startswith(filename_filter)
         ]
+        if structural:
+            reg_files = [rf for rf in reg_files if "_structural" in rf]
+        else:
+            reg_files = [rf for rf in reg_files if "_structural" not in rf]
         if sort:
             reg_files = sorted(reg_files)
         return reg_files
@@ -1572,8 +1613,9 @@ class Job:
         axis=1,
         edge_crop=False,
         edge_crop_npix=None,
+        structural=False,
     ):
-        paths = self.get_registered_files(key, filename_filter)
+        paths = self.get_registered_files(key, filename_filter, structural=structural)
         astype = None
         if self.params.get("save_dtype", "float32") in ("float16", n.float16):
             astype = n.float32
