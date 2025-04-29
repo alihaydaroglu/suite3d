@@ -64,7 +64,7 @@ class s3dio:
         todo("This function is not implemented yet. Please implement it before using it!")
         return mov
 
-    def load_data(self, paths, verbose=True, debug=False, **parameters):
+    def load_data(self, paths, verbose=True, debug=False, structural=False, **parameters):
         """
         A central mechanism for loading data files. This function is meant to be called every
         single time raw data files are ever loaded, and it will handle all the necessary steps to
@@ -75,7 +75,7 @@ class s3dio:
         # example use of _update_prms to get the parameters to use for this call
         params = self._update_prms(**parameters)
         _dataloader = self._get_dataloader(params)
-        mov_list = _dataloader(paths, params, verbose=verbose, debug=debug)
+        mov_list = _dataloader(paths, params, verbose=verbose, debug=debug, structural=structural)
         # concatenate movies across time to make a single movie
         mov = n.concatenate(mov_list, axis=1)
 
@@ -85,7 +85,7 @@ class s3dio:
 
         return self._preprocess_data(mov, params)
 
-    def _load_scanimage_tifs(self, paths, params, verbose=True, debug=False):
+    def _load_scanimage_tifs(self, paths, params, verbose=True, debug=False, structural=False):
         """
         Load tifs that are in the standard 2p imaging format from ScanImage.
 
@@ -110,7 +110,8 @@ class s3dio:
             params (dict): parameters for loading the tiffs (inherited from self.job.params in the caller)
             verbose (bool, optional): Verbosity. Defaults to True.
             debug (bool, optional): Debugging mode. Defaults to False.
-
+            structural (bool, optional): Whether to process the structural channel. Defaults to False.
+                                         If True, params["structural_color_channel"] will be used to load the structural channel.
         Returns:
             mov (ndarray): the loaded tiff data with shape (planes, frames, y-pixels, x-pixels)
         """
@@ -131,7 +132,8 @@ class s3dio:
                 # if anyone is using multiple functional color channels, they need to modify the code themselves or raise an
                 # issue to ask for this feature to be implemented. A simple work around is to run the suite3d pipeline multiple
                 # times with different functional color channels and then combine the results however you see fit.
-                mov = n.take(mov, params["functional_color_channel"], axis=1)
+                color_channel = params["functional_color_channel"] if not structural else params["structural_color_channel"]
+                mov = n.take(mov, color_channel, axis=1)
             return mov
 
         # todo("Should we filter across the slow y-axis like the lbm loader?")
@@ -233,7 +235,10 @@ class s3dio:
         # Return mov_list of the current batch
         return mov_list
     
-    def _load_faced_tifs(self, paths, params, verbose=True, debug=False):
+    def _load_faced_tifs(self, paths, params, verbose=True, debug=False, structural=False):
+        if structural:
+            print("Structural detection not implemented for FACED data!")
+            return None
         nz = params["faced_nz"]
         mov_list = []
         for tif_path in paths:
@@ -245,8 +250,7 @@ class s3dio:
             mov_list.append(mov)
         return mov_list
 
-    @deprecated_inputs("mp_args is never set to anything except an empty dictionary")
-    def _load_lbm_tifs(self, paths, params, verbose=True, debug=False):
+    def _load_lbm_tifs(self, paths, params, verbose=True, debug=False, structural=False):
         """
         Load tifs that are in the standard lbm imaging format.
 
@@ -260,6 +264,9 @@ class s3dio:
             _type_: _description_
         """
         todo("Add explanation of how lbm tiffs are organized to the docstring.")
+        if structural:
+            print("Structural detection not implemented for LBM data!")
+            return None
 
         n_ch_tif = params.get("n_ch_tif", 30)
         if n_ch_tif == 30 and params.get("convert_plane_ids_to_channel_ids", True):

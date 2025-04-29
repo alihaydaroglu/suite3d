@@ -108,9 +108,110 @@ def block_mov(mov_gpu, mov_blocks, yblocks, xblocks):
     return mov_blocks
 
 
-def register_gpu():
-    pass
+def rigid_2d_reg_gpu_from_existing_shifts(
+    mov_cpu,
+    ymaxs,
+    xmaxs,
+    crosstalk_coeff = None, 
+    min_pix_vals = None,
+    fuse_and_pad=False,
+    ypad=None, 
+    xpad=None,
+    fuse_shift=None,
+    new_xs=None,
+    old_xs=None,
+    cavity_size = 15,
+    log_cb=default_log,
+):
+    """Register a movie using existing shifts (computed from rigid_2d_reg_gpu)
 
+    Takes a movie and ymaxs & xmaxs (the outputs of rigid_2d_reg_gpu). Returns the 
+    shifted movie according to those shifts. Intended for use when registering an 
+    structural imaging channel such that it matches the functional channel. 
+
+    Parameters
+    ----------
+    mov_cpu : ndarray (nz, nt, ny, nx)
+        The movie to register
+    ymaxs : ndarray (nz, nt)
+        The y-shifts to apply to the movie
+    xmaxs : ndarray (nz, nt)
+        The x-shifts to apply to the movie
+    crosstalk_coeff : float, optional
+        The crosstalk coefficient to apply to the movie
+    min_pix_vals : ndarray (nz,), optional
+        The minimum pixel values to enforce positivity
+    fuse_and_pad : bool, optional
+        Whether to fuse and pad the movie
+    ypad : int, optional
+        The number of pixels to pad in the y-direction
+    xpad : int, optional
+        The number of pixels to pad in the x-direction
+    fuse_shift : bool, optional
+        Whether to fuse and shift the movie
+    new_xs : ndarray (nz, nt), optional
+        The new x-coordinates to use for the movie
+    old_xs : ndarray (nz, nt), optional
+        The old x-coordinates to use for the movie
+    cavity_size : int, optional
+        The size of the cavity to use for the crosstalk coefficient
+    log_cb : function, optional
+        The logging callback function
+
+    Returns
+    -------
+    mov_shifted : ndarray (nz, nt, ny, nx)
+        The shifted movie. Same as the first output of rigid_2d_reg_gpu when shift=True.
+    """
+    nz, nt, ny, nx = mov_cpu.shape
+    start_t = time.time()
+    mempool = cp.get_default_memory_pool()
+    if not fuse_and_pad: mov_gpu = cp.asarray(mov_cpu, dtype=cp.complex64)
+    if fuse_and_pad: mov_gpu = cp.asarray(mov_cpu, dtype=cp.float32)
+
+    load_t = time.time()
+    log_cb("Loaded mov and masks to GPU for rigid reg in %.2f sec" % ((load_t-start_t),), 4)
+
+    if min_pix_vals is not None:
+        log_cb("Subtracting min pix vals to enforce positivity", 4)
+        min_pix_vals = cp.asarray(min_pix_vals, dtype=mov_gpu.dtype)
+        mov_gpu[:] -= min_pix_vals[:nz, cp.newaxis, cp.newaxis, cp.newaxis]
+
+    if crosstalk_coeff is not None: 
+        log_cb("Subtracting crosstalk", 4)
+        mov_gpu = utils.crosstalk_subtract(mov_gpu, crosstalk_coeff, cavity_size)
+    
+    if fuse_and_pad:
+        log_cb("Fusing and padding movie",4)
+        mov_gpu = fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs)
+        nz,nt,ny,nx = mov_gpu.shape
+        log_cb("GPU Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),4)
+        mempool.free_all_blocks()
+        log_cb(log_gpu_memory(mempool), 4)
+
+    log_cb("Allocating memory for shifted movie", 4)
+    mov_shifted = cp.zeros((nt,nz,ny,nx), dtype=cp.float32)
+    mov_shifted[:] = mov_gpu.real.swapaxes(0,1).copy()
+
+    log_cb(log_gpu_memory(mempool), 4)
+    shift_t = 0
+    for zidx in range(nz):        
+        shift_tic = time.time()
+        log_cb("Shifting plane %d" % (zidx,), 4)
+        xmax_z, ymax_z = xmaxs[zidx], ymaxs[zidx]
+            
+        for frame_idx in range(nt):
+            mov_shifted[frame_idx, zidx] = shift_frame(mov_shifted[frame_idx, zidx],
+                            dy=ymax_z[frame_idx], dx=xmax_z[frame_idx])
+        shift_t += (time.time() - shift_tic)
+
+    log_cb("Shifted batch in %.2f sec" % shift_t, 3)
+    log_cb(log_gpu_memory(mempool), 4)
+    mempool.free_all_blocks()
+    log_cb("Freeing all blocks", 3)
+    log_cb(log_gpu_memory(mempool), 4)
+    return mov_shifted
+    
 
 def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
                     rmins, rmaxs, crosstalk_coeff = None, shift=True, 
@@ -158,7 +259,6 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
         mov_shifted[:] = mov_gpu.real.swapaxes(0,1).copy()
 
     # print("mov_shifted before reg, min: %.2f, max: %.2f" % (mov_shifted[:,10].min(), mov_shifted[:,10].max()))
-
 
     log_cb(log_gpu_memory(mempool), 4)
     reg_t = 0; shift_t = 0
