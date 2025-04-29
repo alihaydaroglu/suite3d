@@ -587,7 +587,7 @@ class Job:
                 summary = self.load_summary(structural=True)
                 register_dataset_gpu_from_existing_shifts(self, tifs, params, self.dirs, summary, self.log, structural=True)
 
-                ref_img_3d_structural = n.mean(self.get_registered_movie("registered_fused_data", "fused", structural=True), axis=1)
+                ref_img_3d_structural = self.get_registered_movie("registered_fused_data", "fused", structural=True).mean(axis=1).compute()
                 n.save(os.path.join(self.dirs["summary"], "ref_img_3d_structural.npy"), ref_img_3d_structural)
                 
                 if params["clear_registered_structural_data"]:
