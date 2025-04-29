@@ -192,6 +192,8 @@ def load_and_stitch_full_tif_mp(
     sh_mem_params = (sh_tif.shape, sh_tif.dtype)
 
     n_t, n_ch_tif, __, __ = sh_tif.shape
+
+    assert hasattr(channels, "__len__"), f"Check parameter 'channels', must be an iterable with __len__. Got type: {type(channels)}"
     n_ch = len(channels)
 
     # split and stitch two frames to figure out the output size

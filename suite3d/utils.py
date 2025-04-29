@@ -876,8 +876,11 @@ def estimate_crosstalk(
     nz = im3d.shape[0]  # if you are not ussing all pleans from the second caivty
 
     if nz <= cavity_size:
-        raise ValueError("Number of z-planes must be greater than or equal to cavity_size."
-                         " Check init-pass parameters `cavity_size`.")
+        raise ValueError(
+            f"Number of z-planes ({nz}) must be >= cavity_size ({cavity_size}). "
+            f"Got image with shape {im3d.shape}. "
+            "Check init-pass parameters `cavity_size` and `planes`."
+        )
 
     n_second_cavity_planes = nz - cavity_size
 
