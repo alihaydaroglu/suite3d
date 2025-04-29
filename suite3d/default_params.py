@@ -44,6 +44,9 @@ params = {
     "fix_fastZ": False,  # if you messed up your ROI z-definitions in scanimage, this is useful
     "num_colors": 1,  # if not lbm data, how many color channels were recorded by scanimage
     "functional_color_channel": 0,  # if not lbm data, which color channel is the functional one
+    "process_structural_channel": False, # whether to process the structural channel
+    "structural_color_channel": 1, # which color channel is the structural one
+    "clear_registered_structural_data": True, # whether to clear the registered structural data after the mean volume is calculated
     "save_dtype": "float16",
     ### Initialization Step ###
     # number of files to use for the initialization step
