@@ -63,13 +63,14 @@ def load_init_tifs(
     return full_mov
 
 
-def run_init_pass(job):
+def run_init_pass(job, structural=False):
     tifs = job.tifs
     params = job.params
 
     jobio = s3dio(job)
 
-    summary_path = os.path.join(job.dirs["summary"], "summary.npy")
+    summary_name = "summary_structural.npy" if structural else "summary.npy"
+    summary_path = os.path.join(job.dirs["summary"], summary_name)
     job.log("Saving summary to %s" % summary_path, 0)
     if not os.path.isdir(job.dirs["summary"]):
         job.log("Summary dir does not exist!!")
@@ -83,12 +84,7 @@ def run_init_pass(job):
     )
     n_ch_tif = job.params.get("n_ch_tif", 30)
     job.log("Loading init tifs with %d channels" % n_ch_tif)
-    todo(
-        "Check work. This is a big change. Before, all the parameters were passed directly with a params.get('name', default) call."
-        + "Now, they are inherited from job.params (because job is an attribute of the jobio object.)"
-    )
-
-    init_mov = jobio.load_data(init_tifs)
+    init_mov = jobio.load_data(init_tifs, structural=structural)
 
     nz, nt, ny, nx = init_mov.shape
     if params["init_n_frames"] is not None:
@@ -105,6 +101,7 @@ def run_init_pass(job):
                 % params["init_n_frames"]
             )
             init_mov = init_mov[:, subset_ts]
+                
     nz, nt, ny, nx = init_mov.shape
     job.log("Loaded movie with %d frames and shape %d, %d, %d" % (nt, nz, ny, nx))
     im3d = init_mov.mean(axis=1)
@@ -229,7 +226,8 @@ def run_init_pass(job):
             use_GPU=params.get("gpu_reg", True),
         )
 
-        summary_mov_path = os.path.join(job.dirs["summary"], "init_mov.npy")
+        init_mov_name = "init_mov_structural.npy" if structural else "init_mov.npy"
+        summary_mov_path = os.path.join(job.dirs["summary"], init_mov_name)
         n.save(summary_mov_path, shifted_mov)
         job.log("Saved init mov to %s" % summary_mov_path)
 
@@ -266,7 +264,6 @@ def run_init_pass(job):
                 use_GPU=params.get("gpu_reg", True),
             )
         )
-
         summary = {
             "ref_img_3d": ref_image,  # ctalk-sub and padded and plane-shifted
             "ref_img_3d_unaligned": ref_padded,  # ctalk-sub and padded, 3d doesnt have unalligned reference img
@@ -290,7 +287,7 @@ def run_init_pass(job):
             "og_xs": og_xs,
             "init_tifs": init_tifs,
         }
-    summary_path = os.path.join(job.dirs["summary"], "summary.npy")
+    
     job.log("Saving summary to %s" % summary_path)
     n.save(summary_path, summary)
     # job.show_summary_plots()
@@ -309,4 +306,8 @@ def run_init_pass(job):
     #     n.save(summary_path, summary)
 
     job.log("Initial pass complete. See %s for details" % job.dirs["summary"])
-    job.summary = summary
+    
+    if structural: 
+        job.structural_summary = summary
+    else:
+        job.summary = summary
