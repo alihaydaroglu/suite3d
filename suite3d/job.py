@@ -889,8 +889,8 @@ class Job:
             local_thresh_window_pix = self.params.get('local_thresh_window_pix', 51)
             local_thresh_pct = self.params.get('local_thresh_pct', 51)
             if local_thresh:
+                maps['vmap_raw'] = maps['vmap'].copy()
                 vmap = ext.thresh_mask_corr_map(maps['vmap'], local_thresh_window_pix, local_thresh_pct)
-                maps['vmap_raw'] = vmap
                 maps['vmap'] = vmap 
             else:
                 vmap = maps['vmap']
@@ -1359,9 +1359,10 @@ class Job:
         info = n.load(os.path.join(patch_dir, "info.npy"), allow_pickle=True).item()
         return stats, info
 
-    def get_traces(self, patch_idx=0, parent_dir_name="detection", patch_dir=None):
+    def get_traces(self, parent_dir_name="rois", patch_dir=None):
         if patch_dir is None:
-            patch_dir = self.get_patch_dir(patch_idx, parent_dir_name=parent_dir_name)
+            patch_dir = self.dirs[parent_dir_name]
+            # patch_dir = self.get_patch_dir(patch_idx, parent_dir_name=parent_dir_name)
         traces = {}
         for filename in ["F.npy", "Fneu.npy", "spks.npy"]:
             if filename in os.listdir(patch_dir):
