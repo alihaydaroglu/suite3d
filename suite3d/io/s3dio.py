@@ -120,7 +120,7 @@ class s3dio:
                 # get functional channel from multi-channel tiff
                 
                 if len(mov.shape) == 3:
-                    mov = mov.reshape(-1, params['num_colors'], mov.shape[-2:],mov.shape[-1:])
+                    mov = mov.reshape(-1, params['num_colors'], mov.shape[-2],mov.shape[-1])
                 elif len(mov.shape) != 4:
                     raise ValueError(
                         f"tiff file is {mov.ndim}D instead of 4D, expecting (frames, colors, y-pixels, x-pixels)"
@@ -228,8 +228,8 @@ class s3dio:
             tif_file = n.swapaxes(tif_file.reshape(volumes, params["n_ch_tif"], py, px), 0, 1)
 
             # Filter out planes to analyze
-            if params["multiplane_2p_use_planes"] is not None:
-                tif_file = tif_file[params["multiplane_2p_use_planes"]]
+            if params["planes"] is not None:
+                tif_file = tif_file[params["planes"]]
 
             mov_list.append(tif_file)
 
