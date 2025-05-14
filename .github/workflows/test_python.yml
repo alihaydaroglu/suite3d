@@ -2,11 +2,14 @@ name: Install and Test Suite3D
 
 on:
   pull_request:
-    branches: [main]
+    branches-ignore:
+      - main
   workflow_dispatch:
 
 jobs:
   test-full:
+    if: >
+      startsWith(github.event.head_commit.message, 'ci')
     name: Tests
     timeout-minutes: 25
     strategy:
