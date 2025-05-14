@@ -1,11 +1,5 @@
 name: Install and Test Suite3D
 
-on:
-  pull_request:
-    branches:
-        - dev
-  workflow_dispatch:
-
 jobs:
   test-full:
     if: >
