@@ -1,5 +1,11 @@
 name: Install and Test Suite3D
 
+on:
+  push:
+    branches-ignore:
+      - main
+  workflow_dispatch:
+
 jobs:
   test-full:
     if: >
