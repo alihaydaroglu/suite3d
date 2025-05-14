@@ -2,8 +2,8 @@ name: Install and Test Suite3D
 
 on:
   pull_request:
-    branches-ignore:
-      - main
+    branches:
+        - dev
   workflow_dispatch:
 
 jobs:
