@@ -12,14 +12,14 @@ cd suite3d
 `pip`
 ``` bash
 python -m venv
-pip install ".[mrc]" % include mrcfile 
+pip install ".[all]" % include viz/jupyter utilities
 ```
 
 `conda` (miniforge3 recommended)
 ``` bash
 conda create -n s3d -c conda-forge python=3.10
 conda activate s3d
-pip install -e ".[mrcfile]"  # [mrcfile] optional
+pip install -e ".[all]"  # [all] optional
 ```
 
 If the cloning line doesn't work, try: `git clone --recurse-submodules https://github.com/alihaydaroglu/suite3d`

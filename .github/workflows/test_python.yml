@@ -1,0 +1,36 @@
+name: Install and Test Suite3D
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-full:
+    name: Tests
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+        os: ["ubuntu-latest", "macos-latest"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y -qq
+          sudo apt-get install --no-install-recommends -y \
+            xorg-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxcb-glx0-dev
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --all-extras --dev
