@@ -20,20 +20,24 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -y -qq
-          sudo apt-get install --no-install-recommends -y \
-            xorg-dev \
-            libx11-dev \
-            libxcb1-dev \
-            libxcb-glx0-dev
-
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }} #"3.11"}
           enable-cache: true
+
+      # - name: Sync dev dependencies
+      #   run: uv sync --dev
 
       - name: Sync dependencies
         run: GIT_LFS_SKIP_SMUDGE=1 uv sync --all-extras --dev
+
+
+      # - name: Install system dependencies
+      #   run: |
+      #     sudo apt-get update -y -qq
+      #     sudo apt-get install --no-install-recommends -y \
+      #       xorg-dev \
+      #       libx11-dev \
+      #       libxcb1-dev \
+      #       libxcb-glx0-dev
