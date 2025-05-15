@@ -356,8 +356,8 @@ def _get_roi_start_pix(ims, rois, return_full=False):
     pixel_sizes = sizes / sizes_pix
     psize_y = n.mean(pixel_sizes[:, 1])
     psize_x = n.mean(pixel_sizes[:, 0])
-    assert n.product(n.isclose(pixel_sizes[:, 1] - psize_y, 0)), "Y pixels not uniform"
-    assert n.product(n.isclose(pixel_sizes[:, 0] - psize_x, 0)), "X pixels not uniform"
+    assert n.prod(n.isclose(pixel_sizes[:, 1] - psize_y, 0)), "Y pixels not uniform"
+    assert n.prod(n.isclose(pixel_sizes[:, 0] - psize_x, 0)), "X pixels not uniform"
 
     # SI unit coordinates of each pixel of the full image
     full_xs = n.arange(xmin, xmax, psize_x)
