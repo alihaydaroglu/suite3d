@@ -20,7 +20,6 @@ def get_params():
         "planes": np.arange(14),         # planes to analyze (0-based indexing)
         "n_ch_tif": 14,                  # number of channels/planes in each TIFF
         "cavity_size": 1,
-        "planes": np.arange(14),
         "lbm": True,
     }
 
