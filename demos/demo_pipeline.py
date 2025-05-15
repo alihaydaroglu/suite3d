@@ -2,14 +2,15 @@ from pathlib import Path
 import os
 import numpy as np
 from suite3d.job import Job
-from suite3d import ui
-from suite3d import io
+# from suite3d import ui
+# from suite3d import io
+
 os.chdir(os.path.dirname(os.path.abspath("")))
 
 
 def main(load=False):
 
-    fpath = Path(r"D://demo//full")
+    fpath = Path(r"D://demo")
     job_path = fpath.joinpath("results")
 
     # Set the mandatory parameters
@@ -40,13 +41,16 @@ def main(load=False):
         job = Job(str(job_path), 'v1', create=True, overwrite=True, verbosity = 1, tifs=tifs, params=params)
         job.run_init_pass()
         job.register()
-        # job.params['n_skip'] = job.load_summary()['fuse_shift']
+        job.calculate_corr_map()
+        job.params['patch_size_xy'] = (250, 250)
+        job.segment_rois()
         return job
 
 
 if __name__ == '__main__':
     job = main(load=True)
-    corr = job.calculate_corr_map()
-    job.params['patch_size_xy'] = (250, 250)
-    job.segment_rois(patches_to_segment=(5,))
+    job.register()
+    # corr = job.calculate_corr_map()
+    # job.params['patch_size_xy'] = (250, 250)
+    # job.segment_rois(patches_to_segment=(5,))
     x=2
