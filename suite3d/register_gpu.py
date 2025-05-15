@@ -65,8 +65,7 @@ def nonrigid_2d_reg_gpu(mov_gpu, mult_mask, add_mask, refs_nr_f, yblocks, xblock
     mov_blocks[:] = convolve_2d_gpu(mov_blocks, refs_nr_f, axes=(3,4))
     phase_corr = cp.zeros((nt, nz, nb, ncc, ncc), dtype=cp.float32)
     phase_corr = unwrap_fft_2d(mov_blocks.real, nr = nr, out=phase_corr)
-    # log_cb("Completed FFT of blocks and computed phase correlations in %.2f sec" %\
-           (time.time() - fft_t), 4)
+    # log_cb("Completed FFT of blocks and computed phase correlations in %.2f sec" %(time.time() - fft_t), 4)
     # print(mov_blocks.std())
     # print(phase_corr.std())
     smooth_t = time.time()
