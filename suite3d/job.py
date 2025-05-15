@@ -558,7 +558,10 @@ class Job:
             if do_gpu_reg:
                 register_dataset_gpu_3d(self, tifs, params, self.dirs, summary, self.log)
             else:
-                pass
+                raise NotImplementedError(
+                    "3D registration without GPU is not implemented yet."
+                    " Either set gpu_reg=True or set 3d_reg=False"
+                )
                 # register_dataset_3d(self,tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
         else:
             if do_gpu_reg:
@@ -1577,6 +1580,9 @@ class Job:
         edge_crop_npix=None,
     ):
         paths = self.get_registered_files(key, filename_filter)
+        if not paths:
+            self.log(f"No registered files found in {self.dirs[key]}")
+            return None
         astype = None
         if self.params.get("save_dtype", "float32") in ("float16", n.float16):
             astype = n.float32
