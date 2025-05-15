@@ -672,7 +672,7 @@ class Job:
                 % (k, str(self.params[k]))
             )
         if all_combinations:
-            n_combs = n.product(n_per_param)
+            n_combs = n.prod(n_per_param)
             combinations = list(itertools.product(*param_vals_list))
         else:
             n_combs = n.sum(n_per_param)
@@ -1533,7 +1533,7 @@ class Job:
             self.log("Time-cropped to size %s" % str(mov.shape))
 
         if self.params.get("svd_pix_chunk") is None:
-            self.params["svd_pix_chunk"] = n.product(self.params["svd_block_shape"]) // 2
+            self.params["svd_pix_chunk"] = n.prod(self.params["svd_block_shape"]) // 2
         if self.params.get("svd_time_chunk") is None:
             self.params["svd_save_time_chunk"] = 4000
         if self.params.get("svd_save_time_chunk") is None:
@@ -1706,7 +1706,7 @@ class Job:
             param_vals_list.append(params_to_sweep[k])
             param_per_run[k] = []
         if all_combinations:
-            n_combs = n.product(n_per_param)
+            n_combs = n.prod(n_per_param)
             combinations = n.array(list(itertools.product(*param_vals_list)))
         else:
             n_combs = n.sum(n_per_param)
