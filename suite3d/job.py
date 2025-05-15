@@ -1,3 +1,5 @@
+from .init_pass import run_init_pass
+
 try:
     import tifffile
 except:
@@ -477,7 +479,7 @@ class Job:
     def run_init_pass(self):
         self.save_params(copy_dir_tag="summary")
         self.log("Launching initial pass", 0)
-        init_pass.run_init_pass(self)
+        run_init_pass(self)
 
     def copy_init_pass_from_job(self, old_job):
         n.save(os.path.join(self.dirs["summary"], "summary.npy"), old_job.load_summary())
