@@ -1670,7 +1670,7 @@ class Job:
                 nf = len(tf.pages) // self.params.get("n_ch_tif", 30)
                 nframes.append(nf)
                 size_to_frames[tifsize] = nf
-                self.log(tif + " is %d frames and %d bytes" % (nf, tifsize))
+                self.log(f"{tif} is {nf} frames and {tifsize} bytes")
 
         nframes = n.array(nframes)
         dir_ids = n.array(dir_ids)
