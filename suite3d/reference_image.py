@@ -2,16 +2,23 @@
 # It will have functions from suite2P which have been slightly modified
 import numpy as np
 
-n = np
-import cupy as cp
-import os
+try:
+    import cupy as cp
+    import cupyx.scipy.fft as cufft
+    import scipy.fft
+    import cupyx.scipy.ndimage as cuimage
+    import cupy as cp
+    HAS_CUPY = True
+except ImportError:
+    HAS_CUPY = False
+    cp = np
+
 import time
-import mkl_fft
-import cupy as cp
-import cupyx.scipy.fft as cufft
-import scipy.fft
-import cupyx.scipy.ndimage as cuimage
-from numba import vectorize, complex64
+try:
+    from mkl_fft import fft2
+except ImportError:
+    from scipy.fft import fft2
+from numba import vectorize
 from numpy import fft
 
 
@@ -19,8 +26,9 @@ from . import register_gpu as reg
 from . import reg_3d as reg_3d  # new 3d registration functions
 from .utils import default_log
 
-# Function which runs createion of reference image+ masks
+n = np
 
+# Function which runs createion of reference image+ masks
 
 # There are function at the bottom of this page for controlling the 3D reg version of reference img creation.
 def compute_reference_and_masks(
@@ -387,7 +395,7 @@ def gaussian_fft(sig, ny, nx):
     hgy = n.exp(-n.square(yy / sig) / 2)
     hgg = hgy * hgx
     hgg /= hgg.sum()
-    fhg = n.real(mkl_fft.fft2(n.fft.ifftshift(hgg)))
+    fhg = n.real(fft2(n.fft.ifftshift(hgg)))
     return fhg
 
 
@@ -412,7 +420,7 @@ def phasecorr_ref(RefImg, smooth_sigma=None):
     # ny, nx = RefImg.shape,  #padding?
     # get the comple conjugate og the fft'd reference image
     cfRefImg = n.conj(
-        mkl_fft.fft2(RefImg)
+        fft2(RefImg)
     )  # padding?  , (next_fast_len(ny), next_fast_len(nx))))
     # normalise cfRefImg
     cfRefImg /= 1e-5 + n.absolute(cfRefImg)

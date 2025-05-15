@@ -1,15 +1,21 @@
-import cupy as cp
 import numpy as n
-from cupyx.scipy import fft as cufft
-from cupyx.scipy import ndimage as cuimage
 from functools import lru_cache
-from scipy import ndimage
 from . import utils
 import time
+
 try:
-    import mkl_fft
-except:
-    print("No MKL fft ")
+    from mkl_fft import fft2, ifft2
+except ImportError:
+    from scipy.fft import fft2, ifft2
+
+try:
+    import cupy as cp
+    from cupyx.scipy import fft as cufft
+    from cupyx.scipy import ndimage as cuimage
+except ImportError:
+    import numpy as cp
+    from scipy.fft import fft as cufft
+    from scipy import ndimage as cuimage
 
 from .utils import default_log
 
@@ -76,7 +82,7 @@ def nonrigid_2d_reg_gpu(mov_gpu, mult_mask, add_mask, refs_nr_f, yblocks, xblock
     shift_t = time.time()
     ymaxs, xmaxs = get_subpixel_shifts(pc, max_shift, npad, subpixel, n_gpu_threads_per_block)
     # log_cb("Computed subpixel shifts in %.2f sec" % (time.time() - shift_t), 4)
-    mempool.free_all_blocks(); 
+    mempool.free_all_blocks()
     # log_cb(log_gpu_memory(mempool), 4)
     return ymaxs, xmaxs, snrs
 
@@ -331,10 +337,10 @@ def convolve_2d_gpu(mov, ref_f, axes=(1,2)):
     return mov
 
 def convolve_2d_cpu(mov, ref_f):
-    mov[:] = mkl_fft.fft2(mov, axes=(1,2), overwrite_x=True)
+    mov[:] = fft2(mov, axes=(1,2), overwrite_x=True)
     mov /= n.abs(mov) + n.complex64(1e-5)
     mov *= ref_f
-    mov[:] = mkl_fft.ifft2(mov, axes=(1,2), overwrite_x=True)
+    mov[:] = ifft2(mov, axes=(1,2), overwrite_x=True)
     return mov
 
 #TODO xpad/ypad should be integer ?
