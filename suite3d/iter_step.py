@@ -1,15 +1,8 @@
 import os
 import numpy as n
-import copy
-from multiprocessing import shared_memory, Pool
-from scipy.ndimage import uniform_filter
-from dask import array as darr
 import time
 
-
 from .s2p_registration import nonrigid_transform_data, register_frames
-# from . import deepinterp as dp
-
 from . import detection3d as det3d
 from . import svd_utils as svu
 from . import lbmio
@@ -27,8 +20,8 @@ import threading
 
 try:
     import cupy as cp
-except:
-    print("CUPY not installed! ")
+except ImportError:
+    import numpy as cp
 
 
 def init_batches(tifs, batch_size, max_tifs_to_analyze=None):
