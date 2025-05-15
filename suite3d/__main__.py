@@ -11,8 +11,6 @@ os.chdir(os.path.dirname(os.path.abspath("")))
 os.environ["SUITE3D_DEVELOPER"] = "true"
 
 def get_params():
-    """Chat GPT, just a copy of defaults for development"""
-
     # basic imaging
     params = {
         "tau": 1.3,                      # GCamp6s parameter (example)
@@ -49,7 +47,7 @@ def get_params():
         "n_init_files": 1,           # number of TIFFs used for initialization
     })
 
-    # Registration & Advanced Parameters
+    # Registration
     params.update({
         "fuse_shift_override": None, # override for fusing shifts if desired
         "init_n_frames": None,       # number of frames to use for initialization (None = use defaults)

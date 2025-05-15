@@ -430,16 +430,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cupy"
-version = "13.4.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "fastrlock" },
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/20/ca/951248eb2554b075b251349968fbb4977c9986088ea17ffc3bfb449046ca/cupy-13.4.1.tar.gz", hash = "sha256:9654730da3f7122ba3fe99ce951247e299f3f9c23449a884ba9914444845f0cd", size = 3498639 }
-
-[[package]]
 name = "cycler"
 version = "0.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -585,20 +575,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4f/4e/b5bcc356933d2f56f330a47a0f59abbfd3054c113ccd46469557c3cd2097/fastplotlib-0.4.0.tar.gz", hash = "sha256:57d92acf97feadf2009f9c4e12d2bed75e0bc199c8016cd14d09cd8f9c01b529", size = 139884 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/78/d8/4304e948c2b5db1b646f35fb99abea2d9f09f8466f2b3c48b3ada4565b74/fastplotlib-0.4.0-py3-none-any.whl", hash = "sha256:f850b597accdb8a3ca3ff10d6593e223d263c5255226842390ed4213968c8311", size = 166977 },
-]
-
-[[package]]
-name = "fastrlock"
-version = "0.8.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/73/b1/1c3d635d955f2b4bf34d45abf8f35492e04dbd7804e94ce65d9f928ef3ec/fastrlock-0.8.3.tar.gz", hash = "sha256:4af6734d92eaa3ab4373e6c9a1dd0d5ad1304e172b1521733c6c3b3d73c8fa5d", size = 79327 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/df/56270f2e10c1428855c990e7a7e5baafa9e1262b8e789200bd1d047eb501/fastrlock-0.8.3-cp312-cp312-macosx_11_0_universal2.whl", hash = "sha256:8cb2cf04352ea8575d496f31b3b88c42c7976e8e58cdd7d1550dfba80ca039da", size = 55727 },
-    { url = "https://files.pythonhosted.org/packages/57/21/ea1511b0ef0d5457efca3bf1823effb9c5cad4fc9dca86ce08e4d65330ce/fastrlock-0.8.3-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:85a49a1f1e020097d087e1963e42cea6f307897d5ebe2cb6daf4af47ffdd3eed", size = 52201 },
-    { url = "https://files.pythonhosted.org/packages/80/07/cdecb7aa976f34328372f1c4efd6c9dc1b039b3cc8d3f38787d640009a25/fastrlock-0.8.3-cp312-cp312-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:5f13ec08f1adb1aa916c384b05ecb7dbebb8df9ea81abd045f60941c6283a670", size = 53924 },
-    { url = "https://files.pythonhosted.org/packages/88/6d/59c497f8db9a125066dd3a7442fab6aecbe90d6fec344c54645eaf311666/fastrlock-0.8.3-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:0ea4e53a04980d646def0f5e4b5e8bd8c7884288464acab0b37ca0c65c482bfe", size = 52140 },
-    { url = "https://files.pythonhosted.org/packages/62/04/9138943c2ee803d62a48a3c17b69de2f6fa27677a6896c300369e839a550/fastrlock-0.8.3-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:38340f6635bd4ee2a4fb02a3a725759fe921f2ca846cb9ca44531ba739cc17b4", size = 53261 },
-    { url = "https://files.pythonhosted.org/packages/e2/4b/db35a52589764c7745a613b6943bbd018f128d42177ab92ee7dde88444f6/fastrlock-0.8.3-cp312-cp312-win_amd64.whl", hash = "sha256:da06d43e1625e2ffddd303edcd6d2cd068e1c486f5fd0102b3f079c44eb13e2c", size = 31235 },
 ]
 
 [[package]]
@@ -2938,6 +2914,7 @@ name = "suite3d"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
     { name = "dask" },
     { name = "dask-image" },
     { name = "importlib-metadata" },
@@ -2966,7 +2943,6 @@ dependencies = [
 
 [package.optional-dependencies]
 all = [
-    { name = "cupy" },
     { name = "fastplotlib" },
     { name = "imgui-bundle" },
     { name = "ipykernel" },
@@ -2978,9 +2954,6 @@ fpl = [
     { name = "imgui-bundle" },
     { name = "ipykernel" },
     { name = "jupyter-rfb" },
-]
-gpu = [
-    { name = "cupy" },
 ]
 mrc = [
     { name = "mrcfile" },
@@ -2996,8 +2969,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cupy", marker = "extra == 'all'" },
-    { name = "cupy", marker = "extra == 'gpu'" },
+    { name = "click" },
     { name = "dask", specifier = ">=2025.3.0" },
     { name = "dask-image" },
     { name = "fastplotlib", marker = "extra == 'all'" },
