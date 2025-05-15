@@ -1662,7 +1662,7 @@ class Job:
             # dir_ids.append((tif.split(os.path.sep)[-2]))
             # tifsize = int(os.path.getsize(tif))
             dir_ids.append(tif.parent.name)
-            tifsize = int(tif.stat().st_size
+            tifsize = int(tif.stat().st_size)
             if tifsize in size_to_frames.keys():
                 nframes.append(size_to_frames[tifsize])
             else:
