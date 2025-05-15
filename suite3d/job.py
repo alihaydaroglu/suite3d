@@ -30,21 +30,16 @@ from . import utils
 from . import lbmio
 from .io import get_frame_counts
 
-try:
-    from . import corrmap
-    from . import svd_utils as svu
-    from . import extension as ext
-    from . import init_pass
-    from .iter_step import (
-        register_dataset_s2p,
-        fuse_and_save_reg_file,
-        register_dataset_gpu,
-        register_dataset_gpu_3d,
-    )
-except Exception as e:
-    print("Issues importing compute components. \n")
-    print("")
-    print(f"{e}")
+from . import corrmap
+from . import svd_utils as svu
+from . import extension as ext
+from . import init_pass
+from .iter_step import (
+    register_dataset_s2p,
+    fuse_and_save_reg_file,
+    register_dataset_gpu,
+    register_dataset_gpu_3d,
+)
 
 from .default_params import get_default_params
 from . import ui
