@@ -810,9 +810,6 @@ def compute_npil_masks_mp_helper(coords, cell_pix_shmem_par, npil_pars, offset):
     return (npcoords, npcoords_patch)
 
 
-import time
-
-
 def compute_npil_masks_mp(stats, shape, offset=(0, 0, 0), n_proc=8, npil_pars={}):
     # TODO: parallelize this (EASY)
     # tic = time.time()

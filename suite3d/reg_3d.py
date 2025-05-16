@@ -2,9 +2,21 @@
 import os
 import numpy as n
 
+from .reference_image import HAS_CUPY
+
 np = n
-import cupy as cp
-from cupyx.scipy import fft as cufft
+
+try:
+    import cupy as cp
+    from cupyx.scipy import fft as cufft
+    from cupyx.scipy import ndimage as cuimage
+    HAS_CUPY = True
+except ImportError:
+    import numpy as cp
+    from scipy.fft import fft as cufft
+    from scipy import ndimage as cuimage
+    HAS_CUPY = False
+
 import scipy
 from numba import njit
 
@@ -567,6 +579,11 @@ def rigid_3d_ref_gpu(
     sub_pixel_shifts : ndarray (nt, 3)
         The sub pixel shift estiamted from the phase correlation
     """
+    if not HAS_CUPY:
+        raise ImportError(
+            "GPU registration requires cupy. Please install cupy to use this function."
+            " See https://docs.cupy.dev/en/stable/install.html for installation instructions."
+        )
     mempool = cp.get_default_memory_pool()
     __, nt, __, __ = mov_cpu.shape
     max_pc_size = pc_size * 2 + 1

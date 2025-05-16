@@ -138,7 +138,7 @@ def load_and_stitch_tifs(
             debug=debug,
             use_roi_idxs=use_roi_idxs,
             fix_fastZ=fix_fastZ,
-            **mp_args
+            **mp_args,
         )
         mov_list.append(im)
     if concat:
@@ -192,6 +192,10 @@ def load_and_stitch_full_tif_mp(
     sh_mem_params = (sh_tif.shape, sh_tif.dtype)
 
     n_t, n_ch_tif, __, __ = sh_tif.shape
+
+    assert hasattr(
+        channels, "__len__"
+    ), f"Check parameter 'channels', must be an iterable with __len__. Got type: {type(channels)}"
     n_ch = len(channels)
 
     # split and stitch two frames to figure out the output size
@@ -296,7 +300,9 @@ def load_and_stitch_full_tif_worker(
     tic = time.time()
 
     sh_mem = shared_memory.SharedMemory(sh_mem_name)
-    tiffile = n.ndarray(shape=sh_arr_params[0], dtype=sh_arr_params[1], buffer=sh_mem.buf)
+    tiffile = n.ndarray(
+        shape=sh_arr_params[0], dtype=sh_arr_params[1], buffer=sh_mem.buf
+    )
 
     if filt is not None:
         b, a = filt
@@ -451,8 +457,8 @@ def stitch_rois_fast(
     pixel_sizes = sizes / sizes_pix
     psize_y = n.mean(pixel_sizes[:, 1])
     psize_x = n.mean(pixel_sizes[:, 0])
-    assert n.product(n.isclose(pixel_sizes[:, 1] - psize_y, 0)), "Y pixels not uniform"
-    assert n.product(n.isclose(pixel_sizes[:, 0] - psize_x, 0)), "X pixels not uniform"
+    assert n.prod(n.isclose(pixel_sizes[:, 1] - psize_y, 0)), "Y pixels not uniform"
+    assert n.prod(n.isclose(pixel_sizes[:, 0] - psize_x, 0)), "X pixels not uniform"
 
     # SI unit coordinates of each pixel of the full image
     full_xs = n.arange(xmin, xmax, psize_x)
@@ -535,7 +541,9 @@ def stitch_rois_fast_helper(
 
 
 def get_filter(filt_params):
-    return signal.iirnotch(filt_params["f0"], filt_params["Q"], filt_params["line_freq"])
+    return signal.iirnotch(
+        filt_params["f0"], filt_params["Q"], filt_params["line_freq"]
+    )
 
 
 def load_and_stitch_tifs_notLBM(
@@ -580,7 +588,9 @@ def load_and_stitch_tifs_notLBM(
     Returns:
     """
     if filt is not None:
-        print("a filter was requested but it is not coded for load_and_stitch_tifs_noLBM")
+        print(
+            "a filter was requested but it is not coded for load_and_stitch_tifs_noLBM"
+        )
 
     tic = time.time()
 

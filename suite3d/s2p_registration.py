@@ -2,7 +2,12 @@ import numpy as np
 from numba import float32, njit, prange
 from scipy.ndimage import gaussian_filter1d
 from numba import vectorize, complex64
-from mkl_fft import fft2, ifft2
+
+try:
+    from mkl_fft import fft2, ifft2
+except ImportError:
+    from scipy.fftpack import fft2, ifft2
+
 from functools import lru_cache
 
 from typing import Tuple

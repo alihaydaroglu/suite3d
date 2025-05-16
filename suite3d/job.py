@@ -9,6 +9,7 @@ import os
 import copy
 import time
 import sys
+from pathlib import Path
 import numpy as n
 import itertools
 from multiprocessing import Pool
@@ -31,19 +32,16 @@ from . import utils
 from . import lbmio
 from .io import get_frame_counts
 
-try:
-    from . import corrmap
-    from . import svd_utils as svu
-    from . import extension as ext
-    from . import init_pass
-    from .iter_step import (
-        register_dataset_s2p,
-        fuse_and_save_reg_file,
-        register_dataset_gpu,
-        register_dataset_gpu_3d,
-    )
-except:
-    print("Issues importing compute components")
+from . import corrmap
+from . import svd_utils as svu
+from . import extension as ext
+from . import init_pass
+from .iter_step import (
+    register_dataset_s2p,
+    fuse_and_save_reg_file,
+    register_dataset_gpu,
+    register_dataset_gpu_3d,
+)
 
 from .default_params import get_default_params
 from . import ui
@@ -52,8 +50,8 @@ from . import ui
 class Job:
     def __init__(
         self,
-        root_dir,
-        job_id,
+        root_dir: str | Path,
+        job_id: str,
         params=None,
         tifs=None,
         overwrite=False,
@@ -66,7 +64,7 @@ class Job:
     ):
         """Create a Job object that is a wrapper to manage files, current state, log etc.
         Args:
-            root_dir (str): Root directory in which job directory will be created
+            root_dir (str or pathlib.Path): Root directory in which job directory will be created
             job_id (str): Unique name for the job directory
             params (dict): Job parameters (see examples)
             tifs (list) : list of full paths to tif files to be used
@@ -77,6 +75,8 @@ class Job:
             copy_parent_symlink (bool) : if copying dirs, you can optionally symlink them
             verbosity (int, optional): Verbosity level. 0: critical only, 1: info, 2: debug. Defaults to 1.
         """
+        if isinstance(root_dir, Path):
+            root_dir = str(root_dir)
 
         self.verbosity = verbosity
         self.job_id = job_id
@@ -558,7 +558,10 @@ class Job:
             if do_gpu_reg:
                 register_dataset_gpu_3d(self, tifs, params, self.dirs, summary, self.log)
             else:
-                pass
+                raise NotImplementedError(
+                    "3D registration without GPU is not implemented yet."
+                    " Either set gpu_reg=True or set 3d_reg=False"
+                )
                 # register_dataset_3d(self,tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
         else:
             if do_gpu_reg:
@@ -669,7 +672,7 @@ class Job:
                 % (k, str(self.params[k]))
             )
         if all_combinations:
-            n_combs = n.product(n_per_param)
+            n_combs = n.prod(n_per_param)
             combinations = list(itertools.product(*param_vals_list))
         else:
             n_combs = n.sum(n_per_param)
@@ -1530,7 +1533,7 @@ class Job:
             self.log("Time-cropped to size %s" % str(mov.shape))
 
         if self.params.get("svd_pix_chunk") is None:
-            self.params["svd_pix_chunk"] = n.product(self.params["svd_block_shape"]) // 2
+            self.params["svd_pix_chunk"] = n.prod(self.params["svd_block_shape"]) // 2
         if self.params.get("svd_time_chunk") is None:
             self.params["svd_save_time_chunk"] = 4000
         if self.params.get("svd_save_time_chunk") is None:
@@ -1577,6 +1580,9 @@ class Job:
         edge_crop_npix=None,
     ):
         paths = self.get_registered_files(key, filename_filter)
+        if not paths:
+            self.log(f"No registered files found in {self.dirs[key]}")
+            return None
         astype = None
         if self.params.get("save_dtype", "float32") in ("float16", n.float16):
             astype = n.float32
@@ -1651,8 +1657,12 @@ class Job:
         nframes = []
         dir_ids = []
         for tif in self.tifs:
-            dir_ids.append((tif.split(os.path.sep)[-2]))
-            tifsize = int(os.path.getsize(tif))
+            tif = Path(tif)
+
+            # dir_ids.append((tif.split(os.path.sep)[-2]))
+            # tifsize = int(os.path.getsize(tif))
+            dir_ids.append(tif.parent.name)
+            tifsize = int(tif.stat().st_size)
             if tifsize in size_to_frames.keys():
                 nframes.append(size_to_frames[tifsize])
             else:
@@ -1660,7 +1670,7 @@ class Job:
                 nf = len(tf.pages) // self.params.get("n_ch_tif", 30)
                 nframes.append(nf)
                 size_to_frames[tifsize] = nf
-                self.log(tif + " is %d frames and %d bytes" % (nf, tifsize))
+                self.log(f"{tif} is {nf} frames and {tifsize} bytes")
 
         nframes = n.array(nframes)
         dir_ids = n.array(dir_ids)
@@ -1700,7 +1710,7 @@ class Job:
             param_vals_list.append(params_to_sweep[k])
             param_per_run[k] = []
         if all_combinations:
-            n_combs = n.product(n_per_param)
+            n_combs = n.prod(n_per_param)
             combinations = n.array(list(itertools.product(*param_vals_list)))
         else:
             n_combs = n.sum(n_per_param)

@@ -207,7 +207,7 @@ def compute_corr_map_batch(
     )
     sdnorm_exp = corr_map_params["sdnorm_exp"]
     intensity_thresh = corr_map_params["intensity_thresh"]
-    fix_vmap_edge_planes = corr_map_params["fix_vmap_edge_planes"]
+    # fix_vmap_edge_planes = corr_map_params["fix_vmap_edge_planes"]
 
     # these parameters relate to computational resources
     n_processors = computation_params["n_proc"]
