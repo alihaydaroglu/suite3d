@@ -7,14 +7,13 @@ name = "suite3d"
 description = "Fast, volumetric cell detection. In development."
 version = "0.0.1"
 readme = "README.md"
-requires-python = ">=3.11, <=3.12"
+requires-python = "==3.12.4" # ">=3.11, <=3.12"
 keywords = ["Pipeline", "Numpy", "Microscopy", "ScanImage", "Suite2p", "Volumetric"]
 license = { text = "BSD-3-Clause" }
 urls = { homepage = "https://github.com/alihaydaroglu/suite3d" }
 scripts = {suite3d = "suite3d.__main__:main"}
 dependencies = [
     "dask>=2025.3.0",
-    "mkl-fft>=1.3.13",
     "tifffile>=2021.3.4",
     "zarr>=2.18.3",
     "matplotlib>=3.10.1",
@@ -27,8 +26,9 @@ dependencies = [
     "pynwb",
     "sbxreader",
     "imreg-dft-nw",
+    "click",
     "ipython",
-    "jupyterlab",
+    "jupyterlab==4.4.0",
     "jupyter_rfb",
     "pyqt5==5.15.11",
     "pyqtgraph",
@@ -36,14 +36,17 @@ dependencies = [
     "napari",
     "scikit-image",
     "dask-image",
-    "cupy",
-    "pyqt5-qt5==5.15.2",
-    "mkl>=2025.1.0",
-    "mkl-service>=2.4.2",
-    "mbo_utilities",
+    "pyqt5-qt5==5.15.2; sys_platform == 'win32'",
+    "pyqt5-qt5==5.15.16; sys_platform == 'darwin' or sys_platform == 'linux'",
 ]
 
 [project.optional-dependencies]
+gpu = [
+    # "cupy",
+    # "mkl-fft>=1.3.13",
+    # "mkl>=2025.1.0",
+    # "mkl-service>=2.4.2",
+]
 mrc = [
     "mrcfile",
 ] 
@@ -54,6 +57,7 @@ fpl = [
     "imgui-bundle",
 ]
 all = [
+    # "cupy",
     "fastplotlib",
     "ipykernel",
     "jupyter_rfb",
@@ -71,10 +75,6 @@ dev = [
 
 [tool.uv]
 default-groups = "all"
-
-[tool.uv.sources]
-mbo_utilities = { git = "https://github.com/MillerBrainObservatory/mbo_utilities", branch = "master" }
-
 
 [tool.setuptools.packages.find]
 where = ["."]

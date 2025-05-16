@@ -1,15 +1,21 @@
-import cupy as cp
 import numpy as n
-from cupyx.scipy import fft as cufft
-from cupyx.scipy import ndimage as cuimage
 from functools import lru_cache
-from scipy import ndimage
 from . import utils
 import time
+
 try:
-    import mkl_fft
-except:
-    print("No MKL fft ")
+    from mkl_fft import fft2, ifft2
+except ImportError:
+    from scipy.fft import fft2, ifft2
+
+try:
+    import cupy as cp
+    from cupyx.scipy import fft as cufft
+    from cupyx.scipy import ndimage as cuimage
+except ImportError:
+    import numpy as cp
+    from scipy.fft import fft as cufft
+    from scipy import ndimage as cuimage
 
 from .utils import default_log
 
@@ -43,15 +49,15 @@ def nonrigid_2d_reg_gpu(mov_gpu, mult_mask, add_mask, refs_nr_f, yblocks, xblock
     add_mask = cp.asarray(add_mask)
 
     load_t = time.time()
-    log_cb("Allocated GPU array for non-rigid reg in %.2f sec" % ((load_t-start_t),), 4)
-    log_cb("Blocked movie is %2.2fGB" % (mov_blocks.nbytes/1024**3), 4)
-    log_cb(log_gpu_memory(mempool),4)
+    # log_cb("Allocated GPU array for non-rigid reg in %.2f sec" % ((load_t-start_t),), 4)
+    # log_cb("Blocked movie is %2.2fGB" % (mov_blocks.nbytes/1024**3), 4)
+    # log_cb(log_gpu_memory(mempool),4)
     # print(mov_gpu.std())
     if rmins is not None and rmaxs is not None:
         clip_t = time.time()
         for zidx in range(nz):
             mov_gpu[:,zidx] = clip_and_mask_mov(mov_gpu[:,zidx], rmins[zidx], rmaxs[zidx])
-        log_cb("Clipped movie in %.2f sec" % (time.time() - clip_t), 4)
+        # log_cb("Clipped movie in %.2f sec" % (time.time() - clip_t), 4)
     # print(mov_gpu.std())
 
     block_t = time.time()
@@ -59,25 +65,25 @@ def nonrigid_2d_reg_gpu(mov_gpu, mult_mask, add_mask, refs_nr_f, yblocks, xblock
     mov_blocks *= mult_mask
     mov_blocks += add_mask
     
-    log_cb("Split movie into blocks in %.2f sec" % (time.time() - block_t),4)
+    # log_cb("Split movie into blocks in %.2f sec" % (time.time() - block_t),4)
 
     fft_t = time.time()
     mov_blocks[:] = convolve_2d_gpu(mov_blocks, refs_nr_f, axes=(3,4))
     phase_corr = cp.zeros((nt, nz, nb, ncc, ncc), dtype=cp.float32)
     phase_corr = unwrap_fft_2d(mov_blocks.real, nr = nr, out=phase_corr)
-    log_cb("Completed FFT of blocks and computed phase correlations in %.2f sec" %\
-           (time.time() - fft_t), 4)
+    # log_cb("Completed FFT of blocks and computed phase correlations in %.2f sec" %(time.time() - fft_t), 4)
     # print(mov_blocks.std())
     # print(phase_corr.std())
     smooth_t = time.time()
     pc, snrs = compute_snr_and_smooth(phase_corr, smooth_mat, n_smooth_iters,
                                       snr_thresh,log_cb=log_cb)
-    log_cb("Computed SNR and smoothed phase corrs in %.2f sec" % (time.time() - smooth_t),4)
+    # log_cb("Computed SNR and smoothed phase corrs in %.2f sec" % (time.time() - smooth_t),4)
     
     shift_t = time.time()
     ymaxs, xmaxs = get_subpixel_shifts(pc, max_shift, npad, subpixel, n_gpu_threads_per_block)
-    log_cb("Computed subpixel shifts in %.2f sec" % (time.time() - shift_t), 4)
-    mempool.free_all_blocks(); log_cb(log_gpu_memory(mempool), 4)
+    # log_cb("Computed subpixel shifts in %.2f sec" % (time.time() - shift_t), 4)
+    mempool.free_all_blocks()
+    # log_cb(log_gpu_memory(mempool), 4)
     return ymaxs, xmaxs, snrs
 
 def get_subpixel_shifts(pc, max_shift=10, npad=3, subpixel=5, n_thread_per_block=512):
@@ -133,38 +139,38 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     phase_corr = cp.zeros((nt, ncc, ncc))
 
     load_t = time.time()
-    log_cb("Loaded mov and masks to GPU for rigid reg in %.2f sec" % ((load_t-start_t),), 4)
+    # log_cb("Loaded mov and masks to GPU for rigid reg in %.2f sec" % ((load_t-start_t),), 4)
 
     if min_pix_vals is not None:
-        log_cb("Subtracting min pix vals to enforce positivity", 4)
+        # log_cb("Subtracting min pix vals to enforce positivity", 4)
         min_pix_vals = cp.asarray(min_pix_vals, dtype=mov_gpu.dtype)
         mov_gpu[:] -= min_pix_vals[:nz, cp.newaxis, cp.newaxis, cp.newaxis]
 
     if crosstalk_coeff is not None: 
-        log_cb("Subtracting crosstalk", 4)
+        # log_cb("Subtracting crosstalk", 4)
         mov_gpu = utils.crosstalk_subtract(mov_gpu, crosstalk_coeff, cavity_size)
     
     if fuse_and_pad:
-        log_cb("Fusing and padding movie",4)
+        # log_cb("Fusing and padding movie",4)
         mov_gpu = fuse_and_pad_gpu(mov_gpu, fuse_shift, ypad, xpad, new_xs, old_xs)
         nz,nt,ny,nx = mov_gpu.shape
-        log_cb("GPU Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),4)
+        # log_cb("GPU Mov of shape %d, %d, %d, %d; %.2f GB" % (nz, nt, ny, nx, mov_gpu.nbytes/(1024**3)),4)
         mempool.free_all_blocks()
-        log_cb(log_gpu_memory(mempool), 4)
+        # log_cb(log_gpu_memory(mempool), 4)
 
     if shift:
-        log_cb("Allocating memory for shifted movie", 4)
+        # log_cb("Allocating memory for shifted movie", 4)
         mov_shifted = cp.zeros((nt,nz,ny,nx), dtype=cp.float32)
         mov_shifted[:] = mov_gpu.real.swapaxes(0,1).copy()
 
     # print("mov_shifted before reg, min: %.2f, max: %.2f" % (mov_shifted[:,10].min(), mov_shifted[:,10].max()))
 
 
-    log_cb(log_gpu_memory(mempool), 4)
+    # log_cb(log_gpu_memory(mempool), 4)
     reg_t = 0; shift_t = 0
     for zidx in range(nz):
         reg_tic = time.time()
-        log_cb("Registering plane %d" % (zidx,), 4)
+        # log_cb("Registering plane %d" % (zidx,), 4)
         mov_gpu[zidx] = clip_and_mask_mov(mov_gpu[zidx], rmins[zidx], rmaxs[zidx],
                           mult_mask_gpu[zidx], add_mask_gpu[zidx])
         mov_gpu[zidx] = convolve_2d_gpu(mov_gpu[zidx], refs_f_gpu[zidx])
@@ -187,13 +193,13 @@ def rigid_2d_reg_gpu(mov_cpu, mult_mask, add_mask, refs_f, max_reg_xy,
     
     # print("mov_shifted after shift, min: %.2f, max: %.2f" % (mov_shifted[:,10].min(), mov_shifted[:,10].max()))
 
-    log_cb("Registered batch in %.2f sec"  % reg_t, 3)
-    if shift: 
-        log_cb("Shifted batch in %.2f sec" % shift_t, 3)
-    log_cb(log_gpu_memory(mempool), 4)
+    # log_cb("Registered batch in %.2f sec"  % reg_t, 3)
+    # if shift: 
+    #     log_cb("Shifted batch in %.2f sec" % shift_t, 3)
+    # log_cb(log_gpu_memory(mempool), 4)
     mempool.free_all_blocks()
-    log_cb("Freeing all blocks", 3)
-    log_cb(log_gpu_memory(mempool), 4)
+    # log_cb("Freeing all blocks", 3)
+    # log_cb(log_gpu_memory(mempool), 4)
     if shift:
         return mov_shifted, ymaxs, xmaxs, cmaxs
     return ymaxs, xmaxs, cmaxs
@@ -331,10 +337,10 @@ def convolve_2d_gpu(mov, ref_f, axes=(1,2)):
     return mov
 
 def convolve_2d_cpu(mov, ref_f):
-    mov[:] = mkl_fft.fft2(mov, axes=(1,2), overwrite_x=True)
+    mov[:] = fft2(mov, axes=(1,2), overwrite_x=True)
     mov /= n.abs(mov) + n.complex64(1e-5)
     mov *= ref_f
-    mov[:] = mkl_fft.ifft2(mov, axes=(1,2), overwrite_x=True)
+    mov[:] = ifft2(mov, axes=(1,2), overwrite_x=True)
     return mov
 
 #TODO xpad/ypad should be integer ?
@@ -436,13 +442,13 @@ def compute_snr_and_smooth(phase_corr, smooth_mat, n_smooth_iters = 2,
         snrs = get_snr(pc)
         idx_to_smooth = (snrs < snr_thresh)
         n_low_snr = idx_to_smooth.sum()
-        log_cb("Iter %d: %d/%d blocks below SNR thresh" % (i, n_low_snr, snrs.size), 4)
+        # log_cb("Iter %d: %d/%d blocks below SNR thresh" % (i, n_low_snr, snrs.size), 4)
         if n_low_snr < 1: break
         pc_smooth = cp.moveaxis(cp.tensordot(smooth_mat, pc_smooth, ((1,), (2,))),0,2)
         pc[idx_to_smooth] = pc_smooth[idx_to_smooth]
     snrs = get_snr(pc)
     n_low_snr = (snrs < snr_thresh).sum()
-    log_cb("Iter %d: %d/%d blocks below SNR thresh" % (i, n_low_snr, snrs.size), 4)
+    # log_cb("Iter %d: %d/%d blocks below SNR thresh" % (i, n_low_snr, snrs.size), 4)
     return pc, snrs
 
 

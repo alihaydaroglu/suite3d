@@ -16,8 +16,6 @@ from multiprocessing import Pool, shared_memory
 from scipy.ndimage import gaussian_filter1d
 from scipy.ndimage import convolve1d
 
-# import tensorflow as tf
-# from tensorflow.keras.models import load_model
 from itertools import product
 
 try:
@@ -27,17 +25,16 @@ try:
 except:
     print("Missing some packages")
 from datetime import datetime
-import pickle
 from multiprocessing import cpu_count
 import time
 
-# from . import tiff_utils as tfu
 from .developer import deprecated
 
+# Only show this error once
 try:
     from git import Repo
-except:
-    print("Install gitpython for dev benchmarking to work")
+except ImportError:
+    pass
 
 colors = ["#90be6d", "#e98a15", "#b26c98", "#1b9aaa", "#3a405a"]
 

@@ -3,8 +3,7 @@
 *.nbc
 *.nbi
 #  find * -size +50M | cat >> .gitignore
-runs/*
-dev/
+
 .idea/
 build/
 develop-eggs/
@@ -16,3 +15,8 @@ share/python-wheels/
 *.egg-info/
 *.egg
 MANIFEST
+
+__pycache__/
+exclude/
+runs/
+dev/

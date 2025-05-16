@@ -1,3 +1,5 @@
+from .init_pass import run_init_pass
+
 try:
     import tifffile
 except:
@@ -30,21 +32,16 @@ from . import utils
 from . import lbmio
 from .io import get_frame_counts
 
-try:
-    from . import corrmap
-    from . import svd_utils as svu
-    from . import extension as ext
-    from . import init_pass
-    from .iter_step import (
-        register_dataset_s2p,
-        fuse_and_save_reg_file,
-        register_dataset_gpu,
-        register_dataset_gpu_3d,
-    )
-except Exception as e:
-    print("Issues importing compute components. \n")
-    print("")
-    print(f"{e}")
+from . import corrmap
+from . import svd_utils as svu
+from . import extension as ext
+from . import init_pass
+from .iter_step import (
+    register_dataset_s2p,
+    fuse_and_save_reg_file,
+    register_dataset_gpu,
+    register_dataset_gpu_3d,
+)
 
 from .default_params import get_default_params
 from . import ui
@@ -482,7 +479,7 @@ class Job:
     def run_init_pass(self):
         self.save_params(copy_dir_tag="summary")
         self.log("Launching initial pass", 0)
-        init_pass.run_init_pass(self)
+        run_init_pass(self)
 
     def copy_init_pass_from_job(self, old_job):
         n.save(os.path.join(self.dirs["summary"], "summary.npy"), old_job.load_summary())
@@ -561,7 +558,10 @@ class Job:
             if do_gpu_reg:
                 register_dataset_gpu_3d(self, tifs, params, self.dirs, summary, self.log)
             else:
-                pass
+                raise NotImplementedError(
+                    "3D registration without GPU is not implemented yet."
+                    " Either set gpu_reg=True or set 3d_reg=False"
+                )
                 # register_dataset_3d(self,tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
         else:
             if do_gpu_reg:
@@ -672,7 +672,7 @@ class Job:
                 % (k, str(self.params[k]))
             )
         if all_combinations:
-            n_combs = n.product(n_per_param)
+            n_combs = n.prod(n_per_param)
             combinations = list(itertools.product(*param_vals_list))
         else:
             n_combs = n.sum(n_per_param)
@@ -894,8 +894,8 @@ class Job:
             local_thresh_window_pix = self.params.get('local_thresh_window_pix', 51)
             local_thresh_pct = self.params.get('local_thresh_pct', 51)
             if local_thresh:
+                maps['vmap_raw'] = maps['vmap'].copy()
                 vmap = ext.thresh_mask_corr_map(maps['vmap'], local_thresh_window_pix, local_thresh_pct)
-                maps['vmap_raw'] = vmap
                 maps['vmap'] = vmap 
             else:
                 vmap = maps['vmap']
@@ -1364,9 +1364,10 @@ class Job:
         info = n.load(os.path.join(patch_dir, "info.npy"), allow_pickle=True).item()
         return stats, info
 
-    def get_traces(self, patch_idx=0, parent_dir_name="detection", patch_dir=None):
+    def get_traces(self, parent_dir_name="rois", patch_dir=None):
         if patch_dir is None:
-            patch_dir = self.get_patch_dir(patch_idx, parent_dir_name=parent_dir_name)
+            patch_dir = self.dirs[parent_dir_name]
+            # patch_dir = self.get_patch_dir(patch_idx, parent_dir_name=parent_dir_name)
         traces = {}
         for filename in ["F.npy", "Fneu.npy", "spks.npy"]:
             if filename in os.listdir(patch_dir):
@@ -1532,7 +1533,7 @@ class Job:
             self.log("Time-cropped to size %s" % str(mov.shape))
 
         if self.params.get("svd_pix_chunk") is None:
-            self.params["svd_pix_chunk"] = n.product(self.params["svd_block_shape"]) // 2
+            self.params["svd_pix_chunk"] = n.prod(self.params["svd_block_shape"]) // 2
         if self.params.get("svd_time_chunk") is None:
             self.params["svd_save_time_chunk"] = 4000
         if self.params.get("svd_save_time_chunk") is None:
@@ -1579,6 +1580,9 @@ class Job:
         edge_crop_npix=None,
     ):
         paths = self.get_registered_files(key, filename_filter)
+        if not paths:
+            self.log(f"No registered files found in {self.dirs[key]}")
+            return None
         astype = None
         if self.params.get("save_dtype", "float32") in ("float16", n.float16):
             astype = n.float32
@@ -1653,8 +1657,12 @@ class Job:
         nframes = []
         dir_ids = []
         for tif in self.tifs:
-            dir_ids.append((tif.split(os.path.sep)[-2]))
-            tifsize = int(os.path.getsize(tif))
+            tif = Path(tif)
+
+            # dir_ids.append((tif.split(os.path.sep)[-2]))
+            # tifsize = int(os.path.getsize(tif))
+            dir_ids.append(tif.parent.name)
+            tifsize = int(tif.stat().st_size)
             if tifsize in size_to_frames.keys():
                 nframes.append(size_to_frames[tifsize])
             else:
@@ -1662,7 +1670,7 @@ class Job:
                 nf = len(tf.pages) // self.params.get("n_ch_tif", 30)
                 nframes.append(nf)
                 size_to_frames[tifsize] = nf
-                self.log(tif + " is %d frames and %d bytes" % (nf, tifsize))
+                self.log(f"{tif} is {nf} frames and {tifsize} bytes")
 
         nframes = n.array(nframes)
         dir_ids = n.array(dir_ids)
@@ -1702,7 +1710,7 @@ class Job:
             param_vals_list.append(params_to_sweep[k])
             param_per_run[k] = []
         if all_combinations:
-            n_combs = n.product(n_per_param)
+            n_combs = n.prod(n_per_param)
             combinations = n.array(list(itertools.product(*param_vals_list)))
         else:
             n_combs = n.sum(n_per_param)
