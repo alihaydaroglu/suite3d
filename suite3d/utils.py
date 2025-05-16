@@ -34,9 +34,7 @@ from .developer import deprecated
 try:
     from git import Repo
 except ImportError:
-    if not hasattr(__builtins__, "_gitpython_warned"):
-        print("Install gitpython for dev benchmarking to work")
-        __builtins__._gitpython_warned = True
+    pass
 
 colors = ["#90be6d", "#e98a15", "#b26c98", "#1b9aaa", "#3a405a"]
 
