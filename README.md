@@ -64,3 +64,4 @@ There is a Dockerfile in this repo that successfully builds (`docker build - < D
 Use [this](https://liveuclac-my.sharepoint.com/:f:/g/personal/ucqfhay_ucl_ac_uk/EuQX2PFw13xHhILvRux29AQB48tXCxBJQ7z6JfHee25pfw?e=HmBlAc) for the standard 2p imaging demo, recorded in mouse CA1, courtesy of Andrew Landau. 
 
 Sample LBM data coming soon!
+
