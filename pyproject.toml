@@ -7,9 +7,9 @@ name = "suite3d"
 description = "Fast, volumetric cell detection. In development."
 version = "0.0.1"
 readme = "README.md"
-requires-python = "==3.12.4" # ">=3.11, <=3.12"
+requires-python = ">=3.11, <3.13"
 keywords = ["Pipeline", "Numpy", "Microscopy", "ScanImage", "Suite2p", "Volumetric"]
-license = { text = "BSD-3-Clause" }
+license = { text = "AGPL-3.0-or-later" }
 urls = { homepage = "https://github.com/alihaydaroglu/suite3d" }
 scripts = {suite3d = "suite3d.__main__:main"}
 dependencies = [
