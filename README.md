@@ -12,6 +12,14 @@ git clone git@github.com:alihaydaroglu/suite3d.git
 cd suite3d
 ```
 
+`conda` (miniforge3 only)
+``` bash
+conda create -n s3d -c conda-forge python=3.11
+conda activate s3d
+pip install -e ".[all]"  # [all] optional
+```
+
+
 `pip`
 ``` bash
 python -m venv
@@ -22,12 +30,6 @@ source .venv/bin/activate      # linux, macOS
 pip install ".[all]" % include viz/jupyter utilities
 ```
 
-`conda` (miniforge3 only)
-``` bash
-conda create -n s3d -c conda-forge python=3.11
-conda activate s3d
-pip install -e ".[all]"  # [all] optional
-```
 
 ### GPU Dependencies
 
