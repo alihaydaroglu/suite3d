@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.8,<3.9
+  - python>=3.11, <3.13 # 3.8,<3.9
   - pip
   - mkl
   - tbb
@@ -16,6 +16,7 @@ dependencies:
   - matplotlib
   - ipykernel
   - jupyter
+  - jupyterlab
   - nb_conda_kernels
   - scikit-learn
   - mrcfile
@@ -27,7 +28,7 @@ dependencies:
     - torch>=1.7.1
     - natsort
     - rastermap>0.1.0
-    - tifffile
+    - tifffile>=2021.3.4
     - scanimage-tiff-reader>=1.4.1
     - importlib-metadata
     - paramiko

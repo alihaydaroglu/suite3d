@@ -1,0 +1,34 @@
+name: Install and Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [dev, master]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -y -qq
+          sudo apt-get install --no-install-recommends -y \
+            xorg-dev \
+            libx11-dev \
+            libxcb1-dev \
+            libxcb-glx0-dev
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: GIT_LFS_SKIP_SMUDGE=1 uv sync --all-extras --dev
+
+      # - name: Run tests
+      #   run: uv run pytest tests

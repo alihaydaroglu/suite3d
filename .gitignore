@@ -1,7 +1,22 @@
-
+*venv*
 *.pyc
 *.nbc
 *.nbi
 #  find * -size +50M | cat >> .gitignore
-runs/*
+
+.idea/
+build/
+develop-eggs/
+dist/
+eggs/
+.eggs/
+wheels/
+share/python-wheels/
+*.egg-info/
+*.egg
+MANIFEST
+
+__pycache__/
+exclude/
+runs/
 dev/

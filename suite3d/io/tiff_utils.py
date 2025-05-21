@@ -127,5 +127,6 @@ def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
     os.makedirs(dir, exist_ok=True)
     fpath = os.path.join(dir, fname)
     with mrcfile.new(fpath, overwrite=True) as mrc:
+        print(fpath)
         mrc.set_data(data.astype(dtype))
         mrc.voxel_size = voxel_size

@@ -24,7 +24,7 @@ def block_and_svd(mov_reg, n_comp, block_shape= (1, 128, 128), block_overlaps=(0
         nt, nz, ny, nx = mov_reg.shape
     blocks, grid_shape = make_blocks((nz, ny, nx), block_shape, block_overlaps)
     if pix_chunk is None:
-        pix_chunk = n.product(block_shape)
+        pix_chunk = n.prod(block_shape)
     n_blocks = blocks.shape[1]
 
     log_cb("Will compute SVD in %d blocks in a grid shaped %s" %
@@ -324,11 +324,11 @@ def make_blocks(img_shape, block_shape, overlaps=(0, 36, 36), nonoverlapping_mas
     x_blocks = n.stack([x_start, x_end], axis=-1)
 
     grid = z_blocks.shape[:-1]
-    n_blocks = n.product(grid)
+    n_blocks = n.prod(grid)
     if n.sum(overlaps) > 0:
         min_grid = make_blocks(img_shape, block_shape, (0, 0, 0))[
             0].shape[1:-1]
-        n_min_blocks = n.product(min_grid)
+        n_min_blocks = n.prod(min_grid)
         # print("%d blocks with overlap (%d without, %.2fx increase)" % (n_blocks,n_min_blocks, n_blocks/n_min_blocks))
 
 
