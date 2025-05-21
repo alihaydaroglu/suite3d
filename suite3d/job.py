@@ -875,6 +875,7 @@ class Job:
         patches_to_segment=None,
         ts=None,
         vmap=None,
+        prune_thresh=None
     ):
         """
         Start from the correlation map in parent_dir and segment into ROIs
@@ -1004,6 +1005,7 @@ class Job:
                 savepath=stats_path,
                 patch_idx=patch_idx,
                 offset=(zs[0], ys[0], xs[0]),
+                prune_thresh=prune_thresh
             )
             n.save(info_path, mini_info)
             patch_counter += 1

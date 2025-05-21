@@ -165,9 +165,10 @@ def detect_cells_mp(
     allow_overlap=False,
     offset=(0, 0, 0),
     savepath=None,
-    extension_func = 'corr',
+    extension_func="corr",
     debug=False,
     patch_idx=-1,
+    prune_thresh=None,
     **kwargs,
 ):
     """
@@ -244,6 +245,7 @@ def detect_cells_mp(
                         patch_idx,
                         patch_norms,
                         extension_func,
+                        prune_thresh,
                     )
                     for i in range(len(filtered_rois))
                 ],
@@ -407,8 +409,9 @@ def detect_cells_worker(
     max_pix=1000,
     patch_idx=-1,
     patch_norms=None,
-    extension_func = 'corr', # corr or proj
-    ):
+    extension_func="corr",  # corr or proj
+    prune_thresh=None,
+):
     """
     Worker function for detecting cells in parallel.
 
@@ -434,10 +437,11 @@ def detect_cells_worker(
     tproj = patch[:, zz, yy, xx] @ lam
     threshold = min(Th2, n.percentile(tproj, percentile)) if percentile > 0 else Th2
 
-    if extension_func == 'corr':
+    if extension_func == "corr":
         extfunc = alternate_iter_extend3d
     else:
         extfunc = iter_extend3d
+        print("how did you get here?")
 
     active_frames = n.nonzero(tproj > threshold)[0]
 
@@ -467,6 +471,16 @@ def detect_cells_worker(
             max_pix=max_pix,
             patch_norms=patch_norms,
         )
+        if prune_thresh is not None:
+            prune_thresh_val = lam.max() * prune_thresh
+            to_prune = n.array(lam) < prune_thresh_val
+            zz = zz[~to_prune]
+            yy = yy[~to_prune]
+            xx = xx[~to_prune]
+            lam = lam[~to_prune]
+            lam /= n.sqrt((lam**2).sum())
+            default_log("Pruned %d pixels" % to_prune.sum(), 3)
+
         tproj = patch[:, zz, yy, xx] @ lam
         active_frames = n.nonzero(tproj > threshold)[0]
         npix = len(lam)
