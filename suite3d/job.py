@@ -1432,8 +1432,8 @@ class Job:
         if files is None:
             files = self.get_registered_files()
         # __, xs = lbmio.load_and_stitch_full_tif_mp(
-            self.tifs[0], channels=n.arange(1), get_roi_start_pix=True
-        )
+            # self.tifs[0], channels=n.arange(1), get_roi_start_pix=True
+        # )
         centers = n.sort(xs)[1:]
         shift_xs = n.round(self.load_summary()["plane_shifts"][:, 1]).astype(int)
         if save:
