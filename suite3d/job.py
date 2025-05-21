@@ -29,7 +29,7 @@ except:
 from suite3d import dcnv
 
 from . import utils
-from . import lbmio
+# from . import lbmio
 from .io import get_frame_counts
 
 from . import corrmap
@@ -596,7 +596,7 @@ class Job:
             mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
 
         if self.params.get('detection_timebin') is None:
-            self.params['detection_timebin'] = int(n.round(self.params['fs'] / (self.params['tau'])))
+            self.params['detection_timebin'] = 2 * int(n.round(self.params['fs'] / (self.params['tau'])))
             self.log("Updated detection_timebin to %d based on framerate and tau" % self.params['detection_timebin'])
 
         if mov is None:
@@ -1429,7 +1429,7 @@ class Job:
         n_skip = self.params["n_skip"]
         if files is None:
             files = self.get_registered_files()
-        __, xs = lbmio.load_and_stitch_full_tif_mp(
+        # __, xs = lbmio.load_and_stitch_full_tif_mp(
             self.tifs[0], channels=n.arange(1), get_roi_start_pix=True
         )
         centers = n.sort(xs)[1:]

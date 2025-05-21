@@ -4,7 +4,10 @@ from matplotlib import pyplot as plt
 from matplotlib import colors
 import copy
 
-
+try:
+    import mrcfile
+except:
+    print("No MRCFile")
 try:
     import napari
 except:
@@ -13,6 +16,8 @@ try:
     import pyqtgraph as pg
 except:
     print("No PyQtGraph")
+
+    
 
 try:
     from napari._qt.widgets.qt_range_slider_popup import QRangeSliderPopup
@@ -748,3 +753,11 @@ def fill_cells_vol(coords, fill_vals, shape=None, empty=n.nan, filt=None, squeez
     if expanded and squeeze:
         vols = vols[0]
     return vols
+
+def save_mrc(dir, fname, data, voxel_size, dtype=n.float32):
+    os.makedirs(dir, exist_ok=True)
+    fpath = os.path.join(dir, fname)
+    with mrcfile.new(fpath, overwrite=True) as mrc:
+        print(fpath)
+        mrc.set_data(data.astype(dtype))
+        mrc.voxel_size = voxel_size

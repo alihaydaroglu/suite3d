@@ -2,7 +2,7 @@ import os
 import numpy as n
 
 from . import utils
-from . import lbmio
+# from . import lbmio
 from . import reference_image as ref
 from .utils import default_log
 from .developer import todo, deprecated

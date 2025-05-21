@@ -5,7 +5,7 @@ import time
 from .s2p_registration import nonrigid_transform_data, register_frames
 from . import detection3d as det3d
 from . import svd_utils as svu
-from . import lbmio
+# from . import lbmio
 from . import utils
 from . import register_gpu as reg_gpu
 from . import reg_3d as reg_3d
