@@ -20,6 +20,7 @@ from itertools import product
 
 try:
     from dask import array as darr
+    from dask_image import ndfilters as dafilt
     from skimage.measure import moments
     from skimage.metrics import normalized_mutual_information
 except:
@@ -50,6 +51,14 @@ def set_num_processors(n_procs):
         n_procs (int): The number of processors to use for parallel processing.
     """
     return max(min(n_procs, cpu_count() - 1), 1)
+
+
+def spatial_downsample_movie(mov, factor):
+    # mov of size (nz, nt, ny, nx)
+    # factor is an integer
+    dafilt.uniform_filter(mov, size=(1, 1, factor, factor), mode="nearest", cval=0.0)
+    mov = mov[:, :, ::factor, ::factor]
+    return mov
 
 
 def pad_and_fuse(mov, plane_shifts, fuse_shift, xs, fuse_shift_offset=0):
@@ -86,9 +95,7 @@ def pad_and_fuse(mov, plane_shifts, fuse_shift, xs, fuse_shift_offset=0):
             x1 = xs[i + 1] - rshift
         dx = x1 - x0
         # print(x0,x1, xn0, xn0+dx, mov_pad.shape, mov.shape)
-        mov_pad[:, :, yshift : yshift + nyo, xshift + xn0 : xshift + xn0 + dx] = mov[
-            :, :, :, x0:x1
-        ]
+        mov_pad[:, :, yshift : yshift + nyo, xshift + xn0 : xshift + xn0 + dx] = mov[:, :, :, x0:x1]
         new_xs.append((xn0, xn0 + dx))
         og_xs.append((x0, x1))
         xn0 += dx
@@ -110,9 +117,7 @@ def edge_crop_movie(mov, summary=None, edge_crop_npix=None):
     if edge_crop_npix is None or edge_crop_npix < 1:
         return mov
     __, nz, ny, nx = mov.shape
-    yt, yb, xl, xr = get_shifted_plane_bounds(
-        summary["plane_shifts"], ny, nx, summary["ypad"][0], summary["xpad"][0]
-    )
+    yt, yb, xl, xr = get_shifted_plane_bounds(summary["plane_shifts"], ny, nx, summary["ypad"][0], summary["xpad"][0])
     for i in range(nz):
         mov[:, i, : yt[i] + edge_crop_npix] = 0
         mov[:, i, yb[i] - edge_crop_npix :] = 0
@@ -260,14 +265,7 @@ def calculate_crosstalk_coeff(
         # print(len(idxs), X.shape)
 
         if n_proc == 1:
-            liks = n.array(
-                [
-                    sum_log_lik_one_line(
-                        m, X[idxs], Y[idxs], sigma_0=sigma, m_penalty=m_penalty
-                    )
-                    for m in ms
-                ]
-            )
+            liks = n.array([sum_log_lik_one_line(m, X[idxs], Y[idxs], sigma_0=sigma, m_penalty=m_penalty) for m in ms])
         else:
             p = Pool(n_proc)
             liks = p.starmap(
@@ -287,10 +285,7 @@ def calculate_crosstalk_coeff(
         m_first_liks.append(liks[pks[0]])
 
         if verbose:
-            print(
-                "Plane %d and %d, m_opt: %.2f and m_first: %.2f"
-                % (i, i + n_per_cavity, m_opt, m_first)
-            )
+            print("Plane %d and %d, m_opt: %.2f and m_first: %.2f" % (i, i + n_per_cavity, m_opt, m_first))
 
         if bounds is None:
             bounds = (0, n.percentile(X, 99.95))
@@ -340,9 +335,7 @@ def calculate_crosstalk_coeff(
         plt.hist(m_opts, density=True, log=False, bins=n.arange(0, 1.01, 0.01))
         plt.plot(x, gs)
         plt.yticks([])
-        plt.scatter(
-            [x[n.argmax(gs)]], [n.max(gs)], label="Best coeff: %.3f" % x[n.argmax(gs)]
-        )
+        plt.scatter([x[n.argmax(gs)]], [n.max(gs)], label="Best coeff: %.3f" % x[n.argmax(gs)])
         plt.legend()
         plt.xlabel("Coeff value")
         plt.ylabel("")
@@ -394,10 +387,7 @@ def register_movie(mov3d, tvecs=None, save_path=None, n_shift_proc=10):
 
     p.starmap(
         shift_movie_plane,
-        [
-            (idx, sh_mem_name, tvecs[idx], shape_mem, mov_reg.dtype)
-            for idx in n.arange(1, n_planes)
-        ],
+        [(idx, sh_mem_name, tvecs[idx], shape_mem, mov_reg.dtype) for idx in n.arange(1, n_planes)],
     )
 
     im3d = mov_reg.mean(axis=1)
@@ -406,6 +396,7 @@ def register_movie(mov3d, tvecs=None, save_path=None, n_shift_proc=10):
     sh_mem.unlink()
 
     return mov_reg_ret
+
 
 def create_shmem(shmem_params):
     shmem = shared_memory.SharedMemory(create=True, size=shmem_params["nbytes"])
@@ -639,15 +630,9 @@ def save_benchmark_results(
 
 
 def load_baseline_results(results_dir):
-    outputs = n.load(
-        os.path.join(results_dir, "baseline", "outputs.npy"), allow_pickle=True
-    ).item()
-    timings = n.load(
-        os.path.join(results_dir, "baseline", "timings.npy"), allow_pickle=True
-    ).item()
-    repo_status = n.load(
-        os.path.join(results_dir, "baseline", "repo_status.npy"), allow_pickle=True
-    ).item()
+    outputs = n.load(os.path.join(results_dir, "baseline", "outputs.npy"), allow_pickle=True).item()
+    timings = n.load(os.path.join(results_dir, "baseline", "timings.npy"), allow_pickle=True).item()
+    repo_status = n.load(os.path.join(results_dir, "baseline", "repo_status.npy"), allow_pickle=True).item()
     return outputs, timings, repo_status
 
 
@@ -703,16 +688,13 @@ def compare_outputs(baseline_outputs, outputs, rtol=1e-04, atol=1e-06, print_out
         new_out = outputs[key]
         is_close = n.isclose(base_out, new_out, rtol=rtol, atol=atol).flatten()
         if type(base_out) is n.ndarray:
-            string += (
-                "%-36.36s%-20.20s | %-20.20s |  mismatch: %d / %d (%2.5f %% match) \n"
-                % (
-                    key,
-                    " ",
-                    " ",
-                    (~is_close).sum(),
-                    is_close.size,
-                    100 * (is_close).sum() / is_close.size,
-                )
+            string += "%-36.36s%-20.20s | %-20.20s |  mismatch: %d / %d (%2.5f %% match) \n" % (
+                key,
+                " ",
+                " ",
+                (~is_close).sum(),
+                is_close.size,
+                100 * (is_close).sum() / is_close.size,
             )
             string += "%-36.36s%-20.20s | %-20.20s | \n" % (
                 "           shape: ",
@@ -739,9 +721,7 @@ def compare_outputs(baseline_outputs, outputs, rtol=1e-04, atol=1e-06, print_out
 
 
 def benchmark(results_dir, outputs, timings, repo_status):
-    baseline_outputs, baseline_timings, baseline_repo_status = load_baseline_results(
-        results_dir
-    )
+    baseline_outputs, baseline_timings, baseline_repo_status = load_baseline_results(results_dir)
 
     repo_comp = compare_repo_status(baseline_repo_status, repo_status)
     timing_comp = compare_timings(baseline_timings, timings)
@@ -839,9 +819,7 @@ def crosstalk_subtract(mov, crosstalk_coeff, cavity_size):
     return mov
 
 
-def estimate_crosstalk(
-    im3d, cavity_size, step_dist=0.005, max_test_ct=0.5, use_mutual_information=False
-):
+def estimate_crosstalk(im3d, cavity_size, step_dist=0.005, max_test_ct=0.5, use_mutual_information=False):
     """
     This function estimates the crosstalk between two cavities by iterativley testing different
     values of the crosstalk and looking at plane2 - ct*plane1 and by either:
@@ -897,13 +875,9 @@ def estimate_crosstalk(
             if use_mutual_information:
                 if z == 0 and i == 0:
                     print("Using mutual information, not recommended")
-                ct_metric[z, i] = normalized_mutual_information(
-                    base_plane, test_plane_ct_sub, bins=100
-                )
+                ct_metric[z, i] = normalized_mutual_information(base_plane, test_plane_ct_sub, bins=100)
             else:
-                ct_metric[z, i] = n.corrcoef(
-                    base_plane.flatten(), test_plane_ct_sub.flatten()
-                )[0, 1]
+                ct_metric[z, i] = n.corrcoef(base_plane.flatten(), test_plane_ct_sub.flatten())[0, 1]
 
         if use_mutual_information:
             ct_info = {"ct_metric": ct_metric, "steps": steps}
@@ -920,9 +894,7 @@ def estimate_crosstalk(
                 "ct_metric_d2": d2y,
                 "steps": steps,
             }
-            ct[z] = steps[
-                min_idx + 2
-            ]  # + 2 is to account for the change in shape doing second derivative
+            ct[z] = steps[min_idx + 2]  # + 2 is to account for the change in shape doing second derivative
 
     ct_estimate = n.median(ct)
     print(f"Estiamted crosstalk in {time.time() - time_init}s")

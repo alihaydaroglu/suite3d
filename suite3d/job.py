@@ -63,6 +63,7 @@ class Job:
         parent_job=None,
         copy_parent_dirs=(),
         copy_parent_symlink=False,
+        update_root_path=False,
     ):
         """Create a Job object that is a wrapper to manage files, current state, log etc.
         Args:
@@ -88,9 +89,7 @@ class Job:
         if create:
             if parent_job is not None:
                 self.init_job_dir(root_dir, job_id, exist_ok=overwrite)
-                return self.copy_parent_job(
-                    parent_job, copy_parent_dirs, copy_parent_symlink
-                )
+                return self.copy_parent_job(parent_job, copy_parent_dirs, copy_parent_symlink)
             self.init_job_dir(root_dir, job_id, exist_ok=overwrite)
             def_params = get_default_params()
             self.log("Loading default params")
@@ -108,6 +107,8 @@ class Job:
         else:
             self.job_dir = os.path.join(root_dir, "s3d-%s" % job_id)
             self.load_dirs()
+            if update_root_path:
+                self.update_root_path(root_dir)
             self.load_params(params_path=params_path)
             self.tifs = self.params.get("tifs", [])
 
@@ -179,15 +180,7 @@ class Job:
             self.log(f"Timer {key} completed in {tx:.3f} sec", level=level)
         return tx
 
-    def log(
-        self,
-        string="",
-        level=1,
-        logfile=True,
-        log_mem_usage=False,
-        tic=False,
-        toc=False,
-    ):
+    def log(self, string="", level=1, logfile=True, log_mem_usage=False, tic=False, toc=False):
         """Print messages based on current verbosity level
 
         Args:
@@ -235,9 +228,7 @@ class Job:
                 header = "\n[%s][%02d] " % (datetime_string, level)
                 f.write(header + "   " * level + string)
 
-    def load_file(
-        self, filename, dir_name=None, path=None, allow_pickle=True, mmap_mode=None
-    ):
+    def load_file(self, filename, dir_name=None, path=None, allow_pickle=True, mmap_mode=None):
         """
         Light wrapper around n.load() to load an arbitrary .npy file from self.base_dir
         """
@@ -344,9 +335,7 @@ class Job:
         """
         Load dirs.npy into self.dirs
         """
-        self.dirs = n.load(
-            os.path.join(self.job_dir, "dirs.npy"), allow_pickle=True
-        ).item()
+        self.dirs = n.load(os.path.join(self.job_dir, "dirs.npy"), allow_pickle=True).item()
 
     def save_params(
         self,
@@ -403,10 +392,7 @@ class Job:
     def make_extension_dir(self, extension_root, extension_name="ext"):
         extension_dir = os.path.join(extension_root, "s3d-extension-%s" % self.job_id)
         if extension_name in self.dirs.keys():
-            self.log(
-                "Extension dir %s already exists at %s"
-                % (extension_name, self.dirs[extension_name])
-            )
+            self.log("Extension dir %s already exists at %s" % (extension_name, self.dirs[extension_name]))
             return self.dirs[extension_name]
         os.makedirs(extension_dir)
         self.log("Made new extension dir at %s" % extension_dir)
@@ -457,18 +443,14 @@ class Job:
         self.job_dir = job_dir
         if os.path.isdir(job_dir):
             self.log("Job directory %s already exists" % job_dir, 0)
-            assert (
-                exist_ok
-            ), "Set create=False to load existing job, or set overwrite=True to overwrite existing job"
+            assert exist_ok, "Set create=False to load existing job, or set overwrite=True to overwrite existing job"
         else:
             os.makedirs(job_dir, exist_ok=True)
 
         self.log("Loading job directory for %s in %s" % (job_id, root_dir), 0)
         if "dirs.npy" in os.listdir(job_dir):
             self.log("Loading dirs ")
-            self.dirs = n.load(
-                os.path.join(job_dir, "dirs.npy"), allow_pickle=True
-            ).item()
+            self.dirs = n.load(os.path.join(job_dir, "dirs.npy"), allow_pickle=True).item()
         else:
             self.dirs = {"job_dir": self.job_dir}
 
@@ -542,16 +524,12 @@ class Job:
 
         if os.path.isfile(plane_fits_img):
             im = imread(plane_fits_img)
-            f2, ax = plt.subplots(
-                figsize=(im.shape[0] // 200, im.shape[1] // 200), dpi=400
-            )
+            f2, ax = plt.subplots(figsize=(im.shape[0] // 200, im.shape[1] // 200), dpi=400)
             ax.imshow(im)
             ax.set_axis_off()
         if os.path.isfile(gamma_fit_img):
             im = imread(gamma_fit_img)
-            f3, ax = plt.subplots(
-                figsize=(im.shape[0] // 200, im.shape[1] // 200), dpi=150
-            )
+            f3, ax = plt.subplots(figsize=(im.shape[0] // 200, im.shape[1] // 200), dpi=150)
             ax.imshow(im)
             ax.set_axis_off()
 
@@ -587,8 +565,7 @@ class Job:
                 )
             else:
                 raise NotImplementedError(
-                    "3D registration without GPU is not implemented yet."
-                    " Either set gpu_reg=True or set 3d_reg=False"
+                    "3D registration without GPU is not implemented yet." " Either set gpu_reg=True or set 3d_reg=False"
                 )
                 # register_dataset_3d(self,tifs, params, self.dirs, summary, self.log, start_batch_idx=start_batch_idx)
         else:
@@ -677,13 +654,8 @@ class Job:
             mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
 
         if self.params.get("detection_timebin") is None:
-            self.params["detection_timebin"] = 2 * int(
-                n.round(self.params["fs"] / (self.params["tau"]))
-            )
-            self.log(
-                "Updated detection_timebin to %d based on framerate and tau"
-                % self.params["detection_timebin"]
-            )
+            self.params["detection_timebin"] = 2 * int(n.round(self.params["fs"] / (self.params["tau"])))
+            self.log("Updated detection_timebin to %d based on framerate and tau" % self.params["detection_timebin"])
 
         if mov is None:
             mov = self.get_registered_movie("registered_fused_data", "fused")
@@ -710,9 +682,7 @@ class Job:
         results = {}
         for file in files:
             if file in os.listdir(self.dirs[corrmap_dir_tag]):
-                results[file[:-4]] = n.load(
-                    os.path.join(self.dirs[corrmap_dir_tag], file)
-                )
+                results[file[:-4]] = n.load(os.path.join(self.dirs[corrmap_dir_tag], file))
         return results
 
     def setup_sweep(
@@ -740,9 +710,7 @@ class Job:
         # make a copy of the param file before the sweep
         init_params = copy.deepcopy(self.params)
         # make a directory for this sweep within the parent directory of all sweeps
-        sweep_dir_name, sweep_dir = self.make_new_dir(
-            sweep_name, parent_dir_name=sweep_parent_dir, return_dir_tag=True
-        )
+        sweep_dir_name, sweep_dir = self.make_new_dir(sweep_name, parent_dir_name=sweep_parent_dir, return_dir_tag=True)
 
         n_per_param = []
         param_names = []
@@ -753,10 +721,9 @@ class Job:
             param_names.append(k)
             n_per_param.append(len(params_to_sweep[k]))
             param_vals_list.append(params_to_sweep[k])
-            assert self.params[k] in params_to_sweep[k], (
-                "The 'base' value of the parameter %s should be included in the sweep (%s)"
-                % (k, str(self.params[k]))
-            )
+            assert (
+                self.params[k] in params_to_sweep[k]
+            ), "The 'base' value of the parameter %s should be included in the sweep (%s)" % (k, str(self.params[k]))
         if all_combinations:
             n_combs = n.prod(n_per_param)
             combinations = list(itertools.product(*param_vals_list))
@@ -791,9 +758,7 @@ class Job:
                 comb_str += "-%s_%s" % (param, val_str)
                 comb_param[param] = param_value
             comb_dir_tag = "comb_%05d" % comb_idx
-            self.log(
-                "Created directory for %s with params %s" % (comb_dir_tag, comb_str), 2
-            )
+            self.log("Created directory for %s with params %s" % (comb_dir_tag, comb_str), 2)
             # create directories for each combination
             comb_dir_tag, comb_dir = self.make_new_dir(
                 comb_dir_tag,
@@ -832,9 +797,7 @@ class Job:
         iter_limit=None,
         save_mov_sub=False,
     ):
-        sweep_summary = self.setup_sweep(
-            params_to_sweep, sweep_name, all_combinations=all_combinations
-        )
+        sweep_summary = self.setup_sweep(params_to_sweep, sweep_name, all_combinations=all_combinations)
         sweep_summary["sweep_type"] = "corrmap"
         sweep_dir_path = sweep_summary["sweep_dir_path"]
         sweep_summary["results"] = []
@@ -894,9 +857,7 @@ class Job:
             dict: sweep_summary containing results and sweep info
         """
 
-        sweep_summary = self.setup_sweep(
-            params_to_sweep, sweep_name, all_combinations=all_combinations
-        )
+        sweep_summary = self.setup_sweep(params_to_sweep, sweep_name, all_combinations=all_combinations)
         sweep_summary["sweep_type"] = "segmentation"
         sweep_summary["results"] = []
         sweep_summary["sweep_type"] = "segmentation"
@@ -921,9 +882,7 @@ class Job:
                 "roi_dir": output_dir,
             }
             if comb_idx == 0:
-                results["info"] = self.load_segmentation_results(
-                    output_dir, to_load=["info"]
-                )
+                results["info"] = self.load_segmentation_results(output_dir, to_load=["info"])
             sweep_summary["results"].append(results)
             self.save_file("sweep_summary", sweep_summary, path=sweep_dir_path)
 
@@ -938,22 +897,14 @@ class Job:
         block_dirs = []
         if n_blocks is not None:
             for i in range(n_blocks):
-                block_dirs.append(
-                    self.make_new_dir(
-                        "%03d" % i, "svd_blocks", dir_tag="svd_blocks_%03d" % i
-                    )
-                )
+                block_dirs.append(self.make_new_dir("%03d" % i, "svd_blocks", dir_tag="svd_blocks_%03d" % i))
             return block_dirs
 
     def make_stack_dirs(self, n_stacks):
         stack_dirs = []
         self.make_new_dir("stacks", "svd", dir_tag="svd_stacks")
         for i in range(n_stacks):
-            stack_dirs.append(
-                self.make_new_dir(
-                    "%03d" % i, "svd_stacks", dir_tag="svd_stacks_%03d" % i
-                )
-            )
+            stack_dirs.append(self.make_new_dir("%03d" % i, "svd_stacks", dir_tag="svd_stacks_%03d" % i))
         return stack_dirs
 
     def segment_rois(
@@ -983,9 +934,7 @@ class Job:
             local_thresh_pct = self.params.get("local_thresh_pct", 51)
             if local_thresh:
                 maps["vmap_raw"] = maps["vmap"].copy()
-                vmap = ext.thresh_mask_corr_map(
-                    maps["vmap"], local_thresh_window_pix, local_thresh_pct
-                )
+                vmap = ext.thresh_mask_corr_map(maps["vmap"], local_thresh_window_pix, local_thresh_pct)
                 maps["vmap"] = vmap
             else:
                 vmap = maps["vmap"]
@@ -1004,9 +953,7 @@ class Job:
             "segmentation", output_dir_name, return_dir_tag=True
         )
         self.save_params(copy_dir_tag=segmentation_dir_tag)
-        rois_dir_name, rois_dir_path = self.make_new_dir(
-            "rois", output_dir_name, return_dir_tag=True
-        )
+        rois_dir_name, rois_dir_path = self.make_new_dir("rois", output_dir_name, return_dir_tag=True)
 
         self.log(
             "Saving results to %s and %s " % (segmentation_dir_path, rois_dir_path)
@@ -1020,9 +967,7 @@ class Job:
         patch_size_xy = self.params["patch_size_xy"]
         patch_overlap_xy = self.params["patch_overlap_xy"]
         nt, nz, ny, nx = mov_sub.shape
-        patches, grid_shape = svu.make_blocks(
-            (nz, ny, nx), (nz,) + patch_size_xy, (0,) + patch_overlap_xy
-        )
+        patches, grid_shape = svu.make_blocks((nz, ny, nx), (nz,) + patch_size_xy, (0,) + patch_overlap_xy)
         patches_vmap, __ = svu.make_blocks(
             (nz, ny, nx),
             (nz,) + patch_size_xy,
@@ -1045,9 +990,7 @@ class Job:
             )
 
             # set up the save directory for this patch
-            patch_dir = self.make_new_dir(
-                "patch-%04d" % patch_idx, segmentation_dir_tag, add_to_dirs=False
-            )
+            patch_dir = self.make_new_dir("patch-%04d" % patch_idx, segmentation_dir_tag, add_to_dirs=False)
             stats_path = os.path.join(patch_dir, "stats.npy")
             info_path = os.path.join(patch_dir, "info.npy")
 
@@ -1055,21 +998,15 @@ class Job:
             vzs, vys, vxs = patches_vmap[:, patch_idx]
 
             # prepare the movie
-            mov_patch = mov_sub[
-                ts[0] : ts[1], zs[0] : zs[1], ys[0] : ys[1], xs[0] : xs[1]
-            ]
+            mov_patch = mov_sub[ts[0] : ts[1], zs[0] : zs[1], ys[0] : ys[1], xs[0] : xs[1]]
             if self.params["segmentation_timebin"] > 1:
                 self.log(
-                    "Binning movie with a factor of %.2f"
-                    % self.params["segmentation_timebin"],
+                    "Binning movie with a factor of %.2f" % self.params["segmentation_timebin"],
                     2,
                 )
-                mov_patch = ext.binned_mean(
-                    mov_patch, self.params["segmentation_timebin"]
-                )
+                mov_patch = ext.binned_mean(mov_patch, self.params["segmentation_timebin"])
             self.log(
-                "Loading %.2f GB movie to memory, shape: %s "
-                % (mov_patch.nbytes / 1024**3, str(mov_patch.shape)),
+                "Loading %.2f GB movie to memory, shape: %s " % (mov_patch.nbytes / 1024**3, str(mov_patch.shape)),
                 3,
             )
             mov_patch = mov_patch.compute()
@@ -1117,15 +1054,11 @@ class Job:
         stats = n.load(os.path.join(stats_dir, "stats.npy"), allow_pickle=True)
         nz, ny, nx = info["vmap"].shape
         n.save(os.path.join(stats_dir, "stats_small.npy"), stats)
-        stats = ext.compute_npil_masks_mp(
-            stats, (nz, ny, nx), n_proc=self.params["n_proc_corr"]
-        )
+        stats = ext.compute_npil_masks_mp(stats, (nz, ny, nx), n_proc=self.params["n_proc_corr"])
         n.save(os.path.join(stats_dir, "stats.npy"), stats)
         return stats_dir
 
-    def load_segmentation_results(
-        self, output_dir_path=None, output_dir_name="rois", to_load=None
-    ):
+    def load_segmentation_results(self, output_dir_path=None, output_dir_name="rois", to_load=None):
         """
         Load the results of cell segmentation from disk. Can provide the dir_name or absolute path
         to the directory containing stats.npy and info.npy (typically job_dir/rois)
@@ -1148,6 +1081,62 @@ class Job:
             to_return[file] = data
         return to_return
 
+    def export_registered_movie(self, export_path, dir_idxs, planes=None, zmean=True, downsample_factor=1):
+        """
+        Export the registered movie to a specified path as a tif file.
+
+        Args:
+            export_path (str): Absolute path to the directory where the tif file will be saved.
+            dir_idxs (list): List of directories containing the tiff files to export.
+            planes (list, optional): List of plane indices to export. If None, exports all planes. Defaults to None.
+            zmean (bool, optional): Whether to take the mean across z-planes. Defaults to True.
+            downsample_factor (int, optional): Factor by which to downsample the movie. Defaults to 1.
+        """
+        export_path = os.path.join(export_path, "s3d-results-%s" % self.job_id)
+        self.log("Exporting registered movie to %s" % export_path)
+        mov = self.get_registered_movie()
+        if type(dir_idxs) == int:
+            dir_idxs = (dir_idxs,)
+        movs = []
+        for dir_idx in dir_idxs:
+            start, end = self.get_dir_frame_idxs(dir_idx)
+            movs.append(mov[:, start:end, :, :])
+        mov = n.concatenate(movs, axis=0)
+
+        self.log("Loaded movie with shape %s" % str(mov.shape))
+        if type(planes) == int:
+            planes = (planes,)
+        if planes is not None:
+            self.log("Exporting only planes %s" % str(planes))
+            mov = mov[planes, :, :]
+        if zmean:
+            self.log("Taking mean across z-planes")
+            mov = n.mean(mov, axis=0)
+        if downsample_factor > 1:
+            mov = utils.spatial_downsample_movie(mov, downsample_factor)
+
+        self.log("Computing movie with shape %s" % str(mov.shape))
+        mov = mov.compute()
+
+        if not os.path.isdir(export_path):
+            os.makedirs(export_path, exist_ok=True)
+
+        filename = "registered_movie-%02d_planes" % len(planes)
+        if zmean:
+            filename += "-zmean"
+        if downsample_factor > 1:
+            filename += "-downsampled-%02d" % downsample_factor
+        filename += "-dir"
+        for dir_idx in dir_idxs:
+            filename += "_%02d" % dir_idx
+        filename += ".npy"
+
+        self.log("Saving movie to %s" % export_path)
+        self.log("With filename %s" % filename)
+        self.save_file(data=mov, filename=filename, path=export_path)
+
+        return mov
+
     def export_results(
         self,
         export_path,
@@ -1167,9 +1156,7 @@ class Job:
             results_to_export (list, optional): list of files to export. Defaults to the important ones.
             export_frame_counts (bool, optional): Whether to export the number of frames in each file. Defaults to True.
         """
-        full_export_path = os.path.join(
-            export_path, "s3d-results-%s" % self.job_id + output_dir_label
-        )
+        full_export_path = os.path.join(export_path, "s3d-results-%s" % self.job_id + output_dir_label)
         os.makedirs(full_export_path, exist_ok=True)
         self.log("Created dir %s to export results" % full_export_path)
         if results_to_export is None:
@@ -1181,9 +1168,7 @@ class Job:
                 "Fneu.npy",
                 "iscell.npy",
             ]
-        results = self.load_segmentation_results(
-            output_dir_name=result_dir_name, to_load=results_to_export
-        )
+        results = self.load_segmentation_results(output_dir_name=result_dir_name, to_load=results_to_export)
 
         if (
             self.params["process_structural_channel"]
@@ -1205,6 +1190,8 @@ class Job:
             # save the number of frames in each tiff file, and which directory they were in
             frames = self.load_frame_counts()
             self.save_file(data=frames, filename="frames.npy", path=full_export_path)
+        summary = self.load_summary()
+        self.save_file(data=summary, filename="summary.npy", path=full_export_path)
         for result in results.keys():
             data = results[result]
             # stats_small doesn't contain the neuropil coordinates,
@@ -1240,9 +1227,7 @@ class Job:
         self.save_params()
         if stats_dir is None and patch_idx is not None:
             stats_dir = self.get_patch_dir(patch_idx, parent_dir_name=parent_dir_name)
-            stats, info = self.get_detected_cells(
-                patch_idx, parent_dir_name=parent_dir_name
-            )
+            stats, info = self.get_detected_cells(patch_idx, parent_dir_name=parent_dir_name)
             offset = (info["zs"], info["ys"], info["xs"])
         elif stats_dir is None:
             stats_dir = self.dirs["rois"]
@@ -1254,12 +1239,9 @@ class Job:
                     n.save(os.path.join(stats_dir, "stats.npy"), stats)
                 else:
                     self.log(
-                        "WARNING - overwriting with provided stats.npy in %s. Old one is in old_stats.npy"
-                        % stats_dir
+                        "WARNING - overwriting with provided stats.npy in %s. Old one is in old_stats.npy" % stats_dir
                     )
-                    old_stats = n.load(
-                        os.path.join(stats_dir, "stats.npy"), allow_pickle=True
-                    )
+                    old_stats = n.load(os.path.join(stats_dir, "stats.npy"), allow_pickle=True)
                     n.save(os.path.join(stats_dir, "old_stats.npy"), old_stats)
                     n.save(os.path.join(stats_dir, "stats.npy"), stats)
             else:
@@ -1268,13 +1250,9 @@ class Job:
         # return stats
         if mov is None:
             if not mov_shape_tfirst:
-                mov = self.get_registered_movie(
-                    "registered_fused_data", "fused", edge_crop=False
-                )
+                mov = self.get_registered_movie("registered_fused_data", "fused", edge_crop=False)
             else:
-                mov = self.get_registered_movie(
-                    "registered_fused_data", "fused", axis=0, edge_crop=False
-                )
+                mov = self.get_registered_movie("registered_fused_data", "fused", axis=0, edge_crop=False)
         if crop and self.params["svd_crop"] is not None:
             cz, cy, cx = self.params["svd_crop"]
             self.log("Cropping with bounds: %s" % (str(self.params["svd_crop"])))
@@ -1303,10 +1281,7 @@ class Job:
 
         valid_stats = [stat for i, stat in enumerate(stats) if iscell[i, 0]]
         save_iscell = os.path.join(save_dir, "iscell_extracted.npy")
-        self.log(
-            "Extracting %d valid cells, and saving cell flags to %s"
-            % (len(valid_stats), save_iscell)
-        )
+        self.log("Extracting %d valid cells, and saving cell flags to %s" % (len(valid_stats), save_iscell))
         stats = valid_stats
         # return stats
         n.save(save_iscell, iscell)
@@ -1411,9 +1386,7 @@ class Job:
             keep_stats_keys += extra_stats_keys
 
         for patch_idx in patch_idxs:
-            stats_patch, info_patch, iscell = self.load_patch_results(
-                patch_idx, parent_dir_name
-            )
+            stats_patch, info_patch, iscell = self.load_patch_results(patch_idx, parent_dir_name)
             if max_roi_per_patch is not None and len(stats_patch) > max_roi_per_patch:
                 self.log(
                     "Clipping patch %d because it has %d ROIs, max is %d"
@@ -1444,8 +1417,7 @@ class Job:
             )
             iscell = iscell[~duplicate_cells]
             self.log(
-                "Removed %d duplicate cells in %.2fs"
-                % (duplicate_cells.sum(), time.time() - tic),
+                "Removed %d duplicate cells in %.2fs" % (duplicate_cells.sum(), time.time() - tic),
                 2,
             )
 
@@ -1461,9 +1433,7 @@ class Job:
             self.log("Saved iscell", 2)
             if info_use_idx is not None:
                 n.save(os.path.join(output_dir_path, "info.npy"), info)
-                self.log(
-                    "Saved info (copied from patch) %d" % patch_idxs[info_use_idx], 2
-                )
+                self.log("Saved info (copied from patch) %d" % patch_idxs[info_use_idx], 2)
             return output_dir_path
 
     def get_detected_cells(self, patch=0, parent_dir_name="detection"):
@@ -1505,11 +1475,7 @@ class Job:
 
     def get_denoised_files(self):
         all_files = n.os.listdir(self.dirs["deepinterp"])
-        reg_files = [
-            os.path.join(self.dirs["deepinterp"], x)
-            for x in all_files
-            if x.startswith("dp")
-        ]
+        reg_files = [os.path.join(self.dirs["deepinterp"], x) for x in all_files if x.startswith("dp")]
         return reg_files
 
     def get_iter_dirs(self, dir_tag="iters", sort=True):
@@ -1534,14 +1500,10 @@ class Job:
         res = {}
         for filename in ["vmap", "max_img", "mean_img", "sum_img", "vmap2"]:
             if filename + ".npy" in os.listdir(iter_dir):
-                res[filename] = n.load(
-                    os.path.join(iter_dir, filename + ".npy"), allow_pickle=True
-                )
+                res[filename] = n.load(os.path.join(iter_dir, filename + ".npy"), allow_pickle=True)
         return res
 
-    def fuse_registered_movie(
-        self, files=None, save=True, n_proc=8, delete_original=False, parent_dir=None
-    ):
+    def fuse_registered_movie(self, files=None, save=True, n_proc=8, delete_original=False, parent_dir=None):
         n_skip = self.params["n_skip"]
         if files is None:
             files = self.get_registered_files()
@@ -1551,9 +1513,7 @@ class Job:
         centers = n.sort(xs)[1:]
         shift_xs = n.round(self.load_summary()["plane_shifts"][:, 1]).astype(int)
         if save:
-            reg_fused_dir = self.make_new_dir(
-                "registered_fused_data", parent_dir_name=parent_dir
-            )
+            reg_fused_dir = self.make_new_dir("registered_fused_data", parent_dir_name=parent_dir)
         else:
             reg_fused_dir = ""
         if save:
@@ -1607,26 +1567,15 @@ class Job:
             fused_files = n.concatenate(fused_files, axis=1)
         return fused_files
 
-    def svd_decompose_movie(
-        self,
-        svd_dir_tag,
-        run_svd=True,
-        end_batch=None,
-        mov=None,
-        mov_shape_tfirst=False,
-    ):
+    def svd_decompose_movie(self, svd_dir_tag, run_svd=True, end_batch=None, mov=None, mov_shape_tfirst=False):
         svd_dir = self.dirs[svd_dir_tag]
         self.save_params(copy_dir_tag=svd_dir_tag)
 
         if mov is None:
             if not mov_shape_tfirst:
-                mov = self.get_registered_movie(
-                    "registered_fused_data", "fused", edge_crop=False
-                )
+                mov = self.get_registered_movie("registered_fused_data", "fused", edge_crop=False)
             else:
-                mov = self.get_registered_movie(
-                    "registered_fused_data", "fused", axis=0, edge_crop=False
-                )
+                mov = self.get_registered_movie("registered_fused_data", "fused", axis=0, edge_crop=False)
             self.log("Loaded mov of size %s" % str(mov.shape))
         if self.params.get("svd_crop", None) is not None:
             crop = self.params["svd_crop"]
@@ -1738,10 +1687,7 @@ class Job:
             edge_crop_npix = self.params.get("edge_crop_npix", 0)
         if edge_crop_npix == 0:
             return mov
-        self.log(
-            "Cropping the edges by %d pixels (accounting for plane shifts)"
-            % edge_crop_npix
-        )
+        self.log("Cropping the edges by %d pixels (accounting for plane shifts)" % edge_crop_npix)
         summary = self.summary
         if summary is None:
             summary = self.load_summary()
@@ -1762,11 +1708,11 @@ class Job:
     def load_frame_counts(self):
         if "frames.npy" not in os.listdir(self.dirs["job_dir"]):
             self.save_frame_counts()
-        return n.load(
-            os.path.join(self.dirs["job_dir"], "frames.npy"), allow_pickle=True
-        ).item()
+        return n.load(os.path.join(self.dirs["job_dir"], "frames.npy"), allow_pickle=True).item()
 
     def get_dir_frame_idxs(self, dir_idx):
+        if type(dir_idx) == int:
+            dir_idx = str(dir_idx)
         frames = self.load_frame_counts()
         idxs = n.where(frames["dir_ids"] == dir_idx)[0]
         st, en = idxs[0], idxs[-1]
@@ -1882,9 +1828,7 @@ class Job:
             "complete": False,
         }
         n.save(sweep_summary_path, sweep_summary)
-        self.log(
-            "Saving summary for %d combinations to %s" % (n_combs, sweep_summary_path)
-        )
+        self.log("Saving summary for %d combinations to %s" % (n_combs, sweep_summary_path))
 
         if do_vmap:
             vmaps = []
@@ -1897,23 +1841,18 @@ class Job:
                     0,
                     log_mem_usage=True,
                 )
-                self.log(
-                    "Summary dict size: %02d GB"
-                    % (sys.getsizeof(sweep_summary) / 1024**3)
-                )
+                self.log("Summary dict size: %02d GB" % (sys.getsizeof(sweep_summary) / 1024**3))
                 self.log("Combination params: %s" % comb_str, 2)
                 self.log("Saving to tag %s at %s" % (comb_dir_tag, comb_dir), 2)
                 self.params = comb_params[comb_idx]
-                (vmap, mean_img, max_img), mov_sub_dir, iter_dir = (
-                    self.calculate_corr_map(
-                        mov=mov,
-                        svd_info=svd_info,
-                        parent_dir=comb_dir_tag,
-                        iter_limit=n_test_iters,
-                        update_main_params=False,
-                        svs=svs,
-                        us=us,
-                    )
+                (vmap, mean_img, max_img), mov_sub_dir, iter_dir = self.calculate_corr_map(
+                    mov=mov,
+                    svd_info=svd_info,
+                    parent_dir=comb_dir_tag,
+                    iter_limit=n_test_iters,
+                    update_main_params=False,
+                    svs=svs,
+                    us=us,
                 )
                 if delete_mov_sub:
                     self.log("Removing mov_sub from %s" % mov_sub_dir)
@@ -1940,10 +1879,7 @@ class Job:
         n_params = len(param_names)
         for cidx, combination in enumerate(combinations):
             param_idxs = [
-                n.where(n.array(param_dict[param_names[pidx]]) == combination[pidx])[0][
-                    0
-                ]
-                for pidx in range(n_params)
+                n.where(n.array(param_dict[param_names[pidx]]) == combination[pidx])[0][0] for pidx in range(n_params)
             ]
             vmap_sweep[tuple(param_idxs)] = vmaps[cidx]
         v = ui.napari.Viewer()
@@ -2006,9 +1942,7 @@ class Job:
         return timestamps, used_mem, used_swp, used_vrt, avail_vrt, descriptors
 
     def plot_memory_usage(self, show_descriptors_pctile=None):
-        timestamps, used_mem, used_swp, used_vrt, avail_vrt, descriptors = (
-            self.get_logged_mem_usage()
-        )
+        timestamps, used_mem, used_swp, used_vrt, avail_vrt, descriptors = self.get_logged_mem_usage()
         f, axs = plt.subplots(2, 1, sharex=True, figsize=(8, 8))
 
         ax = axs[0]
@@ -2026,9 +1960,7 @@ class Job:
         ax.set_xlabel("Timestamp")
 
         if show_descriptors_pctile is not None:
-            top_deltas = n.where(
-                deltas > n.percentile(deltas, show_descriptors_pctile)
-            )[0]
+            top_deltas = n.where(deltas > n.percentile(deltas, show_descriptors_pctile))[0]
             for top_idx in top_deltas:
                 ax.text(
                     timestamps[top_idx + 1],
