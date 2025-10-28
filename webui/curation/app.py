@@ -6,9 +6,9 @@ import panel as pn
 from sklearn.cluster import KMeans
 import json
 from pathlib import Path
-from umap_visualiser import UMAPVisualiser
-from box_viewer import BoxViewer
-from hist_viewer import HistViewer
+from webui.curation.umap_visualiser import UMAPVisualiser
+from webui.curation.box_viewer import BoxViewer
+from webui.curation.hist_viewer import HistViewer
 
 pn.extension()
 
@@ -89,13 +89,15 @@ class AppOrchestrator:
         """Load and prepare all data with sampling coordination"""
         print("Loading UMAP data from:", self.umap_file_path)
         try:
+            print("Checking if file exists...")
             if not os.path.exists(self.umap_file_path):
+                print("File not found:", self.umap_file_path)
                 self.status_text.object = f"**Error:** File not found: {self.umap_file_path}"
                 return
-            
+            print("File exists, loading...")
             # Load UMAP embeddings
             self.umap_embedding = np.load(self.umap_file_path)
-            
+            print("UMAP data shape:", self.umap_embedding.shape)
             if self.umap_embedding.ndim != 2 or self.umap_embedding.shape[1] != 2:
                 self.status_text.object = "**Error:** UMAP file must be 2D with shape (n_points, 2)"
                 return
@@ -105,7 +107,7 @@ class AppOrchestrator:
             # Set up classifications file
             file_stem = Path(self.umap_file_path).stem
             self.classifications_file = os.path.join(os.getcwd(), "curation", f"{file_stem}_classifications.json")
-            
+            print("Classifications file:", self.classifications_file)
             # Load existing classifications
             self.load_existing_classifications(n_points)
             
@@ -117,11 +119,11 @@ class AppOrchestrator:
             else:
                 self.use_sampling = False
                 self.sample_indices = np.arange(n_points)
-            
+            print("Using sampling:", self.use_sampling)
             # Initial clustering
             kmeans = KMeans(n_clusters=20, random_state=42, n_init='auto')
             initial_clusters = kmeans.fit_predict(self.umap_embedding)
-            
+            print("Initial clustering done")
             # Create full dataset
             self.full_data = pd.DataFrame({
                 'umap_x': self.umap_embedding[:, 0],
@@ -130,15 +132,16 @@ class AppOrchestrator:
                 'classification': self.classifications,
                 'original_index': np.arange(n_points)
             })
-            
+            print("Full data prepared with shape:", self.full_data.shape)
             # Prepare display data
             self.prepare_display_data()
-            
+            print("Display data prepared with shape:", self.display_data.shape)
             display_points = len(self.display_data)
             self.status_text.object = f"**Status:** Loaded {n_points:,} points, displaying {display_points:,} with 20 clusters"
-
+            print(self.status_text.object)
         except Exception as e:
             self.status_text.object = f"**Error:** Could not load data: {str(e)}"
+            print(self.status_text.object)
     
     def prepare_display_data(self):
         """Prepare sampled data for display"""
@@ -171,10 +174,12 @@ class AppOrchestrator:
         
         
         if self.display_data is not None:
+            print("Creating UMAP visualiser...")
             self.umap_visualiser = UMAPVisualiser(self.display_data)
             # Subscribe to selection events
             self.umap_visualiser.on_cluster_selected = self.on_cluster_selected
-
+            print("UMAP visualiser created.")
+            print("Creating Box and Hist viewers...")
             # add box viewer
             self.box_viewer = BoxViewer(self.hdf5_path, self.sample_indices, self.use_sampling)
 
@@ -391,7 +396,15 @@ def create_app(umap_file="umap_2d.npy", hdf5_path="data.h5"):
     orchestrator = AppOrchestrator(os.path.join(os.getcwd(), "curation", umap_file), hdf5_path=hdf5_path)
     return orchestrator.get_layout()
 
-app = create_app("contrastive_umap.npy", r"\\znas.cortexlab.net\Lab\Share\Ali\for-suyash\data\dataset.h5")
+# Create default app for standalone usage
+def get_curation_panel(umap_file=r"/home/ali/packages/s3d-dev/devbooks/webui_data/outputs/umap_2d.npy",
+                       hdf5_path=r"/home/ali/packages/s3d-dev/devbooks/webui_data/dataset.h5"):
+    """Get the curation panel for embedding in other applications"""
+    return create_app(umap_file, hdf5_path)
+
+# app = create_app("contrastive_umap.npy", r"\\znas.cortexlab.net\Lab\Share\Ali\for-suyash\data\dataset.h5")
+app = create_app(r"/home/ali/packages/s3d-dev/devbooks/webui_data/outputs/umap_2d.npy",
+                  r"/home/ali/packages/s3d-dev/devbooks/webui_data/dataset.h5")
 app.servable()
 
 if __name__ == "__main__":

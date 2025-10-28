@@ -543,7 +543,8 @@ def main(data_directory: str = None, output_directory: str = None):
 
 if __name__ == "__main__":
 
-    data_directory = r"\path\to\your\data\directory"
-    output_directory = r"\path\where\you\want\to\save\output"
+    data_directory = r"/home/ali/packages/s3d-dev/devbooks/outputs"
+    # data_directory = r"/mnt/znas-share/for-suyash/"
+    output_directory = r"/home/ali/packages/s3d-dev/devbooks/webui_data"
 
     main(data_directory=data_directory, output_directory=output_directory)

@@ -270,8 +270,8 @@ def cluster_representatives(umap_2d, labels, full_features, save_path=None, save
 if __name__ == "__main__":
 
 
-    H5_PATH = r"\path\to\your\h5\file.h5"
-    OUT_DIR = r"\where\you\want\to\save\outputs"
+    H5_PATH = r"/home/ali/packages/s3d-dev/devbooks/webui_data/dataset.h5"
+    OUT_DIR = r"/home/ali/packages/s3d-dev/devbooks/webui_data/outputs"
 
     with h5py.File(H5_PATH, 'r') as f:
         X = f["data"][:]

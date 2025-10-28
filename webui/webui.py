@@ -24,6 +24,7 @@ from webui.job_interface import JobInterface
 from webui.init_pass_panel import InitPanel
 from webui.corrmap_panel import CorrmapPanel
 from webui.registration_panel import RegistrationPanel
+from webui.curation.app import get_curation_panel
 
 
 pn.extension(design="native")
@@ -37,8 +38,16 @@ init_panel = InitPanel(max_height=800)
 reg_panel = RegistrationPanel(max_height=800)
 corrmap_panel = CorrmapPanel(max_height=800)
 
+# Create curation tab
+curation_layout = get_curation_panel()
 
-ui = pn.Tabs(job_interface.job_widget, init_panel.layout, reg_panel.layout, corrmap_panel.layout)#, volume_vis_panel)
+ui = pn.Tabs(
+    ("Job Interface", job_interface.job_widget), 
+    ("Initialization", init_panel.layout), 
+    ("Registration", reg_panel.layout), 
+    ("Correlation Map", corrmap_panel.layout),
+    ("Curation", curation_layout)
+)
 
 def job_load_callback(value):
     if value:
