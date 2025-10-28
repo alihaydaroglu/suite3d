@@ -31,6 +31,7 @@ from suite3d import dcnv
 from . import utils
 
 # from . import lbmio
+from .io import lbmio
 from .io import get_frame_counts
 
 from . import corrmap
@@ -119,6 +120,8 @@ class Job:
         This is required for standard 2P data where the number of frames
         in each tif may not divide evenly into the number of planes per
         volume.
+
+        Only tifs within the same directory will "spill over" extra frames
         """
         if not self.params["lbm"] and not self.params["faced"]:
             frame_counts = get_frame_counts(
@@ -126,16 +129,24 @@ class Job:
             )
             extra_frames = {}
             previous_tif = {}
+            current_dir = os.path.dirname(self.tifs[0])
             for i, tif in enumerate(self.tifs):
+                # print(os.path.dirname(tif))
                 c_frames = frame_counts[tif]
-                if i > 0:
-                    # Add link to previous tif and add extra frames from previous tif
-                    previous_tif[tif] = self.tifs[i - 1]
-                    c_frames = c_frames + extra_frames[previous_tif[tif]]
-                else:
+                if os.path.dirname(tif) != current_dir:
+                    # print("Resetting extra frames for new directory")
+                    current_dir = os.path.dirname(tif)
+                    extra_frames[self.tifs[i - 1]] = 0
                     previous_tif[tif] = None
+                else:
+                    if i > 0:
+                        # Add link to previous tif and add extra frames from previous tif
+                        previous_tif[tif] = self.tifs[i - 1]
+                        c_frames = c_frames + extra_frames[previous_tif[tif]]
+                    else:
+                        previous_tif[tif] = None
 
-                # Remainder of current tifs frames by n_ch_tif gives the number of extra frames
+                    # Remainder of current tifs frames by n_ch_tif gives the number of extra frames
                 extra_frames[tif] = c_frames % self.params["n_ch_tif"]
 
             # Add frame counts, extra frames, and previous tif to the params for use in s3dio loading
@@ -1507,9 +1518,9 @@ class Job:
         n_skip = self.params["n_skip"]
         if files is None:
             files = self.get_registered_files()
-        # __, xs = lbmio.load_and_stitch_full_tif_mp(
+        __, xs = lbmio.load_and_stitch_full_tif_mp(
             self.tifs[0], channels=n.arange(1), get_roi_start_pix=True
-        # )
+        )
         centers = n.sort(xs)[1:]
         shift_xs = n.round(self.load_summary()["plane_shifts"][:, 1]).astype(int)
         if save:
