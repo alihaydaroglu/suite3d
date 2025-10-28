@@ -20,3 +20,6 @@ __pycache__/
 exclude/
 runs/
 dev/
+.vscode
+models
+*.npy
