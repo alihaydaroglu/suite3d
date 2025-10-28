@@ -1,0 +1,112 @@
+[build-system]
+requires = ["setuptools>=61", "wheel", "versioneer[toml]==0.29"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "suite3d"
+description = "Fast, volumetric cell detection. In development."
+version = "0.0.1"
+readme = "README.md"
+requires-python = ">=3.11, <3.13"
+keywords = ["Pipeline", "Numpy", "Microscopy", "ScanImage", "Suite2p", "Volumetric"]
+license = { text = "AGPL-3.0-or-later" }
+urls = { homepage = "https://github.com/alihaydaroglu/suite3d" }
+scripts = {suite3d = "suite3d.__main__:main"}
+dependencies = [
+    "dask>=2025.3.0",
+    "tifffile>=2021.3.4",
+    "zarr>=2.18.3",
+    "matplotlib>=3.10.1",
+    "torch>=1.7.1",
+    "natsort",
+    "rastermap>0.1.0",
+    "scanimage-tiff-reader>=1.4.1",
+    "importlib-metadata",
+    "paramiko",
+    "pynwb",
+    "sbxreader",
+    "imreg-dft-nw",
+    "click",
+    "ipython",
+    "jupyterlab==4.4.0",
+    "jupyter_rfb",
+    "pyqt5==5.15.11",
+    "pyqtgraph",
+    "ipykernel",
+    "napari",
+    "scikit-image",
+    "dask-image",
+    "pyqt5-qt5==5.15.2; sys_platform == 'win32'",
+    "pyqt5-qt5==5.15.16; sys_platform == 'darwin' or sys_platform == 'linux'",
+]
+
+[project.optional-dependencies]
+gpu = [
+    # "cupy",
+    # "mkl-fft>=1.3.13",
+    # "mkl>=2025.1.0",
+    # "mkl-service>=2.4.2",
+]
+mrc = [
+    "mrcfile",
+] 
+fpl = [
+    "fastplotlib",
+    "ipykernel",
+    "jupyter_rfb",
+    "imgui-bundle",
+]
+all = [
+    # "cupy",
+    "fastplotlib",
+    "ipykernel",
+    "jupyter_rfb",
+    "imgui-bundle",
+    "mrcfile",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "pytest>=7.4.4",
+    "ruff>=0.6.1",
+    "gitpython",
+]
+
+[tool.uv]
+default-groups = "all"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["suite3d"]
+
+[tool.setuptools.exclude-package-data]
+"*" = ["data/*", "demos/*"]
+
+# Configuration for ruff (linting and style tool)
+[tool.ruff]
+line-length = 88
+src = ["suite3d"]
+exclude = ["docs", "exclude", "demos", "scripts"]
+
+[tool.ruff.lint]
+pydocstyle = { convention = "numpy" }
+select = ["ALL"]
+ignore = [
+    "D401",   # First line should be in imperative mood
+    "COM812", # Missing trailing comma
+    "ISC001", # Import sorting
+    "FIX002", # Fixable issue
+    "DOC201", # No doc for return type
+    "FBT"     # Requires bool options to be keyword-only
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "except ImportError",
+    "\\.\\.\\.",
+    "raise NotImplementedError()"
+]
