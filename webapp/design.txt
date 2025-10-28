@@ -1,0 +1,87 @@
+thank you to chatgpt :) 
+
+OK, I want to build a software with the following components
+- compute: a python compute backend that uses GPU/CPU for large image processing computations. It operates on data already on the server, and can write its outputs into files or into a database
+- database: a MongoDB database that stores previously run jobs, analytics about those jobs, and links to main results (images, graphs) that might be relevant to the user
+- manager: a python program that keeps track of which compute jobs are running, and can be used to launch new compute jobs
+- web UI: using Dash, a webui that can be used to monitor status of jobs, launch new jobs, and display plots/images that are stored in the database for each job.
+
+What do you think?
+
+ChatGPT said:
+ChatGPT
+
+Your plan for building a software system with the components you described is well-structured and covers all the necessary functionality for large-scale image processing using a compute backend, job management, database storage, and a web interface for user interaction. Let's break down each part and highlight key considerations, as well as how everything fits together:
+1. Compute Backend (Python for GPU/CPU Image Processing)
+
+    Purpose: The compute backend will handle large-scale image processing, leveraging CPU/GPU resources for performance.
+    Key Technologies:
+        GPU Acceleration: Depending on your use case, you could use libraries like PyTorch, TensorFlow, CuPy, or OpenCV with GPU support for image processing tasks.
+        File Output: The backend will save outputs either to disk (e.g., as processed image files or metadata) or to the database (e.g., analytics, smaller images, job status).
+        Integration: Ensure this component is modular enough to work independently but with well-defined APIs that can be called by your manager and web UI components.
+    Concurrency: Depending on the workload, consider integrating with job execution libraries such as Celery, Dask, or Ray for parallel execution on multiple compute nodes.
+
+2. MongoDB Database (Job Tracking and Data Storage)
+
+    Purpose: MongoDB will serve as the storage layer for job information, analytics, and results.
+    Key Features:
+        Job Metadata: Each job should store metadata like job ID, input parameters, status (queued, running, finished, failed), compute resources used (CPU/GPU), timestamps, etc.
+        Result Storage: You can store lightweight analytics in MongoDB directly (e.g., numerical results, file paths for outputs stored on disk, small thumbnails), while large image outputs are better stored as files on disk, with MongoDB storing links to those files.
+        Indexing: Efficient indexing in MongoDB for quick lookups of jobs (by status, date, etc.) will be important for tracking and managing jobs in your web UI.
+
+3. Manager (Job Manager for Tracking and Launching Jobs)
+
+    Purpose: This component is responsible for launching compute jobs, tracking their status, and ensuring efficient resource usage.
+    Key Technologies:
+        Job Queuing/Management: You’ll need to implement or integrate a job queuing system. A library like Celery (with RabbitMQ/Redis as a broker) can handle distributed task execution. Alternatively, you can use Dask or Ray for managing distributed compute jobs and real-time task scheduling.
+        State Management: The manager will track the state of each job (queued, running, finished, failed) and update MongoDB accordingly.
+        Launching Jobs: The manager could expose an API for launching jobs, which the web UI will call. It could also have automatic job scheduling logic to queue jobs when resources become available.
+        Monitoring: The manager could periodically check on the health of running jobs, such as resource utilization (CPU/GPU/memory) and failure detection.
+
+Design Consideration: If your image processing tasks are long-running, you will likely need some form of asynchronous job execution. This allows the manager to start and monitor jobs independently from the web interface.
+4. Web UI (Dash for Job Monitoring, Launching, and Displaying Results)
+
+    Purpose: The web UI will act as the interface for users to monitor, manage, and visualize jobs and their outputs.
+    Key Features:
+        Job Management: Users should be able to view all jobs (past, current, and queued), including detailed status information. The UI should allow users to launch new jobs by specifying parameters (e.g., input files, settings).
+        Real-time Updates: Use Dash’s callback mechanism to periodically poll the manager for job status updates. Alternatively, you could use Flask-SocketIO for real-time updates via WebSockets to display job progress (ideal for real-time job tracking).
+        Result Visualization: Once jobs are complete, the web UI should allow users to view job results. This could include:
+            Displaying images: Display the output images processed by the compute backend.
+            Plotting graphs: Use Plotly within Dash to display any relevant graphs (such as performance metrics, statistics from the processing).
+            Displaying metadata: Provide information on processing time, resources used, etc.
+        Launching Jobs: The UI will need forms and inputs to allow users to configure and launch new jobs, interacting with the job manager through APIs.
+
+How Everything Fits Together:
+
+    User Interaction via Web UI (Dash):
+        Users interact with the system through a Dash-based web interface. They can monitor job statuses, launch new jobs, and view job results.
+    API Calls to Manager:
+        When users launch jobs or request updates, the web UI communicates with the manager. This is done through API endpoints that trigger new jobs or request job status updates.
+    Manager Launches Compute Jobs:
+        The manager is responsible for launching the compute jobs. It schedules jobs and assigns them to CPU/GPU resources as available. It also monitors their status and updates MongoDB with job metadata and results.
+    Compute Backend Executes Image Processing:
+        The compute backend performs the heavy image processing using CPU/GPU resources. Results are saved to files and/or MongoDB (as metadata, analytics, or thumbnails).
+    Job Status & Results Stored in MongoDB:
+        MongoDB serves as the central repository for job metadata (such as job state, resources used, etc.), results, and links to output files. This database is queried by both the manager (for job tracking) and the web UI (to display results).
+
+Technology Stack Summary:
+
+    Compute Backend: Python with libraries for GPU/CPU processing (e.g., PyTorch, TensorFlow, OpenCV).
+    Database: MongoDB for job tracking, metadata, and results.
+    Job Manager: Celery (or Dask/Ray) for job queuing and management, interacting with the compute backend.
+    Web UI: Dash (with Plotly and Flask-SocketIO for real-time updates) for monitoring jobs and displaying results.
+
+Additional Considerations:
+
+    Scalability: Depending on your expected workload, you may need to scale the compute backend across multiple machines (or GPUs), and scale your job manager to handle a high volume of jobs concurrently.
+    Error Handling and Retries: Implement mechanisms in the job manager to handle failed jobs, retries, and proper logging for debugging.
+    Security: Ensure secure access to the system (e.g., using authentication in the web UI) and proper handling of sensitive data in MongoDB.
+    Caching/Performance: Consider caching job results that are frequently accessed, or implement a separate file system (like S3) for large image storage to keep the load on MongoDB minimal.
+
+Next Steps:
+
+    Prototype: Build a minimal prototype for each component (backend, database, manager, UI) to validate the flow of data.
+    Integration: Ensure smooth communication between components, especially between the manager and the web UI via the API.
+    Testing and Scaling: Once the basic functionality works, focus on optimizing for performance and scaling.
+
+This system design is robust, modular, and follows best practices, making it well-suited for image processing workloads and job management.
