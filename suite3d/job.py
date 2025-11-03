@@ -739,6 +739,7 @@ class Job:
             n_combs = n.prod(n_per_param)
             combinations = list(itertools.product(*param_vals_list))
         else:
+            combinations = []
             n_combs = n.sum(n_per_param)
             base_vals = [init_params[param_name] for param_name in param_names]
             for i in range(n_combs):
@@ -817,7 +818,7 @@ class Job:
         for comb_idx in range(n_combs):
             comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
             comb_params = sweep_summary["comb_params"][comb_idx]
-            self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
+        self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             self.params = comb_params
             corrmap_out = self.calculate_corr_map(
                 output_dir_name=comb_dir_name,

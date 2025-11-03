@@ -695,7 +695,10 @@ class CurationUI(GenericNapariUI):
 
         # first and last frames to plot
         fmin, fmax = self.activity_plot_bounds
-        frame_times = n.arange(fmin, fmax) / self.info['all_params']['fs']
+        frame_times = n.arange(fmin, fmax)
+        
+        if 'all_params' in self.info:
+            frame_times /= self.info['all_params']['fs']
 
         corrected_roi_idx = roi_idx
         if roi_idx == -1 or not self.extracted_roi_flag[roi_idx]:

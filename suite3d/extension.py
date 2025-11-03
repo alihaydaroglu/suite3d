@@ -210,9 +210,11 @@ def detect_cells_mp(
     n_iters = max_iter // n_proc_detect
     roi_idx = 0
     widxs = n.arange(n_proc_detect)
-
+    
     with Pool(n_proc_detect) as p:
+        prev_n_rois = 0
         for iter_idx in range(n_iters):
+            n_rois = len(stats)
             outs = find_top_n_rois(vmap, n_rois=n_proc_detect)
             filtered_rois = filter_rois(outs, peak_thresh)
 
@@ -261,6 +263,13 @@ def detect_cells_mp(
                 ext_subtract_iters,
             )
             roi_idx = len(stats)
+            n_rois = len(stats)
+            n_rois_iter = n_rois - prev_n_rois
+            prev_n_rois = n_rois
+            log(f"Iter {iter_idx:04d}: added {n_rois_iter} ROIs, total {n_rois}", 2)
+            if n_rois_iter == 0:
+                log("No ROIs added this iteration - ending extraction", 2)
+                break
 
             if savepath is not None and roi_idx % 250 == 0 and roi_idx > 0:
                 save_checkpoint(savepath, stats, log)
@@ -302,13 +311,17 @@ def process_returns(
         savepath (str): Path to save results
         log (function): Logging function
     """
+    print("Processing returns")
     for batch_stats, batch_sub in returns:
         if batch_stats is None and batch_sub is None:
             continue
         zz, yy, xx = batch_stats["coords_patch"]
         threshold = batch_stats["threshold"]
+        if len(zz) == 0:
+            # this is kinda weird... why do some cells end up here? 
+            continue
         patch[:, zz, yy, xx] -= batch_sub
-
+        # print(len(zz), len(yy), len(xx))
         update_vmap(
             vmap, patch, zz, yy, xx, threshold, allow_overlap, vmin, ext_subtract_iters
         )
@@ -711,7 +724,6 @@ def extend_roi3d(zz, yy, xx, shape, extend_z=True):
                         out_of_bounds = True
                 if not out_of_bounds:
                     coords.append(v)
-
     zz, yy, xx = n.unique(coords, axis=0).T
 
     return zz, yy, xx
