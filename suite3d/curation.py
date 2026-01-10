@@ -20,7 +20,7 @@ except:
     print("Problems importing napari or PyQT. No UI available")
 
 default_display_params = {
-    'lam_max' : 0.3, # Voxels with cell values above lam_max will have alpha=1
+    'lam_max' : 1.0, # Voxels with cell values above lam_max will have alpha=1
     'cmap' : 'Set3', # colormap to use
     'scale' : (15,3,3), # size of a voxel in z,y,x in microns
     'contrast_percentiles' : (20,99.9), # the contrast limits (expressed as percentile) on startup
@@ -212,6 +212,7 @@ class GenericNapariUI:
         cmap = self.display_params['cmap']
         if self.display_roi_labels is None:
             self.display_roi_labels = n.ones(self.n_roi)
+        print(lam_max)
         cell_idxs, cell_rgb,cell_rgb_unclipped,cell_rgb_counter = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, 
                         iscell_1d = self.display_roi_labels, cmap=cmap)
         non_cell_idxs, non_cell_rgb,non_cell_rgb_unclipped,non_cell_rgb_counter = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
@@ -846,6 +847,7 @@ def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Se
         # get the coordinates and cell projection values for this cell
         cz,cy,cx = coords[i]
         lam = copy.copy(lams[i])
+        lam /= lam.max()
         lam /= lam_max; lam[lam > 1] = 1
         if iscell_1d[i]: # if is cell, add to cell volumes
             cell_idxs_vol[cz,cy,cx] = i
@@ -1246,6 +1248,8 @@ if __name__ == '__main__':
         print("Running UI in %s" % base_dir.absolute())
     else:
         print("Running UI in current working dir")
+
+    print("Creating %s UI" % parsed_args.type)
 
     if parsed_args.type == 'curation':
         ui = CurationUI(base_dir)

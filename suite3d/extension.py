@@ -368,9 +368,9 @@ def log_cell_addition(log, batch_stats, stats_len):
     """
     med = batch_stats["med"]
     peak_val = batch_stats["peak_val"]
-    npix = len(batch_stats["coords_patch"][0])
+    npix = len(batch_stats["lam"])
     log(
-        f"Added cell {stats_len} at {med[0]:02d}, {med[1]:03d}, {med[2]:03d}, peak: {peak_val:.3f}, thresh: {batch_stats['threshold']:.03f}, {len(batch_stats['active_frames'])} frames, {npix} pixels",
+        f"Added cell {stats_len} at {med[0]:02d}, {med[1]:03d}, {med[2]:03d}, peak: {peak_val:.3f}, {len(batch_stats['active_frames'])} frames, {npix} pixels",
         3,
     )
 

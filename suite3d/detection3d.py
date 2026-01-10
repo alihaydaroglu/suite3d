@@ -233,8 +233,12 @@ def threshold_reduce(
     Vt: Ly x Lx
         The standard deviation of the non-thresholded pixels
     """
-    nbinned, Lyp, Lxp = mov.shape
-    Vt = np.zeros((Lyp, Lxp), "float32")
+    if len(mov.shape) == 4:
+        nbinned, Lz, Lyp, Lxp = mov.shape
+        Vt = np.zeros((Lz, Lyp, Lxp), "float32")
+    else: 
+        nbinned, Lyp, Lxp = mov.shape
+        Vt = np.zeros((Lyp, Lxp), "float32")
     if mean_subtract:
         mov = mov.copy() - mov.mean(axis=0)
     # print(f"Intensity thresh is {intensity_threshold}")

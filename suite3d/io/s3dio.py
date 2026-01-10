@@ -136,6 +136,8 @@ class s3dio:
                 # issue to ask for this feature to be implemented. A simple work around is to run the suite3d pipeline multiple
                 # times with different functional color channels and then combine the results however you see fit.
                 color_channel = params["functional_color_channel"] if not structural else params["structural_color_channel"]
+                # print("Using color channel %d" % (color_channel,))
+                # print(params)
                 mov = n.take(mov, color_channel, axis=1)
             return mov
 

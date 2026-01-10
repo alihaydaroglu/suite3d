@@ -6,6 +6,50 @@ from matplotlib import pyplot as plt
 from scipy.ndimage import gaussian_filter1d,uniform_filter1d
 from .developer import todo
 
+
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import matplotlib as mpl
+
+
+
+def diverging_cmap(low_color="blue", high_color="red", mid_color="white", name="diverging", nan_color="lightgrey"):
+    """
+    Creates a diverging colormap with a specified color at the center (zero value)
+    and a color for NaN values.
+
+    Args:
+        low_color (str): Color for the low end of the colormap.
+        high_color (str): Color for the high end of the colormap.
+        mid_color (str): Color for the center (zero) of the colormap.
+        name (str): Name of the colormap.
+        nan_color (str): Color to display for NaN values.
+
+    Returns:
+        matplotlib.colors.LinearSegmentedColormap: The created colormap.
+    """
+    cdict = {
+        "red": [
+            (0.0, mcolors.to_rgb(low_color)[0], mcolors.to_rgb(low_color)[0]),
+            (0.5, mcolors.to_rgb(mid_color)[0], mcolors.to_rgb(mid_color)[0]),
+            (1.0, mcolors.to_rgb(high_color)[0], mcolors.to_rgb(high_color)[0]),
+        ],
+        "green": [
+            (0.0, mcolors.to_rgb(low_color)[1], mcolors.to_rgb(low_color)[1]),
+            (0.5, mcolors.to_rgb(mid_color)[1], mcolors.to_rgb(mid_color)[1]),
+            (1.0, mcolors.to_rgb(high_color)[1], mcolors.to_rgb(high_color)[1]),
+        ],
+        "blue": [
+            (0.0, mcolors.to_rgb(low_color)[2], mcolors.to_rgb(low_color)[2]),
+            (0.5, mcolors.to_rgb(mid_color)[2], mcolors.to_rgb(mid_color)[2]),
+            (1.0, mcolors.to_rgb(high_color)[2], mcolors.to_rgb(high_color)[2]),
+        ],
+    }
+    cmap = mcolors.LinearSegmentedColormap(name, cdict)
+    cmap.set_bad(nan_color)
+    return cmap
+
+
 def multiple_timeseries(
     ts,
     yss,
@@ -120,10 +164,10 @@ def zscore(
     axes_to_reduce = n.array([i if i not in nax else n.nan for i in range(ndim)])
     axes_to_reduce = tuple(n.array(axes_to_reduce)[~n.isnan(axes_to_reduce)].astype(int))
     if m is None:
-        m = x.mean(axis=axes_to_reduce, keepdims=True)
+        m = n.nanmean(x,axis=axes_to_reduce, keepdims=True)
     if std is None:
-        std = x.std(axis=axes_to_reduce, keepdims=True)
-
+        std = n.nanstd(x,axis=axes_to_reduce, keepdims=True)
+    print(m,std)
     std += 1e-6
 
     if auto_reshape:
@@ -588,3 +632,227 @@ class VolumeViewer:
         #     vmin=self.v[0],
         #     vmax=self.v[1],
         # )
+
+
+# existing code...
+def density_scatter(
+    x, y,
+    *,
+    cmap: str = "viridis",
+    ax=None,
+    s: float = 10,
+    cbar: bool = False,
+    density: str = 'hist',
+    density_bins: int = 64,      # for 'hist'
+    gaussian_sigma: float | int = 0,  # smoothing on histogram (pixels)
+    knn_k: int = 20,              # for 'knn'
+    log_scale: bool = False,      # use logarithmic color scale
+    # colorbar inside-axis options
+    cbar_loc: str = 'lower right',
+    cbar_size: str = '3%',
+    cbar_height: str = '20%',
+    cbar_borderpad: float = 0.2,
+    cbar_orientation: str = 'vertical',
+    # identity line options
+    identity_line: bool = False,
+    max_pts = 5000, # max points to plot, randomly subsampled if more
+    # statistics / legend options
+    show_stats: bool = False,
+    stats_loc: str = 'best',
+    stats_fmt: str = 'slope={slope:.3g}, r={r:.3g}, p={p:.1e}',
+    stats_frameon: bool = False,
+    **scatter_kwargs
+):
+    """Scatter plot colored by local point density.
+
+    Parameters
+    ----------
+    x, y : array-like
+        1D arrays of the same length.
+    density : {'gaussian','hist','knn','uniform'}
+        - 'gaussian': scipy.stats.gaussian_kde (slow for large n)
+        - 'hist': 2D histogram (+ optional Gaussian blur) then per-point lookup
+        - 'knn': k-NN density via cKDTree using 1/(pi r_k^2)
+        - 'uniform': constant color (fallback)
+    density_bins : int
+        Number of bins per axis for 'hist'.
+    gaussian_sigma : float
+        Gaussian blur sigma (in bins) for 'hist'. 0 disables smoothing.
+    knn_k : int
+        k for k-NN density.
+    log_scale : bool
+        If True, use a logarithmic color scale (matplotlib.colors.LogNorm).
+    identity_line : bool
+        If True, draw a gray dashed identity line (y = x) behind the scatter without
+        changing axis limits.
+    show_stats : bool
+        If True, compute linear regression (scipy.stats.linregress) and add a legend entry
+        containing slope, Pearson r, and p-value using stats_fmt.
+    stats_loc : str
+        Matplotlib legend location for the stats string (if show_stats=True).
+    stats_fmt : str
+        Format string with placeholders {slope}, {r}, {p}, {intercept}.
+    stats_frameon : bool
+        Whether the legend frame is shown when displaying stats.
+    """
+    # Convert and clean inputs
+    x = n.asarray(x).ravel()
+    y = n.asarray(y).ravel()
+    if x.shape != y.shape:
+        raise ValueError("x and y must have the same shape")
+    
+    if x.size > max_pts:
+        idx = n.random.choice(x.size, size=max_pts, replace=False)
+        x = x[idx]
+        y = y[idx]
+
+    mask = n.isfinite(x) & n.isfinite(y)
+    x = x[mask]
+    y = y[mask]
+    if x.size == 0:
+        raise ValueError("No finite points to plot")
+
+    # Compute point density
+    xy = n.vstack([x, y])
+    z = None
+    if density == 'gaussian':
+        try:
+            kde = stats.gaussian_kde(xy)
+            z = kde(xy)
+        except Exception:
+            # Fallback to fast histogram method if KDE fails (e.g., singular covariance)
+            density = 'hist'
+
+    if density == 'hist':
+        # 2D histogram on a grid
+        H, xedges, yedges = n.histogram2d(x, y, bins=density_bins)
+        if gaussian_sigma and gaussian_sigma > 0:
+            from scipy.ndimage import gaussian_filter
+            H = gaussian_filter(H, gaussian_sigma, mode='constant')
+        # Map each point to its bin count (fast)
+        ix = n.clip(n.digitize(x, xedges) - 1, 0, H.shape[0] - 1)
+        iy = n.clip(n.digitize(y, yedges) - 1, 0, H.shape[1] - 1)
+        z = H[ix, iy] + 1e-12  # avoid zeros
+
+    elif density == 'knn':
+        # k-NN density estimate using area of circle to k-th neighbor
+        from scipy.spatial import cKDTree
+        tree = cKDTree(n.c_[x, y])
+        dists, _ = tree.query(n.c_[x, y], k=knn_k + 1)  # include self
+        rk = dists[:, -1]
+        area = n.pi * n.maximum(rk, 1e-12) ** 2
+        z = 1.0 / area
+
+    elif density == 'uniform':
+        z = n.full_like(x, fill_value=1.0 / max(1, x.size), dtype=float)
+
+    if z is None:
+        raise ValueError("Unknown density method. Use 'gaussian', 'hist', 'knn', or 'uniform'.")
+
+    # Sort so densest points are plotted last
+    idx = n.argsort(z)
+    x_sorted = x[idx]
+    y_sorted = y[idx]
+    z_sorted = z[idx]
+
+    created_fig = False
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(3, 3))
+        created_fig = True
+    else:
+        fig = None
+
+    # Apply logarithmic normalization if requested (unless user already provided a norm)
+    if log_scale and ('norm' not in scatter_kwargs):
+        # Ensure strictly positive vmin for LogNorm
+        zpos = z_sorted[z_sorted > 0]
+        if zpos.size == 0:
+            zpos = n.array([1.0])
+        vmin = scatter_kwargs.get('vmin', float(zpos.min()))
+        vmax = scatter_kwargs.get('vmax', float(z_sorted.max()))
+        scatter_kwargs['norm'] = mpl.colors.LogNorm(vmin=max(vmin, 1e-12), vmax=max(vmax, vmin * 1.000001))
+
+    sc = ax.scatter(x_sorted, y_sorted, c=z_sorted, s=s, cmap=cmap, **scatter_kwargs)
+
+    # Optional identity line (y=x) behind points; restore limits so it doesn't affect view
+    if identity_line:
+        xlim0 = ax.get_xlim()
+        ylim0 = ax.get_ylim()
+        lo = float(min(xlim0[0], ylim0[0]))
+        hi = float(max(xlim0[1], ylim0[1]))
+        try:
+            zbase = float(sc.get_zorder())
+        except Exception:
+            zbase = 1.0
+        ax.plot([lo, hi], [lo, hi], color='0.6', linestyle='--', linewidth=1.0, zorder=zbase - 1)
+        ax.set_xlim(xlim0)
+        ax.set_ylim(ylim0)
+
+    # Optional stats legend (after plotting so limits unaffected)
+    if show_stats and x.size > 1:
+        try:
+            lr = stats.linregress(x, y)
+            label = stats_fmt.format(slope=lr.slope, r=lr.rvalue, p=lr.pvalue, intercept=lr.intercept)
+            sc.set_label(label)
+            # Only draw legend if not already present (or user wants it explicitly)
+            existing_legend = ax.get_legend()
+            if existing_legend is None:
+                ax.legend(loc=stats_loc, frameon=stats_frameon)
+        except Exception:
+            # Silently ignore regression errors (e.g., constant input)
+            pass
+    if cbar:
+        # Create an inset colorbar inside the plotting axes using fixed bounds to avoid
+        # AnchoredLocator issues during save/render.
+        fig_for_cb = ax.figure if ax is not None else plt.gcf()
+
+        def _as_frac(v, default_frac):
+            # Convert values like '3%' -> 0.03, numbers <=1 kept as-is, >1 treated as percent.
+            if isinstance(v, str) and v.endswith('%'):
+                try:
+                    return float(v[:-1]) / 100.0
+                except Exception:
+                    return default_frac
+            try:
+                vf = float(v)
+                if vf <= 1.0:
+                    return vf
+                # Treat e.g. 3 as 3%
+                return vf / 100.0
+            except Exception:
+                return default_frac
+
+        w_frac = _as_frac(cbar_size, 0.03)
+        h_frac = _as_frac(cbar_height, 0.4)
+        pad = float(cbar_borderpad) if cbar_borderpad is not None else 0.02
+        # If pad looks like inches (large), clamp to a small fraction
+        if pad > 0.5:
+            pad = 0.02
+
+        # Compute bounds in axes fraction coordinates based on location keyword
+        loc = (cbar_loc or 'upper right').lower()
+        if loc == 'upper right':
+            x0 = 1 - w_frac - pad
+            y0 = 1 - h_frac - pad
+        elif loc == 'upper left':
+            x0 = pad
+            y0 = 1 - h_frac - pad
+        elif loc == 'lower right':
+            x0 = 1 - w_frac - pad
+            y0 = pad
+        elif loc == 'lower left':
+            x0 = pad
+            y0 = pad
+        else:
+            # fallback: upper right
+            x0 = 1 - w_frac - pad
+            y0 = 1 - h_frac - pad
+
+        cbax = ax.inset_axes([x0, y0, w_frac, h_frac])
+        cbar_obj = mpl.colorbar.Colorbar(cbax, sc, orientation=cbar_orientation)
+        # Optional: keep the colorbar tidy inside the axis
+        for spine in cbax.spines.values():
+            spine.set_linewidth(0.5)
+    return fig, ax, sc
+# ...existing code...
+

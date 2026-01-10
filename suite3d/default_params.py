@@ -216,9 +216,18 @@ params = {
     "percentile": 95.0,
     # threshold to include a cell in an ROI. Lower to have larger ROIs
     "extend_thresh": 0.05,
+    # apply multi source correction
+    'multi_source': True,
+    # number of power iterations to use when extracting cell footprints
+    "n_power_iter": 3,
+    # use power iteration to extract v1
+    "use_power_iter_v1": True,
+    # minimum number of frames required to segment a patch
+    "min_frames": 50,
     # less useful parameters for cell segmentation:
     # number of extension iterations for each ROI. Recommend leaving at 2
     "roi_ext_iterations": 2,
+    "roi_dilations_per_iter": 1,
     # number of iterations around a cell to exclude future cells from
     "ext_subtract_iters": 0,
     # maximum number of ROIs that can be found in a patch

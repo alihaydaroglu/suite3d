@@ -966,3 +966,113 @@ def plot_ct_hist(crosstalk_planes, show_plots=True, save_plots=None):
 
 #     titles = ["Cavity A", "Cavity B", "Cavity B crosstalk sub"]
 #     tfu.animate_gif(animate_planes, plot_gif, titles=titles)
+
+
+def coords_around_percentile(X, p=50, m=10, thresh=None):
+    """
+    Return m coordinates around percentile p of array X.
+    
+    Args:
+        X (n.ndarray): n-dimensional array
+        p (float): percentile (0-100), default 50 (median)
+        m (int): number of coordinates to return
+    
+    Returns:
+        tuple: coordinates (one tuple per dimension)
+    """
+    X = n.asarray(X)
+    if thresh is None:
+        thresh = n.percentile(X, p)
+    
+    # Find all coordinates where X is closest to the threshold
+    dists = n.abs(X - thresh)
+    
+    # Get linear indices of m smallest distances
+    flat_idxs = n.argsort(dists.flatten())[:m]
+    
+    # Convert to multi-dimensional indices
+    coords = n.unravel_index(flat_idxs, X.shape)
+    
+    return n.array(coords).T
+
+
+def binned_robust_regression(xs, ys, pct=5, x_bins=20, below = True, return_points=False, plot=False):
+    """
+    Estimate neuropil coefficients using percentile regression.
+    
+    Parameters:
+    F: array of fluorescence signals
+    Fneu: array of neuropil signals  
+    pct: percentile threshold for regression (default 5)
+    neu_bins: number of bins for neuropil signal (default 20)
+    
+    Returns:
+    coefficient: estimated neuropil coefficient
+    intercept: estimated intercept
+    """
+    
+
+    
+    # Create bins for neuropil signal
+    xs_bins = n.linspace(xs.min(), xs.max(), x_bins + 1)
+    
+    # Digitize to assign each point to a bin
+    bin_indices = n.digitize(xs, xs_bins) - 1
+    bin_indices = n.clip(bin_indices, 0, x_bins - 1)  # Handle edge cases
+    
+    # Collect points below percentile threshold for each bin
+    est_xs = []
+    est_ys = []
+    
+    for i in range(x_bins):
+        bin_mask = bin_indices == i
+        
+        if n.sum(bin_mask) > 0:
+            ys_in_bin = ys[bin_mask]
+            xs_in_bin = xs[bin_mask]
+            
+            threshold = n.percentile(ys_in_bin, pct)
+            if below: valid_pts = ys_in_bin <= threshold
+            else: valid_pts = ys_in_bin >= threshold
+            
+            est_xs.extend(xs_in_bin[valid_pts])
+            est_ys.extend(ys_in_bin[valid_pts])
+    
+    est_xs = n.array(est_xs)
+    est_ys = n.array(est_ys)
+    
+    # Perform linear regression to estimate coefficient and intercept
+    if len(est_xs) > 1:
+        coefficient, intercept = n.polyfit(est_xs, est_ys, 1)
+        # faster to do it by hand in numpy
+    else:
+        coefficient = 0.0
+        intercept = 0.0
+
+    if plot:
+        max_pts = 1000
+        if len(xs) > max_pts:
+            rand_idxs = n.random.choice(len(xs), max_pts, replace=False)
+            xs_plot = xs[rand_idxs]
+            ys_plot = ys[rand_idxs]
+
+
+        else:
+            xs_plot = xs
+            ys_plot = ys
+        plt.figure(figsize=(4, 4))
+        plt.scatter(xs_plot, ys_plot, s=1, alpha=0.3, label='Data points')
+        # plt.scatter(est_xs, est_ys, color='red', s=5, label='Selected points for regression')
+        x_fit = n.array([xs.min(), xs.max()])
+        y_fit = coefficient * x_fit + intercept
+        plt.plot(x_fit, y_fit, color='k', linewidth=2, label='Fitted line')
+        plt.xlabel('Neuropil Signal')
+        plt.ylabel('Fluorescence Signal')
+        plt.title('Binned Robust Regression')
+        plt.legend()
+        plt.show()
+
+    if return_points:
+        return coefficient, intercept, est_xs, est_ys
+    else:
+        return coefficient, intercept

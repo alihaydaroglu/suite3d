@@ -70,7 +70,7 @@ def get_percentiles(image, pmin=1, pmax=99, eps=0.0001):
     return vmin, vmax
 
 
-def make_label_vols(stats, shape, lam_max=0.3, iscell=None, cmap="Set3", coords=None, lams=None,lam_min = 0):
+def make_label_vols(stats, shape, lam_max=0.5, iscell=None, cmap="Set3", coords=None, lams=None,lam_min = 0):
 
     if stats is not None:
         coords = [stat["coords"] for stat in stats]
@@ -97,10 +97,12 @@ def make_label_vols(stats, shape, lam_max=0.3, iscell=None, cmap="Set3", coords=
         if iscell[i]:
             cz, cy, cx = coords[i]
             lam = copy.copy(lams[i])
-            # print(lam)3
-            lam /= lam_max
-            lam[lam > 1] = 1
-            lam[lam < lam_min] = 0
+            lam /= lam.max()
+            # print(lam.max())
+            lam = n.clip(lam, lam_min, lam_max)
+            lam = lam / lam_max
+
+
             # lam[lam < (lam_min / lam_max)] = 0
             cell_id_vol[cz, cy, cx] = i + 1
             cell_rgb_vol[cz, cy, cx, :3] = cmap(plot_cell_idx % n_cmap)[:3]

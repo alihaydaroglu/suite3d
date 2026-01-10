@@ -238,7 +238,7 @@ def rigid_2d_reg_gpu_from_existing_shifts(
     shift_t = 0
     for zidx in range(nz):
         shift_tic = time.time()
-        log_cb("Shifting plane %d" % (zidx,), 4)
+        # log_cb("Shifting plane %d" % (zidx,), 4)
         xmax_z, ymax_z = xmaxs[zidx], ymaxs[zidx]
 
         for frame_idx in range(nt):
@@ -338,7 +338,7 @@ def rigid_2d_reg_gpu(
 
         if shift:
             shift_tic = time.time()
-            log_cb("Shifting plane %d" % (zidx,), 4)
+            # log_cb("Shifting plane %d" % (zidx,), 4)
             xmax_z, ymax_z = xmaxs[zidx].get(), ymaxs[zidx].get()
 
             # if zidx == 10:

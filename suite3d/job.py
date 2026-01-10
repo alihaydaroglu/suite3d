@@ -35,6 +35,7 @@ from .io import lbmio
 from .io import get_frame_counts
 
 from . import corrmap
+from . import segmentation as seg
 from . import svd_utils as svu
 from . import extension as ext
 from . import init_pass
@@ -818,7 +819,7 @@ class Job:
         for comb_idx in range(n_combs):
             comb_dir_name = sweep_summary["comb_dir_names"][comb_idx]
             comb_params = sweep_summary["comb_params"][comb_idx]
-        self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
+            self.log("Running combination %02d/%02d" % (comb_idx + 1, n_combs), 0)
             self.params = comb_params
             corrmap_out = self.calculate_corr_map(
                 output_dir_name=comb_dir_name,
@@ -852,6 +853,7 @@ class Job:
         ts=None,
         input_dir_name=None,
         vmap=None,
+        extract=False,
     ):
         """
         Run segmentation with many different parameters
@@ -895,6 +897,10 @@ class Job:
             }
             if comb_idx == 0:
                 results["info"] = self.load_segmentation_results(output_dir, to_load=["info"])
+
+            if extract:
+                self.compute_npil_masks(stats_dir = output_dir)
+                self.extract_and_deconvolve(stats_dir=output_dir)
             sweep_summary["results"].append(results)
             self.save_file("sweep_summary", sweep_summary, path=sweep_dir_path)
 
@@ -1036,19 +1042,24 @@ class Job:
                 dx : dx + (vxs[1] - vxs[0]),
             ] = vmap[vzs[0] : vzs[1], vys[0] : vys[1], vxs[0] : vxs[1]]
 
-            mini_info = {"vmap": vmap_patch}
+            mini_info = {"vmap": vmap_patch.copy()}
 
-            stats = ext.detect_cells_mp(
-                mov_patch,
-                vmap_patch,
-                **self.params,
-                log=self.log,
-                savepath=stats_path,
-                patch_idx=patch_idx,
-                offset=(zs[0], ys[0], xs[0]),
+            # stats = ext.detect_cells_mp(
+            #     mov_patch,
+            #     vmap_patch,
+            #     **self.params,
+            #     log=self.log,
+            #     savepath=stats_path,
+            #     patch_idx=patch_idx,
+            #     offset=(zs[0], ys[0], xs[0]),
+            # )
+            stats = seg.segment_rois(
+                mov_patch,vmap_patch, log=self.log, savepath=stats_path, patch_idx=patch_idx, offset=(zs[0], ys[0], xs[0]), **self.params
             )
+            mini_info['vmap_subtracted'] = vmap_patch
             n.save(info_path, mini_info)
             patch_counter += 1
+            # print(stats[0].keys())
 
         # combine all segmented patches
         rois_dir_path = self.combine_patches(
@@ -1393,10 +1404,26 @@ class Job:
             "npcoords",
             "patch_idx",
             "med_patch",
+            "v1_u",
+            'v1h_u',
+            "v2_u",
+            "f1f2",
+            "f1_u",
+            "f2_u",
+            "active_frames",
+            "contamination_factor",
+            "npixs",
+            "worker_idx",
+            "patch_idx",
+            "offset",
+            "extraction_time",
+            "elapsed_time",
+            "vmap_slope",
+            "vmap_int",
         ]
         if extra_stats_keys is not None:
             keep_stats_keys += extra_stats_keys
-
+        print(keep_stats_keys)
         for patch_idx in patch_idxs:
             stats_patch, info_patch, iscell = self.load_patch_results(patch_idx, parent_dir_name)
             if max_roi_per_patch is not None and len(stats_patch) > max_roi_per_patch:
