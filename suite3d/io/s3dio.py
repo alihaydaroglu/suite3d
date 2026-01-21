@@ -171,12 +171,13 @@ class s3dio:
             # Check if frames match expected number of frames
             expected_frames = params["frame_counts"][tif_path]
             if tif_file.shape[0] != expected_frames:
-                raise ValueError(
-                    f"tif_path {tif_path} has {tif_file.shape[0]} frames, but preregister_tifs() detected {expected_frames} frames."
-                    "This may be caused by using preregister_tifs() in safe_mode=False which is fast but error prone." 
-                    "Please set tif_preregistration_safe_mode=True in your params and try again."
-                    "If that still doesn't work, then either the files have changed or there is inconcsistency in the tif structure!"
-                )
+                if verbose:
+                    self.job.log(
+                        f"tif_path {tif_path} has {tif_file.shape[0]} frames, but preregister_tifs() detected {expected_frames} frames. "
+                        "If this tif is the last in this director, that's fine. Otherwise, this may be caused by using preregister_tifs() in safe_mode=False which is fast but error prone. "
+                        "If so, set tif_preregistration_safe_mode=True in your params and try again.",
+                        1
+                    )
 
             # Get the number of frames in previous tifs
             c_prev_tif = params["previous_tif"][tif_path]
@@ -199,8 +200,15 @@ class s3dio:
             check_extra_frames = n_frames_total % params["n_ch_tif"]
             extra_frames_expected = params["extra_frames"][tif_path]
             if check_extra_frames != extra_frames_expected:
-                raise ValueError(f"tif_path {tif_path} has {check_extra_frames} extra frames, but preregister_tifs() detected {extra_frames_expected} frames.")
-            
+                if verbose:
+                    self.job.log(
+                        f"tif_path {tif_path} has {check_extra_frames} extra frames, but preregister_tifs() detected {extra_frames_expected} frames. "
+                        "This may be caused by using preregister_tifs() in safe_mode=False which is fast but error prone. "
+                        "It could also be that this is the last tif in the directory."
+                        "If so, set tif_preregistration_safe_mode=True in your params and try again.",
+                        1
+                    )
+                    extra_frames_expected = check_extra_frames  # just trust what we see
             # Remove extra frames and cache them for later if needed
             if extra_frames_expected > 0:   
                 extra_frames = tif_file[-extra_frames_expected:]

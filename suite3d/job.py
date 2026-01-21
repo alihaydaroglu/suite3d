@@ -1407,6 +1407,7 @@ class Job:
             "v1_u",
             'v1h_u',
             "v2_u",
+            "vox_snrs",
             "f1f2",
             "f1_u",
             "f2_u",

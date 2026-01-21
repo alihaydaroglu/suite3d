@@ -192,10 +192,12 @@ def segment_roi(msub, variances, vmap, roi_init, activity_thresh = 5,max_pix=100
         else:
             v1_u = v1h_u 
 
-        include = v1_u**2 / (variances[cz,cy,cx] - v1_u**2) > vox_snr_thresh
+        vox_snrs = v1_u**2 / (variances[cz,cy,cx] - v1_u**2)
+        include = vox_snrs > vox_snr_thresh
         include[:len(seed_zz)] = True
 
         v1_u = v1_u[include]
+        vox_snrs = vox_snrs[include]
         zz,yy,xx = cz[include], cy[include], cx[include]
         # make sure we always include the seed voxels
         v1h_u = v1h_u[include]
@@ -247,6 +249,7 @@ def segment_roi(msub, variances, vmap, roi_init, activity_thresh = 5,max_pix=100
         'f1_u': f1_u,
         'f2_u': f2_u,
         'f1f2': f1f2,
+        'vox_snrs': vox_snrs,
         # 'f1_u_full' : msub[:, zz, yy, xx] @ lam,
         'peak_val': peak,
         'active_frames': active_frame_idxs,
