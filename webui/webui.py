@@ -1,8 +1,7 @@
-import numpy as n 
 import os
+os.environ["OMP_NUM_THREADS"] = "6"
 import sys
 from pathlib import Path
-
 
 import panel as pn
 
@@ -24,6 +23,7 @@ from webui.job_interface import JobInterface
 from webui.init_pass_panel import InitPanel
 from webui.corrmap_panel import CorrmapPanel
 from webui.registration_panel import RegistrationPanel
+from webui.curation_panel import CurationPanel
 
 
 pn.extension(design="native")
@@ -36,9 +36,10 @@ job_widget_vis_button.name = 'Show create/load job widget'
 init_panel = InitPanel(max_height=800)
 reg_panel = RegistrationPanel(max_height=800)
 corrmap_panel = CorrmapPanel(max_height=800)
+curation_panel = CurationPanel(max_height=800)
 
 
-ui = pn.Tabs(job_interface.job_widget, init_panel.layout, reg_panel.layout, corrmap_panel.layout)#, volume_vis_panel)
+ui = pn.Tabs(job_interface.job_widget, init_panel.layout, reg_panel.layout, corrmap_panel.layout, curation_panel.layout)
 
 def job_load_callback(value):
     if value:
@@ -54,6 +55,10 @@ def job_load_callback(value):
             corrmap_panel.load_job(job_interface)
         except:
             print("Could not load corrmap panel")
+        try:
+            curation_panel.load_job(job_interface)
+        except:
+            print("Could not load curation panel")
 
 pn.bind(job_load_callback, job_interface.param.job_loaded, watch=True)
 

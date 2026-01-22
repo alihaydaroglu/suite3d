@@ -1,4 +1,5 @@
 import numpy as n
+import numba
 
 
 def volume_quality(volume, pct_high = 99.99, pct_low = 25.0):
@@ -44,6 +45,19 @@ def shot_noise_pct(fs, frate_hz):
     noise_level = noise_level / frate_hz
 
     return noise_level
+
+@numba.jit(nopython=True, parallel=True)
+def shot_noise_suyash(fs, frate_hz):
+    npix, nt = fs.shape
+    noise_level = n.empty(npix)
+    
+    for i in numba.prange(npix):
+        row = fs[i]
+        mean_f = n.mean(row)
+        df = n.diff(row) / mean_f
+        noise_level[i] = n.nanmedian(n.abs(n.diff(df)))
+    
+    return noise_level / frate_hz
 
 def choose_top_pix(vol, pct = 98):
     nz, ny, nx = vol.shape
