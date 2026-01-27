@@ -1023,12 +1023,20 @@ class Job:
                     2,
                 )
                 mov_patch = ext.binned_mean(mov_patch, self.params["segmentation_timebin"])
+     
+
+            mov_patch = mov_patch.compute()
+
+            mov_patch = mov_patch.astype(n.float32)
+            
+            if self.params.get('segmentation_spatial_filt', None) is not None:
+                self.log("Applying spatial filter before segmentation: %s" % str(self.params['segmentation_spatial_filt']), 2)
+                mov_patch = seg.filter_movie(mov_patch, self.params['segmentation_spatial_filt'])
+
             self.log(
                 "Loading %.2f GB movie to memory, shape: %s " % (mov_patch.nbytes / 1024**3, str(mov_patch.shape)),
                 3,
             )
-            mov_patch = mov_patch.compute()
-            mov_patch = mov_patch.astype(n.float32)
             self.log("Loaded", 3)
 
             # prepare the correlation map

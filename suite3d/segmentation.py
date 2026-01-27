@@ -3,7 +3,7 @@ import numpy as n
 from multiprocessing import Pool
 from .utils import default_log, binned_robust_regression
 from . import utils
-
+from scipy.ndimage import uniform_filter
 from .extension import find_top_n_rois, filter_rois, save_checkpoint, save_final_results, log_cell_addition
 import time 
 
@@ -384,3 +384,19 @@ def extend_roi3d_old(zz, yy, xx, shape, extend_z=True):
     coords = n.unique(coords, axis=0)
     return coords[:, 0], coords[:, 1], coords[:, 2]
 
+
+def filter_movie(mov, spatial_filt):
+    """Apply spatial filtering to each frame of the movie.
+
+    Args:
+        mov (np.ndarray): 4D array of shape (nt, nz, ny, nx)
+        spatial_filt (tuple): Tuple of three integers specifying the size of the uniform filter in (z, y, x)
+
+    Returns:
+        np.ndarray: Filtered movie of the same shape as input.
+    """
+    nt, nz, ny, nx = mov.shape
+    filtered_mov = n.empty_like(mov)
+    for t in range(nt):
+        filtered_mov[t] = uniform_filter(mov[t], size=(1,spatial_filt,spatial_filt), mode='reflect')
+    return filtered_mov

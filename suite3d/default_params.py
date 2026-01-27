@@ -236,6 +236,7 @@ params = {
     "detection_timebin": None,
     # time bin factor for segmentation (better leave as 1 and play with detection_timebin)
     "segmentation_timebin": 1,
+    "segmentation_spatial_filt" : None,
     # Crop the movie before segmentation to only detect on a subset of the movie
     "detection_time_crop": (None, None),
 
