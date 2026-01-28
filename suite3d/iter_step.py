@@ -530,6 +530,7 @@ def register_dataset_gpu(
     nr_npad = params.get("nr_npad", 3)
     nr_subpixel = params.get("nr_subpixel", 10)
     nr_smooth_iters = params.get("nr_smooth_iters", 2)
+    save_nonrigid_phasecorrs = params.get("save_nonrigid_phasecorrs", False)
     fuse_strips = params.get("fuse_strips", True)
     fix_fastZ = params.get("fix_fastZ", False)
     reg_norm_frames = params.get("reg_norm_frames", True)
@@ -978,177 +979,6 @@ def register_dataset_s2p(
             break
 
 
-def calculate_corrmap_from_svd(
-    svd_info,
-    params,
-    dirs,
-    log_cb,
-    iter_limit=None,
-    iter_dir_tag="iters",
-    mov_sub_dir_tag="mov_sub",
-    svs=None,
-    us=None,
-):
-    assert False, "this is currently broken"
-    t_batch_size = params["t_batch_size"]
-    temporal_hpf = min(t_batch_size, params["temporal_hpf"])
-    if t_batch_size % temporal_hpf != 0:
-        temporal_hpf = int(t_batch_size / (n.floor(t_batch_size / temporal_hpf)))
-        log_cb(
-            "Adjusting temporal hpf to %d to evenly divide %d frames"
-            % (temporal_hpf, t_batch_size)
-        )
-    fix_vmap_edges = params.get("fix_vmap_edges", True)
-    do_sdnorm = params.get("do_sdnorm", "True")
-    n_proc_corr = params["n_proc_corr"]
-    mproc_batchsize = params["mproc_batchsize"]
-    sdnorm_exp = params.get("sdnorm_exp", 1.0)
-
-    if mproc_batchsize is None:
-        mproc_batchsize = n.ceil(t_batch_size / n_proc_corr)
-
-    npil_filt_size = (
-        params["npil_filt_z"],
-        params["npil_filt_xy"],
-        params["npil_filt_xy"],
-    )
-    unif_filt_size = (
-        params["conv_filt_z"],
-        params["conv_filt_xy"],
-        params["conv_filt_xy"],
-    )
-
-    log_cb(
-        "Using conv_filt: %s, %.2f, %.2f"
-        % (params["conv_filt_type"], params["conv_filt_z"], params["conv_filt_xy"]),
-        1,
-    )
-    log_cb(
-        "Using np_filt: %s, %.2f, %.2f"
-        % (params["npil_filt_type"], params["npil_filt_z"], params["npil_filt_xy"]),
-        1,
-    )
-    log_cb("Using normalization exponent of %.2f" % (sdnorm_exp,), 1)
-
-    nz, nt, ny, nx = svd_info["mov_shape"]
-    vol_shape = (nz, ny, nx)
-
-    n_batches = int(n.ceil(nt / t_batch_size))
-    if iter_limit is not None:
-        n_batches = min(iter_limit, n_batches)
-        log_cb("Running only %d batches" % n_batches)
-    batch_dirs, __ = init_batch_files(
-        dirs[iter_dir_tag], makedirs=True, n_batches=n_batches
-    )
-    __, mov_sub_paths = init_batch_files(
-        None,
-        dirs[mov_sub_dir_tag],
-        makedirs=False,
-        n_batches=n_batches,
-        filename="mov_sub",
-    )
-    log_cb("Created files and dirs for %d batches" % n_batches, 1)
-
-    svd_root = "\\".join(svd_info["svd_dirs"][0].split("\\")[:-2])
-    log_cb(
-        "Will reconstruct SVD movie on-the-fly from %s with %d components"
-        % (svd_root, params["n_svd_comp"])
-    )
-    if svs is None:
-        tic = time.time()
-        svs = svu.load_and_multiply_stack_svs(
-            svd_info["svd_dirs"], params["n_svd_comp"], compute=True
-        )
-        toc = time.time()
-        log_cb(
-            "Loaded spatial components in %.2f seconds, %.2f GB"
-            % (toc - tic, svs.nbytes / 1024**3)
-        )
-    else:
-        n_comp_sv = svs.shape[0]
-        log_cb(
-            "Using provided SV matrix, cropping to %d components"
-            % int(params["n_svd_comp"])
-        )
-        if params["n_svd_comp"] > n_comp_sv:
-            log_cb(
-                "WARNING: the provided SV matrix only has %d components, params specifies %d components!"
-                % (n_comp_sv, params["n_svd_comp"])
-            )
-        svs = svs[:, : int(params["n_svd_comp"])]
-
-    vmap2 = n.zeros((nz, ny, nx))
-    mean_img = n.zeros((nz, ny, nx))
-    max_img = n.zeros((nz, ny, nx))
-    sdmov2 = n.zeros((nz, ny, nx))
-    n_frames_proc = 0
-    for batch_idx in range(n_batches):
-        log_cb("Running batch %d of %d" % (batch_idx + 1, n_batches), 2)
-        st_idx = batch_idx * t_batch_size
-        end_idx = min(nt, st_idx + t_batch_size)
-        n_frames_proc += end_idx - st_idx
-
-        log_cb("Reconstructing from svd", 2)
-        recon_tic = time.time()
-        if us is not None:
-            # print(st_idx, end_idx)
-            usx = us[:, st_idx:end_idx, : int(params["n_svd_comp"])]
-            log_cb("Using provided U, cropped to %s" % (str(usx.shape)), 3)
-        else:
-            usx = None
-        movx = svu.reconstruct_movie_batch(
-            svd_info["svd_dirs"],
-            svs,
-            (st_idx, end_idx),
-            vol_shape,
-            svd_info["blocks"],
-            us=usx,
-            log_cb=log_cb,
-        )
-        log_cb("Reconstructed in %.2f seconds" % (time.time() - recon_tic), 2)
-
-        log_cb("Calculating corr map", 2)
-        corrmap_tic = time.time()
-        mov_filt = calculate_corrmap_for_batch(
-            movx,
-            sdmov2,
-            vmap2,
-            mean_img,
-            max_img,
-            temporal_hpf,
-            npil_filt_size,
-            unif_filt_size,
-            params["intensity_thresh"],
-            n_frames_proc,
-            n_proc_corr,
-            mproc_batchsize,
-            mov_sub_save_path=mov_sub_paths[batch_idx],
-            do_sdnorm=do_sdnorm,
-            log_cb=log_cb,
-            return_mov_filt=False,
-            fix_vmap_edges=fix_vmap_edges,
-            sdnorm_exp=sdnorm_exp,
-            conv_filt_type=params["conv_filt_type"],
-            np_filt_type=params["npil_filt_type"],
-            dtype=n.float32,
-        )
-        log_cb("Calculated corr map in %.2f seconds" % (time.time() - corrmap_tic), 2)
-
-        log_cb("Saving to %s" % batch_dirs[batch_idx], 2)
-        n.save(os.path.join(batch_dirs[batch_idx], "vmap2.npy"), vmap2)
-        n.save(os.path.join(batch_dirs[batch_idx], "vmap.npy"), vmap2**0.5)
-        n.save(os.path.join(batch_dirs[batch_idx], "mean_img.npy"), mean_img)
-        n.save(os.path.join(batch_dirs[batch_idx], "max_img.npy"), max_img)
-        n.save(os.path.join(batch_dirs[batch_idx], "std2_img.npy"), sdmov2)
-        gc.collect()
-    vmap = vmap2**0.5
-    if fix_vmap_edges and nz > 1:
-        vmap[0] = vmap[0] * vmap[1].mean() / vmap[0].mean()
-        vmap[-1] = vmap[-1] * vmap[-2].mean() / vmap[-1].mean()
-    n.save(os.path.join(batch_dirs[batch_idx], "vmap.npy"), vmap)
-    return vmap, mean_img, max_img
-
-
 # New 3d registration
 # TODO tidy up what is needed for 3D case
 def register_dataset_gpu_3d(
@@ -1171,24 +1001,17 @@ def register_dataset_gpu_3d(
     reference_params = summary["reference_params"]
     rmins = reference_params.get("plane_mins", None)
     rmaxs = reference_params.get("plane_maxs", None)
-    snr_thresh = 1.2  # TODO add values to a default params dictionary
-    NRsm = reference_params["NRsm"]
-    yblocks, xblocks = reference_params["yblock"], reference_params["xblock"]
-    nblocks = reference_params["nblocks"]
+    snr_thresh = params.get("snr_thresh", 1.2)
     pc_size = params.get("pc_size", (2, 20, 20))
     frate_hz = params.get("fs", 4)
+    nonrigid = params.get("nonrigid", False)
+    job_reg_data_dir = dirs["registered_fused_data"]
 
     # choose the top 2% of pix in each plane to run
     # quality metrics on
     top_pix = qm.choose_top_pix(ref_img_3d)
 
-
-    # NOTE TODO the current mask_mul etc is uncropped, so currently calculated here but should be changed in reference_image.py
-    # when updating to full 3D
-
-    # mask_mul, mask_offset, ref_2ds = n.stack([r[:3] for r in refs_and_masks],axis=1)
-
-    # Current hack to get cropped ref + maks
+    # TODO this cropping seems wrong... it should not be the full pad from both sides, it should crop half and half  
     sigma = reference_params["sigma"]
     ref_img = ref_img_3d.copy()
     if ypad > 0:
@@ -1196,16 +1019,58 @@ def register_dataset_gpu_3d(
     if xpad > 0:
         ref_img = ref_img[:, :, int(xpad) : int(-xpad)]
     # ref_img = ref_img_3d[:, int(ypad):int(-ypad), int(xpad): int(-xpad)]
+
+    # print('xpad: ', xpad)
+    # print('ypad: ', ypad)
+    # print('ref_img_3d shape: ', ref_img_3d.shape)
+    # print('ref_img shape: ', ref_img.shape)
     mask_mul, mask_offset = ref.compute_masks3D(ref_img, sigma)
     ref_2ds = reg_3d.mask_filter_fft_ref(ref_img, mask_mul, mask_offset, smooth=0.5)
+
+    if nonrigid:
+        reference_params['block_size_3d'] = params['block_size_3d']
+        (
+            mask_mul_nr_3d,
+            mask_offset_nr_3d,
+            ref_nr_3d,
+            ref_nr_3d_real,
+            zblocks,
+            yblocks,
+            xblocks,
+            NRsm_3d,
+            reference_params,
+        ) = reg_3d.get_nonrigid_phasecorr_and_masks_3d(ref_img_3d, reference_params)
+        # note the difference betweern ref_img_3d and ref_img - they are named poorly
+        # ref_img is cropped to a small size. this is what we use to rigidly register the raw tiffs 
+        # ref_img_3d is the same exact shape as the post-rigid registration data, and is used for nonrigid registration
+
+        # save the nonrigid params, masks and refs in metrics_path / nonrigid_refs.npy
+        nr_save = {
+            "mask_mul_nr_3d": mask_mul_nr_3d,
+            "mask_offset_nr_3d": mask_offset_nr_3d,
+            "ref_nr_3d": ref_nr_3d,
+            "ref_nr_3d_real": ref_nr_3d_real,
+            "zblocks": zblocks,
+            "yblocks": yblocks,
+            "xblocks": xblocks,
+            "NRsm_3d": NRsm_3d,
+            "reference_params": reference_params,
+        }
+        nr_refs_path = os.path.join(job_reg_data_dir, "nonrigid_refs_3d.npy")
+        n.save(nr_refs_path, nr_save)
+        log_cb("Saved nonrigid 3D refs and masks to %s" % nr_refs_path)
+        # print(zblocks, yblocks, xblocks)
+        # print(len(zblocks), len(yblocks), len(xblocks))
+        # zstarts = 
+
 
     if params["fuse_shift_override"] is not None:
         fuse_shift = params["fuse_shift_override"]
         log_cb("Overriding fuse shift value to %d" % fuse_shift)
 
     job_iter_dir = dirs["iters"]
-    job_reg_data_dir = dirs["registered_fused_data"]
 
+    save_nonrigid_phasecorrs = params.get("save_nonrigid_phasecorrs", False)
     n_tifs_to_analyze = params.get("total_tifs_to_analyze", len(tifs))
     tif_batch_size = params["tif_batch_size"]
     planes = params["planes"]
@@ -1356,12 +1221,58 @@ def register_dataset_gpu_3d(
                 mov_shifted = reg_3d.shift_mov_z(mov_shifted, int_shift)
         log_cb(f"Shifted the mov in: {time.time() - time_shift}s")
 
+    
+    
+        if nonrigid:
+
+            tic_nonrigid = time.time()
+
+            (
+                zshifts_nr,
+                yshifts_nr,
+                xshifts_nr,
+                snrs_nr,
+                nonrigid_phase_corrs,
+            ) = reg_3d.nonrigid_3d_gpu(
+                mov_shifted,
+                mask_mul_nr_3d,
+                mask_offset_nr_3d,
+                ref_nr_3d,
+                zblocks,
+                yblocks,
+                xblocks,
+                snr_thresh,
+                NRsm_3d,
+                max_shift=max_shift_nr,
+                rmins=rmins,
+                rmaxs=rmaxs,
+                npad=nr_npad,
+                n_smooth_iters=nr_smooth_iters,
+                subpixel=nr_subpixel,
+                batch_size=gpu_reg_batchsize,
+                log_cb=log_cb,
+                save_phasecorrs=save_nonrigid_phasecorrs,
+                )
+
+            log_cb(
+                "Computed 3D nonrigid shifts in %.2f sec" % (time.time() - tic_nonrigid),
+                3,
+            )
+
         # NOTE changed this so gets int_shifts + sub_pixel shifts etc
         all_offsets = {}
         all_offsets["phase_corr_shifted"] = phase_corr_shifted
         all_offsets["int_shift"] = int_shift
         all_offsets["pc_peak_loc"] = pc_peak_loc
         all_offsets["sub_pixel_shifts"] = sub_pixel_shifts
+        if nonrigid:
+            all_offsets["nonrigid_zshifts"] = zshifts_nr.get()
+            all_offsets["nonrigid_yshifts"] = yshifts_nr.get()
+            all_offsets["nonrigid_xshifts"] = xshifts_nr.get()
+            all_offsets["nonrigid_snrs"] = snrs_nr.get()
+            if save_nonrigid_phasecorrs:
+                all_offsets["nonrigid_phase_corrs"] = nonrigid_phase_corrs.get()
+            all_offsets["nonrigid_refs"] = ref_nr_3d_real
 
         log_cb("After all GPU Batches:", level=3, log_mem_usage=True)
 

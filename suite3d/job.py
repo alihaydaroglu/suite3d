@@ -2029,7 +2029,8 @@ class Job:
         self, offset_dir="registered_fused_data", n_files=None
     ):
         offset_files = self.get_registered_files(offset_dir, "offsets")
-        metric_Files = self.get_registered_files(offset_dir, "reg_metrics")
+        metric_files = self.get_registered_files(offset_dir, "reg_metrics")
+        nr_file = self.get_registered_files(offset_dir, "nonrigid_refs_3d")
         n_offset_files = len(offset_files)
         summary = self.load_summary()
         nyb, nxb = summary["reference_params"]["block_size"]
@@ -2045,19 +2046,22 @@ class Job:
         if n_files is None:
             n_files = n_offset_files
         for i in range(n_files):
-            if len(metric_Files) > 0:
-                metrics = n.load(metric_Files[i], allow_pickle=True)
+            if len(metric_files) > 0:
+                metrics = n.load(metric_files[i], allow_pickle=True)
                 all_metrics.append(metrics)
             offset = n.load(offset_files[i], allow_pickle=True).item()
             # print(i)
             for key in keys:
                 results[key].append(offset[key])
-            # print(offset.keys())
-            # rigid_xs.append(offset['xmaxs_rr'])
-            # rigid_ys.append(offset['ymaxs_rr'])
-            # nonrigid_xs.append(offset['xmaxs_nr'].reshape(-1,nz, nyb, nxb))
-            # nonrigid_ys.append(offset['ymaxs_nr'].reshape(-1,nz, nyb, nxb))
+
+        for key in results.keys():
+            results[key] = n.concatenate(results[key],axis=0)
+
+
         results["metrics"] = all_metrics
+        
+        if len(nr_file) > 0:
+            results['nonrigid_refs'] = n.load(nr_file[0], allow_pickle=True)
         return results
 
     def get_plane_shifts(self):

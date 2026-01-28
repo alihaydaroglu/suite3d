@@ -1,5 +1,6 @@
 # new function used for the 3d registration
 import os
+from functools import lru_cache
 import numpy as n
 
 from .reference_image import HAS_CUPY
@@ -23,6 +24,7 @@ from numba import njit
 from . import reference_image as ref
 from . import register_gpu as reg
 from . import utils
+from .utils import default_log
 
 
 @njit(nogil=True, cache=True)
@@ -361,6 +363,234 @@ def apply_mask3D(data, mask_mul, mask_offset):
     # print(mask_mul.shape)
     # print(mask_offset.shape)
     return data * mask_mul + mask_offset
+
+
+def kernelD3(xs: n.ndarray, ys: n.ndarray, zs: n.ndarray):
+    """
+    3D gaussian kernel for nonrigid smoothing across blocks.
+
+    Parameters
+    ----------
+    xs, ys, zs : ndarray
+        1D arrays of block indices along x, y, z.
+
+    Returns
+    -------
+    ndarray
+        (nb, nb) smoothing matrix, columns normalized.
+    """
+    zz, yy, xx = n.meshgrid(zs, ys, xs, indexing="ij")
+    coords = n.stack([zz.ravel(), yy.ravel(), xx.ravel()], axis=1)
+    diffs = coords[:, None, :] - coords[None, :, :]
+    dist2 = (diffs**2).sum(axis=2)
+    R = n.exp(-dist2)
+    R = R / n.sum(R, axis=0)
+    return R
+
+
+def make_blocks_3d(Lz, Ly, Lx, block_size=(8, 128, 128)):
+    """
+    Computes overlapping blocks to split a 3D volume for nonrigid registration.
+
+    Parameters
+    ----------
+    Lz, Ly, Lx : int
+        Volume dimensions (z, y, x)
+    block_size : tuple
+        Desired block size (bz, by, bx)
+
+    Returns
+    -------
+    zblock, yblock, xblock : list
+        Lists of [start, end] index arrays per block.
+    nblocks : list
+        [nz, ny, nx] number of blocks per dimension.
+    block_size : tuple
+        Actual block size used per dimension.
+    nonrigid_smoothing_matrix : ndarray
+        (nb, nb) block-smoothing matrix.
+    """
+    block_size_z, nz = ref.calculate_nblocks(N=Lz, block_size=block_size[0])
+    block_size_y, ny = ref.calculate_nblocks(N=Ly, block_size=block_size[1])
+    block_size_x, nx = ref.calculate_nblocks(N=Lx, block_size=block_size[2])
+    block_size = (block_size_z, block_size_y, block_size_x)
+
+    def _unique_linspace_starts(start, stop, npts):
+        if npts <= 1 or stop < start:
+            return n.array([int(start)])
+        starts = n.linspace(start, stop, npts)
+        starts = n.rint(starts).astype(int)
+        starts = n.unique(starts)
+        if starts.size > 0 and starts[-1] != int(stop):
+            if int(stop) not in starts:
+                starts = n.append(starts, int(stop))
+        return starts
+
+    zstart = _unique_linspace_starts(0, Lz - block_size[0], nz)
+    ystart = _unique_linspace_starts(0, Ly - block_size[1], ny)
+    xstart = _unique_linspace_starts(0, Lx - block_size[2], nx)
+
+    nz = zstart.shape[0]
+    ny = ystart.shape[0]
+    nx = xstart.shape[0]
+
+    zblock = [
+        n.array([zstart[iz], zstart[iz] + block_size[0]])
+        for iz in range(nz)
+        for _ in range(ny)
+        for _ in range(nx)
+    ]
+    yblock = [
+        n.array([ystart[iy], ystart[iy] + block_size[1]])
+        for _ in range(nz)
+        for iy in range(ny)
+        for _ in range(nx)
+    ]
+    xblock = [
+        n.array([xstart[ix], xstart[ix] + block_size[2]])
+        for _ in range(nz)
+        for _ in range(ny)
+        for ix in range(nx)
+    ]
+
+    nonrigid_smoothing_matrix = kernelD3(
+        xs=n.arange(nx), ys=n.arange(ny), zs=n.arange(nz)
+    ).T
+
+    return zblock, yblock, xblock, [nz, ny, nx], block_size, nonrigid_smoothing_matrix
+
+
+def nonrigid_phasecorr_reference_3D(
+    refImg0, maskSlope, smooth_sigma, zblock, yblock, xblock, sigz=None
+):
+    """
+    Computes taper masks and FFT'ed references for 3D nonrigid phase correlation.
+
+    Parameters
+    ----------
+    refImg0 : ndarray
+        Reference 3D volume (nz, ny, nx)
+    maskSlope : float
+        Spatial taper width for the full-volume mask
+    smooth_sigma : float
+        Gaussian filter width
+    zblock, yblock, xblock : list
+        Block boundary arrays
+    sigz : float, optional
+        Spatial taper width for z (defaults to maskSlope)
+
+    Returns
+    -------
+    maskMul : ndarray
+        (nb, bz, by, bx) multiplication masks per block
+    maskOffset : ndarray
+        (nb, bz, by, bx) offset masks per block
+    cfRefImg : ndarray
+        (nb, bz, by, bx) FFT-domain references per block
+    """
+    nb = len(zblock)
+    bz = zblock[0][1] - zblock[0][0]
+    by = yblock[0][1] - yblock[0][0]
+    bx = xblock[0][1] - xblock[0][0]
+
+    if sigz is None:
+        sigz = maskSlope
+
+    gaussian_filter = gaussian_fft3D(smooth_sigma, bz, by, bx)
+
+    maskMul = ref.spatial_taper3D(maskSlope, sigz, *refImg0.shape)
+    maskMul1 = n.empty((nb, bz, by, bx), "float32")
+    maskMul1[:] = ref.spatial_taper3D(2 * smooth_sigma, 2 * smooth_sigma, bz, by, bx)
+    maskOffset1 = n.empty((nb, bz, by, bx), "float32")
+    cfRefImg1 = n.empty((nb, bz, by, bx), "complex64")
+    refImg1 = n.empty((nb, bz, by, bx), "float32")
+
+    for zind, yind, xind, maskMul1_n, maskOffset1_n, cfRefImg1_n, refImg1_n in zip(
+        zblock, yblock, xblock, maskMul1, maskOffset1, cfRefImg1, refImg1
+    ):
+        ix = n.ix_(
+            n.arange(zind[0], zind[-1]).astype("int"),
+            n.arange(yind[0], yind[-1]).astype("int"),
+            n.arange(xind[0], xind[-1]).astype("int"),
+        )
+        refImg = refImg0[ix]
+        refImg1_n[:] = refImg
+
+        # block-local masks, scaled by the global spatial taper
+        maskMul1_n *= maskMul[ix]
+        maskOffset1_n[:] = refImg.mean() * (1.0 - maskMul1_n)
+
+        # gaussian filter in FFT domain
+        cfRefImg1_n[:] = n.conj(scipy.fft.fftn(refImg))
+        cfRefImg1_n /= 1e-5 + n.absolute(cfRefImg1_n)
+        cfRefImg1_n[:] *= gaussian_filter
+
+    return maskMul1, maskOffset1, cfRefImg1, refImg1
+
+
+def get_nonrigid_phasecorr_and_masks_3d(ref_image, reference_params):
+    """
+    Produces the FFT'd 3D nonrigid references and masks.
+
+    Parameters
+    ----------
+    ref_image : ndarray (nz, ny, nx)
+        Reference 3D volume
+    reference_params : dict
+        Reference params containing block size and smoothing params
+
+    Returns
+    -------
+    mult_mask_nr : ndarray
+    add_mask_nr : ndarray
+    refs_nr_f : ndarray
+    refs_nr : ndarray
+    zblock, yblock, xblock : list
+    nonrigid_smoothing_matrix : ndarray
+    reference_params : dict
+    """
+    nz, ny, nx = ref_image.shape
+    smooth_sigma = reference_params["smooth_sigma"]
+    block_size = reference_params.get("block_size_3d", reference_params.get("block_size"))
+    if block_size is None or len(block_size) != 3:
+        raise ValueError("block_size_3d must be a 3-tuple for 3D nonrigid registration")
+
+    (
+        zblock,
+        yblock,
+        xblock,
+        nblocks,
+        block_size,
+        nonrigid_smoothing_matrix,
+    ) = make_blocks_3d(Lz=nz, Ly=ny, Lx=nx, block_size=block_size)
+
+    reference_params["zblock"] = zblock
+    reference_params["yblock"] = yblock
+    reference_params["xblock"] = xblock
+    reference_params["nblocks_3d"] = nblocks
+    reference_params["block_size_3d"] = block_size
+    reference_params["nonrigid_smoothing_matrix"] = nonrigid_smoothing_matrix
+
+    mult_mask_nr, add_mask_nr, refs_nr_f, refs_nr = nonrigid_phasecorr_reference_3D(
+        refImg0=ref_image,
+        maskSlope=smooth_sigma * 3,
+        smooth_sigma=smooth_sigma,
+        zblock=zblock,
+        yblock=yblock,
+        xblock=xblock,
+    )
+
+    return (
+        mult_mask_nr,
+        add_mask_nr,
+        refs_nr_f,
+        refs_nr,
+        zblock,
+        yblock,
+        xblock,
+        nonrigid_smoothing_matrix,
+        reference_params,
+    )
 
 
 def mask_filter_fft_ref(ref_img, mult_mask, add_mask, smooth=0.5):
@@ -793,7 +1023,8 @@ def shift_gpu(mov_gpu, shift_batch):
 def clip_mov_gpu(mov, rmin, rmax):
     nz, __, __, __ = mov.shape
     for z in range(nz):
-        mov[z, :, :, :].real = cp.clip(mov[z, :, :, :].real, rmin[z], rmax[z])
+        if rmin[z] is not None and rmax[z] is not None:
+            mov[z, :, :, :].real = cp.clip(mov[z, :, :, :].real, rmin[z], rmax[z])
     return mov
 
 
@@ -956,6 +1187,591 @@ def reg_3d_gpu(mov_batch_gpu, fft_3d_ref_conj):
     del fft_3d_mov
 
     return phase_corr_batch
+
+
+def block_mov_3d(mov_gpu, zblocks, yblocks, xblocks):
+    """
+    Split a 3D movie into 3D blocks.
+
+    Parameters
+    ----------
+    mov_gpu : ndarray (nt, nz, ny, nx)
+        Movie on GPU, time-first
+    zblocks, yblocks, xblocks : list
+        Block boundary arrays
+
+    Returns
+    -------
+    mov_blocks : ndarray (nt, nb, bz, by, bx)
+    """
+    nt, __, __, __ = mov_gpu.shape
+    nb = len(zblocks)
+    bz = zblocks[0][1] - zblocks[0][0]
+    by = yblocks[0][1] - yblocks[0][0]
+    bx = xblocks[0][1] - xblocks[0][0]
+    mov_blocks = cp.zeros((nt, nb, bz, by, bx), dtype=mov_gpu.dtype)
+    for bidx in range(nb):
+        bz0, bz1 = zblocks[bidx]
+        by0, by1 = yblocks[bidx]
+        bx0, bx1 = xblocks[bidx]
+        mov_blocks[:, bidx] = mov_gpu[:, bz0:bz1, by0:by1, bx0:bx1]
+    return mov_blocks
+
+
+def reg_3d_gpu_blocks(mov_blocks, refs_nr_f):
+    """
+    3D phase correlation for block-wise registration.
+
+    Parameters
+    ----------
+    mov_blocks : ndarray (nt, nb, bz, by, bx)
+    refs_nr_f : ndarray (nb, bz, by, bx)
+
+    Returns
+    -------
+    phase_corr : ndarray (nt, nb, bz, by, bx)
+    """
+    refs_nr_f = cp.asarray(refs_nr_f)
+    fft_3d_mov = cufft.fftn(mov_blocks, axes=(2, 3, 4))
+    fft_3d_mov = fft_3d_mov / (1e-5 + cp.abs(fft_3d_mov))
+    fft_3d_mov = fft_3d_mov * refs_nr_f[cp.newaxis, :, :, :, :]
+    phase_corr = cp.abs(cufft.ifftn(fft_3d_mov, axes=(2, 3, 4)))
+    return phase_corr
+
+
+def unwrap_fft_3d(mov_float, pc_size, out=None):
+    """
+    Rearranges the 3D phase correlation so the zero-shift peak is centered.
+
+    The FFT-based phase correlation is periodic; the peak corresponding to a
+    negative shift appears at the high end of each axis. This function reorders
+    the 8 octants of the correlation volume so that shifts in [-pc_size, +pc_size]
+    are centered in the output.
+
+    Parameters
+    ----------
+    mov_float : ndarray (nt, nb, nz, ny, nx)
+        Phase correlation volume
+    pc_size : array-like (3,)
+        Max shift per axis (z, y, x)
+    out : ndarray, optional
+        Output array of shape (nt, nb, 2*pc_size+1)
+
+    Returns
+    -------
+    out : ndarray
+        Centered, cropped phase correlation
+    """
+    nt, nb, nz, ny, nx = mov_float.shape
+    pc_size = cp.asarray(pc_size)
+    pz = int(pc_size[0])
+    py = int(pc_size[1])
+    px = int(pc_size[2])
+    max_pc_size = n.array([pz, py, px]) * 2 + 1
+    if out is None:
+        out = cp.zeros(
+            (nt, nb, int(max_pc_size[0]), int(max_pc_size[1]), int(max_pc_size[2])),
+            dtype=mov_float.dtype,
+        )
+    # print("Attemptimg to unwrap fft 3d")
+    # print("Initial shape:", mov_float.shape)
+    # print("Output shape:", out.shape)
+
+    # z+ y+ x+
+    out[:, :, pz:, py:, px:] = mov_float[:, :, : pz + 1, : py + 1, : px + 1]
+    # z+ y+ x-
+    out[:, :, pz:, py:, :px] = mov_float[
+        :, :, : pz + 1, : py + 1, nx - px :
+    ]
+    # z+ y- x+
+    out[:, :, pz:, :py, px:] = mov_float[
+        :, :, : pz + 1, ny - py :, : px + 1
+    ]
+    # z+ y- x-
+    out[:, :, pz:, :py, :px] = mov_float[
+        :, :, : pz + 1, ny - py :, nx - px :
+    ]
+
+    # z- y+ x+
+    out[:, :, :pz, py:, px:] = mov_float[
+        :, :, nz - pz :, : py + 1, : px + 1
+    ]
+    # z- y+ x-
+    out[:, :, :pz, py:, :px] = mov_float[
+        :, :, nz - pz :, : py + 1, nx - px :
+    ]
+    # z- y- x+
+    out[:, :, :pz, :py, px:] = mov_float[
+        :, :, nz - pz :, ny - py :, : px + 1
+    ]
+    # z- y- x-
+    out[:, :, :pz, :py, :px] = mov_float[
+        :, :, nz - pz :, ny - py :, nx - px :
+    ]
+
+    return out
+
+
+def compute_snr_and_smooth_3d(
+    phase_corr, smooth_mat, n_smooth_iters=1, snr_thresh=1.2, npad=3, log_cb=default_log
+):
+    pc = phase_corr.copy()
+    pc_smooth = pc.copy()
+    for i in range(n_smooth_iters):
+        snrs = get_snr_3d(pc, npad)
+        idx_to_smooth = snrs < snr_thresh
+        n_low_snr = idx_to_smooth.sum()
+        # log_cb("Iter %d: %d/%d blocks below SNR thresh" % (i, n_low_snr, snrs.size), 4)
+        if n_low_snr < 1:
+            break
+        pc_smooth = cp.moveaxis(cp.tensordot(smooth_mat, pc_smooth, ((1,), (1,))), 0, 1)
+        pc[idx_to_smooth] = pc_smooth[idx_to_smooth]
+    snrs = get_snr_3d(pc, npad)
+    return pc, snrs
+
+
+def get_snr_3d(phase_corr, npad=3, kernel=None, n_thread_per_block=512, slow=False):
+    phase_corr = phase_corr.copy()
+    nt, nb, nccz, nccy, nccx = phase_corr.shape
+    nball = nt * nb
+
+    if n.isscalar(npad):
+        npad = (npad, npad, npad)
+    elif len(npad) != 3:
+        raise ValueError("npad must be a scalar or a 3-tuple")
+
+    if kernel is None:
+        kernel = get_kernel_zero_around_max_3d()
+
+    # print(phase_corr.shape)
+    # print(npad)
+
+    # Handle slicing when npad is 0 (0:-0 would be empty, need full slice instead)
+    z_slice = slice(npad[0], -npad[0] if npad[0] > 0 else None)
+    y_slice = slice(npad[1], -npad[1] if npad[1] > 0 else None)
+    x_slice = slice(npad[2], -npad[2] if npad[2] > 0 else None)
+    
+    max_nopad = phase_corr[:, :, z_slice, y_slice, x_slice].max(axis=(-1, -2, -3))
+
+    pc_flat = phase_corr.reshape(nball, nccz * nccy * nccx)
+    argmaxs = cp.argmax(pc_flat, axis=-1)
+    argmax_zs, argmax_ys, argmax_xs = cp.unravel_index(argmaxs, (nccz, nccy, nccx))
+
+    xmin = argmax_xs - npad[2]
+    xmin[xmin < 0] = 0
+    xmax = argmax_xs + npad[2]
+    xmax[xmax > nccx] = nccx
+    ymin = argmax_ys - npad[1]  
+    ymin[ymin < 0] = 0
+    ymax = argmax_ys + npad[1]
+    ymax[ymax > nccy] = nccy
+    zmin = argmax_zs - npad[0]
+    zmin[zmin < 0] = 0
+    zmax = argmax_zs + npad[0]
+    zmax[zmax > nccz] = nccz
+
+    if slow:
+        phase_corr = phase_corr.reshape(nball, nccz, nccy, nccx)
+        for tid in range(nball):
+            phase_corr[
+                tid,
+                zmin[tid] : zmax[tid],
+                ymin[tid] : ymax[tid],
+                xmin[tid] : xmax[tid],
+            ] = 0
+        phase_corr = phase_corr.reshape(nt, nb, nccz, nccy, nccx)
+    else:
+        phase_corr = phase_corr.reshape(nball, nccz, nccy, nccx)
+        n_blocks = int(n.ceil(nball / n_thread_per_block))
+        kernel(
+            (n_blocks,),
+            (n_thread_per_block,),
+            (
+                zmin,
+                zmax,
+                ymin,
+                ymax,
+                xmin,
+                xmax,
+                phase_corr,
+                cp.uint32(nccz),
+                cp.uint32(nccy),
+                cp.uint32(nccx),
+                cp.uint32(nball),
+            ),
+        )
+        phase_corr = phase_corr.reshape(nt, nb, nccz, nccy, nccx)
+
+    max_zerod = phase_corr.max(axis=(-1, -2, -3))
+    snrs = max_nopad / cp.maximum(1e-10, max_zerod)
+    return snrs
+
+
+def crop_maxs_3d(pc, npad, kernel=None, n_thread_per_block=512):
+    nt, nb, nccz_pad, nccy_pad, nccx_pad = pc.shape
+    nball = nb * nt
+    if n.isscalar(npad):
+        npad = (npad, npad, npad)
+    elif len(npad) != 3:
+        raise ValueError("npad must be a scalar or a 3-tuple")
+
+    nccz_nopad = nccz_pad - npad[0] * 2
+    nccy_nopad = nccy_pad - npad[1] * 2
+    nccx_nopad = nccx_pad - npad[2] * 2
+
+    pc_nopad = cp.zeros(
+        (nt, nb, nccz_nopad, nccy_nopad, nccx_nopad), dtype=cp.float32
+    )
+    # Handle slicing when npad is 0 (0:-0 would be empty, need full slice instead)
+    z_slice = slice(npad[0], -npad[0] if npad[0] > 0 else None)
+    y_slice = slice(npad[1], -npad[1] if npad[1] > 0 else None)
+    x_slice = slice(npad[2], -npad[2] if npad[2] > 0 else None)
+    pc_nopad[:] = pc[:, :, z_slice, y_slice, x_slice]
+
+    argmaxs = cp.argmax(pc_nopad.reshape(nt, nb, -1), axis=-1)
+    zmaxs, ymaxs, xmaxs = cp.unravel_index(
+        argmaxs, (nccz_nopad, nccy_nopad, nccx_nopad)
+    )
+
+    xmin = xmaxs - npad[2]
+    xmin[xmin < 0] = 0
+    xmax = xmaxs + npad[2] + 1
+    xmax[xmax > nccx_nopad] = nccx_nopad
+    ymin = ymaxs - npad[1]
+    ymin[ymin < 0] = 0
+    ymax = ymaxs + npad[1] + 1
+    ymax[ymax > nccy_nopad] = nccy_nopad
+    zmin = zmaxs - npad[0]
+    zmin[zmin < 0] = 0
+    zmax = zmaxs + npad[0] + 1
+    zmax[zmax > nccz_nopad] = nccz_nopad
+
+    if kernel is None:
+        kernel = get_kernel_crop_around_max_3d()
+
+    npadmat_z = npad[0] * 2 + 1
+    npadmat_y = npad[1] * 2 + 1
+    npadmat_x = npad[2] * 2 + 1
+
+    pc_mat = cp.zeros((nt, nb, npadmat_z, npadmat_y, npadmat_x), cp.float32)
+
+    use_kernel = npad[0] == npad[1] == npad[2]
+    if use_kernel:
+        npadmat = npadmat_z
+        ncc_nopad = nccz_nopad
+        n_blocks = int(n.ceil(nball / n_thread_per_block))
+        kernel(
+            (n_blocks,),
+            (n_thread_per_block,),
+            (
+                zmin.ravel(),
+                zmax.ravel(),
+                ymin.ravel(),
+                ymax.ravel(),
+                xmin.ravel(),
+                xmax.ravel(),
+                pc_nopad.reshape(nball, ncc_nopad, ncc_nopad, ncc_nopad),
+                pc_mat.reshape(nball, npadmat, npadmat, npadmat),
+                cp.uint32(npadmat),
+                cp.uint32(ncc_nopad),
+                cp.uint32(nball),
+            ),
+        )
+    else:
+        zmin_h = cp.asnumpy(zmin.ravel())
+        zmax_h = cp.asnumpy(zmax.ravel())
+        ymin_h = cp.asnumpy(ymin.ravel())
+        ymax_h = cp.asnumpy(ymax.ravel())
+        xmin_h = cp.asnumpy(xmin.ravel())
+        xmax_h = cp.asnumpy(xmax.ravel())
+        pc_nopad_h = pc_nopad.reshape(nball, nccz_nopad, nccy_nopad, nccx_nopad)
+        pc_mat_h = pc_mat.reshape(nball, npadmat_z, npadmat_y, npadmat_x)
+        for tid in range(nball):
+            pc_mat_h[tid, : zmax_h[tid] - zmin_h[tid], : ymax_h[tid] - ymin_h[tid], : xmax_h[tid] - xmin_h[tid]] = (
+                pc_nopad_h[tid, zmin_h[tid] : zmax_h[tid], ymin_h[tid] : ymax_h[tid], xmin_h[tid] : xmax_h[tid]]
+            )
+
+    return pc_mat, zmaxs, ymaxs, xmaxs
+
+
+def get_kernel_crop_around_max_3d():
+    kernel_crop_around_max = cp.RawKernel(
+        r"""
+    extern "C" __global__
+    void crop_around_max_3d(long long* zmin, long long* zmax, long long* ymin, long long* ymax,
+                            long long* xmin, long long* xmax, float* in, float* out,
+                            unsigned int npadmat, unsigned int ncc, unsigned int max){
+        int tid = blockDim.x * blockIdx.x + threadIdx.x;
+        int xx; int yy; int zz;
+        int i; int j; int k;
+        if (tid < max){
+            i = 0;
+            for (zz = zmin[tid]; zz < zmax[tid]; zz++){
+                j = 0;
+                for (yy = ymin[tid]; yy < ymax[tid]; yy++){
+                    k = 0;
+                    for (xx = xmin[tid]; xx < xmax[tid]; xx++){
+                        out[(tid * npadmat * npadmat * npadmat) + (i * npadmat * npadmat) + (j * npadmat) + k] =
+                            in[(tid * ncc * ncc * ncc) + (zz * ncc * ncc) + (yy * ncc) + xx];
+                        k++;
+                    }
+                    j++;
+                }
+                i++;
+            }
+        }
+    }
+    """,
+        "crop_around_max_3d",
+    )
+    return kernel_crop_around_max
+
+
+def get_kernel_zero_around_max_3d():
+    kernel_zero_around_max = cp.RawKernel(
+        r"""
+    extern "C" __global__
+    void zero_around_max_3d(long long* zmin, long long* zmax, long long* ymin, long long* ymax,
+                            long long* xmin, long long* xmax, float* out,
+                            unsigned int nccz, unsigned int nccy, unsigned int nccx,
+                            unsigned int max){
+        int tid = blockDim.x * blockIdx.x + threadIdx.x;
+        int xx; int yy; int zz;
+        if (tid < max){
+            for (zz = zmin[tid]; zz < zmax[tid]; zz++){
+                for (yy = ymin[tid]; yy < ymax[tid]; yy++){
+                    for (xx = xmin[tid]; xx < xmax[tid]; xx++){
+                        out[(tid * nccz * nccy * nccx) + (zz * nccy * nccx) + (yy * nccx) + xx] = 0;
+                    }
+                }
+            }
+        }
+    }
+    """,
+        "zero_around_max_3d",
+    )
+    return kernel_zero_around_max
+
+
+def kernelD1d(xs: n.ndarray, ys: n.ndarray, sigL: float = 0.85) -> n.ndarray:
+    xs0 = xs.reshape(-1, 1)
+    ys0 = ys.reshape(1, -1)
+    dxs = xs0 - ys0
+    K = n.exp(-(dxs**2) / (2 * sigL**2))
+    return K
+
+
+@lru_cache(maxsize=5)
+def mat_upsample_1d(lpad: int, subpixel: int = 10):
+    lar = n.arange(-lpad, lpad + 1)
+    larUP = n.arange(-lpad, lpad + 0.001, 1.0 / subpixel)
+    nup = larUP.shape[0]
+    Kmat = n.linalg.inv(kernelD1d(lar, lar)) @ kernelD1d(lar, larUP)
+    return Kmat, nup
+
+
+def get_subpixel_shifts_3d(
+    pc, max_shift, npad=3, subpixel=5, n_thread_per_block=512
+):
+    # if npad is an int, make it a 3-tuple
+    if n.isscalar(npad):
+        npad = (npad, npad, npad)
+    nt, nb = pc.shape[:2]
+    Kz, nupz = mat_upsample_1d(lpad=npad[0], subpixel=subpixel)
+    Ky, nupy = mat_upsample_1d(lpad=npad[1], subpixel=subpixel)
+    Kx, nupx = mat_upsample_1d(lpad=npad[2], subpixel=subpixel)
+
+    Kz = cp.asarray(Kz, cp.float32)
+    Ky = cp.asarray(Ky, cp.float32)
+    Kx = cp.asarray(Kx, cp.float32)
+
+    pc_mat, zmaxs, ymaxs, xmaxs = crop_maxs_3d(
+        pc, npad, n_thread_per_block=n_thread_per_block
+    )
+
+    zmaxs = zmaxs - max_shift[0]
+    ymaxs = ymaxs - max_shift[1]
+    xmaxs = xmaxs - max_shift[2]
+
+    # separable upsampling: z -> y -> x
+    pc_up = cp.tensordot(pc_mat, Kz, axes=([2], [0]))
+    pc_up = cp.moveaxis(pc_up, -1, 2)
+    pc_up = cp.tensordot(pc_up, Ky, axes=([3], [0]))
+    pc_up = cp.moveaxis(pc_up, -1, 3)
+    pc_up = cp.tensordot(pc_up, Kx, axes=([4], [0]))
+
+    argmaxs = cp.argmax(pc_up.reshape(nt, nb, -1), axis=-1)
+    zmaxs_sub, ymaxs_sub, xmaxs_sub = cp.unravel_index(argmaxs, (nupz, nupy, nupx))
+
+    midz = nupz // 2
+    midy = nupy // 2
+    midx = nupx // 2
+
+    zmaxs = zmaxs.astype(cp.float32) + (zmaxs_sub.astype(cp.float32) - midz) / subpixel
+    ymaxs = ymaxs.astype(cp.float32) + (ymaxs_sub.astype(cp.float32) - midy) / subpixel
+    xmaxs = xmaxs.astype(cp.float32) + (xmaxs_sub.astype(cp.float32) - midx) / subpixel
+
+    return zmaxs, ymaxs, xmaxs
+
+
+def nonrigid_3d_gpu(
+    mov_cpu,
+    mult_mask,
+    add_mask,
+    refs_nr_f,
+    zblocks,
+    yblocks,
+    xblocks,
+    snr_thresh,
+    smooth_mat,
+    max_shift,
+    rmins=None,
+    rmaxs=None,
+    npad=3,
+    n_smooth_iters=1,
+    subpixel=5,
+    n_gpu_threads_per_block=512,
+    batch_size=20,
+    log_cb=default_log,
+    save_phasecorrs=False,
+):
+    """
+    Nonrigid 3D registration on the GPU, returning a 3D shift per block.
+
+    Parameters
+    ----------
+    mov_cpu : ndarray (nz, nt, ny, nx)
+        Movie (z, time, y, x)
+    mult_mask, add_mask : ndarray (nb, bz, by, bx)
+        Block-wise masks
+    refs_nr_f : ndarray (nb, bz, by, bx)
+        Block-wise FFT references
+    zblocks, yblocks, xblocks : list
+        Block boundaries
+    snr_thresh : float
+        SNR threshold for smoothing
+    smooth_mat : ndarray (nb, nb)
+        Nonrigid smoothing matrix
+    max_shift : array-like (3,)
+        Max shift per axis (z, y, x)
+
+    Returns
+    -------
+    zshifts, yshifts, xshifts : ndarray
+        (nt, nzb, nyb, nxb) subpixel shifts per block
+    snrs : ndarray
+        (nt, nzb, nyb, nxb) SNR per block
+    """
+    if not HAS_CUPY:
+        raise ImportError(
+            "GPU registration requires cupy. Please install cupy to use this function."
+            " See https://docs.cupy.dev/en/stable/install.html for installation instructions."
+        )
+
+    mempool = cp.get_default_memory_pool()
+    nz, nt, __, __ = mov_cpu.shape
+    nb = len(zblocks)
+
+    if n.isscalar(max_shift):
+        max_shift = n.array([max_shift, max_shift, max_shift])
+    else:
+        max_shift = n.asarray(max_shift)
+    if n.isscalar(npad):
+        npad = n.array([npad, npad, npad])
+    else:
+        npad = n.asarray(npad)
+        if npad.size != 3:
+            raise ValueError("npad must be a scalar or a 3-tuple")
+    nr = max_shift + npad
+    ncc = nr * 2 + 1
+    
+    log_cb("Nonrigid 3D registration on GPU:", 3)
+    log_cb(" Movie size: %s" % (str(mov_cpu.shape)), 4)
+    log_cb(" Number of blocks: %d" % (nb), 4)
+    log_cb(" Max shifts (z,y,x): %s" % (str(max_shift)), 4)
+    log_cb(" Npad (z,y,x): %s" % (str(npad)), 4)
+    log_cb(" Phase corr size (z,y,x): %s" % (str(ncc)), 4)
+
+    zstarts = n.array([zb[0] for zb in zblocks])
+    ystarts = n.array([yb[0] for yb in yblocks])
+    xstarts = n.array([xb[0] for xb in xblocks])
+    nzb = n.unique(zstarts).shape[0]
+    nyb = n.unique(ystarts).shape[0]
+    nxb = n.unique(xstarts).shape[0]
+    # print(nzb, nyb, nxb)
+    # print(nb)
+    if nb != nzb * nyb * nxb:
+        raise ValueError("Block list length does not match block grid dimensions")
+
+    mult_mask = cp.asarray(mult_mask, cp.float32)
+    add_mask = cp.asarray(add_mask, cp.float32)
+    refs_nr_f = cp.asarray(refs_nr_f, cp.complex64)
+    smooth_mat = cp.asarray(smooth_mat, cp.float32)
+
+    zshifts = cp.zeros((nt, nb), dtype=cp.float32)
+    yshifts = cp.zeros((nt, nb), dtype=cp.float32)
+    xshifts = cp.zeros((nt, nb), dtype=cp.float32)
+    snrs = cp.zeros((nt, nb), dtype=cp.float32)
+    phase_corrs = None
+    if save_phasecorrs:
+        phase_corrs = cp.zeros(
+            (nt, nb, int(ncc[0]), int(ncc[1]), int(ncc[2])), dtype=cp.float32
+        )
+
+    total_batches = int(n.ceil(nt / batch_size))
+    for b in range(total_batches):
+        mempool.free_all_blocks()
+        t1 = b * batch_size
+        t2 = int(n.min((nt, (b + 1) * batch_size)))
+
+        mov_gpu = cp.asarray(mov_cpu[:, t1:t2, :, :])
+        if rmins is not None and rmaxs is not None:
+            # print("CLIPPIGN")
+            # print(rmins, rmaxs)
+            mov_gpu = clip_mov_gpu(mov_gpu, rmins, rmaxs)
+
+        # switch to time-first for blocking
+        mov_gpu = mov_gpu.swapaxes(0, 1)
+
+        mov_blocks = block_mov_3d(mov_gpu, zblocks, yblocks, xblocks)
+        mov_blocks *= mult_mask[cp.newaxis, :, :, :, :]
+        mov_blocks += add_mask[cp.newaxis, :, :, :, :]
+
+        phase_corr = reg_3d_gpu_blocks(mov_blocks, refs_nr_f)
+        # print(phase_corr.shape)
+        phase_corr = unwrap_fft_3d(phase_corr, nr)
+
+        # TODO: consider iterative smoothing (multiple passes) after initial validation
+        pc, snr_batch = compute_snr_and_smooth_3d(
+            phase_corr, smooth_mat, n_smooth_iters, snr_thresh, log_cb=log_cb, npad=npad
+        )
+
+        if save_phasecorrs:
+            phase_corrs[t1:t2] = pc
+
+        zsub, ysub, xsub = get_subpixel_shifts_3d(
+            pc, max_shift, npad, subpixel, n_gpu_threads_per_block
+        )
+
+        zshifts[t1:t2] = zsub
+        yshifts[t1:t2] = ysub
+        xshifts[t1:t2] = xsub
+        snrs[t1:t2] = snr_batch
+
+        del mov_gpu
+        del mov_blocks
+        del phase_corr
+        mempool.free_all_blocks()
+
+    zshifts = zshifts.reshape(nt, nzb, nyb, nxb)
+    yshifts = yshifts.reshape(nt, nzb, nyb, nxb)
+    xshifts = xshifts.reshape(nt, nzb, nyb, nxb)
+    snrs = snrs.reshape(nt, nzb, nyb, nxb)
+
+    if save_phasecorrs:
+        return zshifts, yshifts, xshifts, snrs, phase_corrs
+    else:
+        return zshifts, yshifts, xshifts, snrs, None
 
 
 def process_phase_corr_gpu(phase_corr, pc_size):

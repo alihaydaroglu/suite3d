@@ -996,9 +996,13 @@ def pad_mov(mov, plane_shifts):
     ypad :
         The amount of y pixels padded
     """
+
+    # This function shifts the movie such that the most extreme negative shifts are sent to 0
+    # it also pads to account for the most extereme positive shifts
     nz, nt, nyo, nxo = mov.shape
 
     plane_shifts = n.round(plane_shifts).astype(int)
+    print(plane_shifts)
 
     xrange = plane_shifts[:, 1].min(), plane_shifts[:, 1].max()
     yrange = plane_shifts[:, 0].min(), plane_shifts[:, 0].max()
@@ -1009,8 +1013,13 @@ def pad_mov(mov, plane_shifts):
     xshift = n.ceil(n.abs((xrange[0]))).astype(int)
     nyn = nyo + ypad.sum()
     nxn = nxo + xpad.sum()
+    print('yrange:', yrange, 'xrange:', xrange)
+    print('ypad:', ypad, 'xpad:', xpad)
+    print('yshift:', yshift, 'xshift:', xshift)
+
 
     mov_pad = n.zeros((nz, nt, nyn, nxn), n.float32)
+    print(mov_pad.shape)
 
     mov_pad[:, :, yshift : yshift + nyo, xshift : xshift + nxo] = mov[:]
     return mov_pad, xpad, ypad
@@ -1047,6 +1056,11 @@ def pad_mov3D(mov, plane_shifts):
     yshift = n.ceil(n.abs((yrange[0]))).astype(int)
     xpad = n.ceil(n.abs(n.diff(xrange))).astype(int)[::-1]
     xshift = n.ceil(n.abs((xrange[0]))).astype(int)
+
+    # print('yrange:', yrange, 'xrange:', xrange)
+    # print('ypad:', ypad, 'xpad:', xpad)
+    # print('yshift:', yshift, 'xshift:', xshift)
+
     nyn = nyo + ypad.sum()
     nxn = nxo + xpad.sum()
 

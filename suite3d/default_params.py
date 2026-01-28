@@ -97,6 +97,7 @@ params = {
     "nr_npad": 3,
     "nr_subpixel": 10,
     "nr_smooth_iters": 2,
+    "save_nonrigid_phasecorrs": False,
     # 3d registration params
     "pc_size": n.asarray((2, 40, 40)),  # ~ max_reg_zyx
     "3d_reg": True,  # Use the new 3d registration fucntions
@@ -112,6 +113,7 @@ params = {
     "max_reg_xy_reference": 50,
     # max value in x/y which a plane can be shifted for the reference
     "gpu_reference_batch_size": 20,
+    "block_size_3d": (5, 128, 128),  # nonrigid 3D block size (z, y, x)
     # parameters from suite2p
     "nonrigid": False,
     "apply_z_shift": False, 
