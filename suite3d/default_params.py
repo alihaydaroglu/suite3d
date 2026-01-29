@@ -117,6 +117,7 @@ params = {
     # parameters from suite2p
     "nonrigid": False,
     "apply_z_shift": False, 
+    "smooth_sigma_nr": 1.15,
     "smooth_sigma": 1.15,
     "snr_thresh" : 1.2, #SNR threshold for nonrigid registration (2D)
     "maxregshift": 0.15,# only used in 2D, CPU registration (suite2p)

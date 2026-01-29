@@ -28,23 +28,39 @@ def diverging_cmap(low_color="blue", high_color="red", mid_color="white", name="
     Returns:
         matplotlib.colors.LinearSegmentedColormap: The created colormap.
     """
-    cdict = {
-        "red": [
-            (0.0, mcolors.to_rgb(low_color)[0], mcolors.to_rgb(low_color)[0]),
-            (0.5, mcolors.to_rgb(mid_color)[0], mcolors.to_rgb(mid_color)[0]),
-            (1.0, mcolors.to_rgb(high_color)[0], mcolors.to_rgb(high_color)[0]),
-        ],
-        "green": [
-            (0.0, mcolors.to_rgb(low_color)[1], mcolors.to_rgb(low_color)[1]),
-            (0.5, mcolors.to_rgb(mid_color)[1], mcolors.to_rgb(mid_color)[1]),
-            (1.0, mcolors.to_rgb(high_color)[1], mcolors.to_rgb(high_color)[1]),
-        ],
-        "blue": [
-            (0.0, mcolors.to_rgb(low_color)[2], mcolors.to_rgb(low_color)[2]),
-            (0.5, mcolors.to_rgb(mid_color)[2], mcolors.to_rgb(mid_color)[2]),
-            (1.0, mcolors.to_rgb(high_color)[2], mcolors.to_rgb(high_color)[2]),
-        ],
-    }
+    if mid_color is None:
+        cdict = {
+            "red": [
+                (0.0, mcolors.to_rgb(low_color)[0], mcolors.to_rgb(low_color)[0]),
+                (1.0, mcolors.to_rgb(high_color)[0], mcolors.to_rgb(high_color)[0]),
+            ],
+            "green": [
+                (0.0, mcolors.to_rgb(low_color)[1], mcolors.to_rgb(low_color)[1]),
+                (1.0, mcolors.to_rgb(high_color)[1], mcolors.to_rgb(high_color)[1]),
+            ],
+            "blue": [
+                (0.0, mcolors.to_rgb(low_color)[2], mcolors.to_rgb(low_color)[2]),
+                (1.0, mcolors.to_rgb(high_color)[2], mcolors.to_rgb(high_color)[2]),
+            ],
+        }
+    else:
+        cdict = {
+            "red": [
+                (0.0, mcolors.to_rgb(low_color)[0], mcolors.to_rgb(low_color)[0]),
+                (0.5, mcolors.to_rgb(mid_color)[0], mcolors.to_rgb(mid_color)[0]),
+                (1.0, mcolors.to_rgb(high_color)[0], mcolors.to_rgb(high_color)[0]),
+            ],
+            "green": [
+                (0.0, mcolors.to_rgb(low_color)[1], mcolors.to_rgb(low_color)[1]),
+                (0.5, mcolors.to_rgb(mid_color)[1], mcolors.to_rgb(mid_color)[1]),
+                (1.0, mcolors.to_rgb(high_color)[1], mcolors.to_rgb(high_color)[1]),
+            ],
+            "blue": [
+                (0.0, mcolors.to_rgb(low_color)[2], mcolors.to_rgb(low_color)[2]),
+                (0.5, mcolors.to_rgb(mid_color)[2], mcolors.to_rgb(mid_color)[2]),
+                (1.0, mcolors.to_rgb(high_color)[2], mcolors.to_rgb(high_color)[2]),
+            ],
+        }
     cmap = mcolors.LinearSegmentedColormap(name, cdict)
     cmap.set_bad(nan_color)
     return cmap

@@ -550,7 +550,7 @@ def get_nonrigid_phasecorr_and_masks_3d(ref_image, reference_params):
     reference_params : dict
     """
     nz, ny, nx = ref_image.shape
-    smooth_sigma = reference_params["smooth_sigma"]
+    smooth_sigma = reference_params["smooth_sigma_nr"]
     block_size = reference_params.get("block_size_3d", reference_params.get("block_size"))
     if block_size is None or len(block_size) != 3:
         raise ValueError("block_size_3d must be a 3-tuple for 3D nonrigid registration")
@@ -1576,11 +1576,13 @@ def get_subpixel_shifts_3d(
     # if npad is an int, make it a 3-tuple
     if n.isscalar(npad):
         npad = (npad, npad, npad)
-    nt, nb = pc.shape[:2]
-    Kz, nupz = mat_upsample_1d(lpad=npad[0], subpixel=subpixel)
-    Ky, nupy = mat_upsample_1d(lpad=npad[1], subpixel=subpixel)
-    Kx, nupx = mat_upsample_1d(lpad=npad[2], subpixel=subpixel)
 
+    if n.isscalar(subpixel):
+        subpixel = (subpixel, subpixel, subpixel)
+    nt, nb = pc.shape[:2]
+    Kz, nupz = mat_upsample_1d(lpad=npad[0], subpixel=subpixel[0])
+    Ky, nupy = mat_upsample_1d(lpad=npad[1], subpixel=subpixel[1])
+    Kx, nupx = mat_upsample_1d(lpad=npad[2], subpixel=subpixel[2])
     Kz = cp.asarray(Kz, cp.float32)
     Ky = cp.asarray(Ky, cp.float32)
     Kx = cp.asarray(Kx, cp.float32)
@@ -1607,9 +1609,9 @@ def get_subpixel_shifts_3d(
     midy = nupy // 2
     midx = nupx // 2
 
-    zmaxs = zmaxs.astype(cp.float32) + (zmaxs_sub.astype(cp.float32) - midz) / subpixel
-    ymaxs = ymaxs.astype(cp.float32) + (ymaxs_sub.astype(cp.float32) - midy) / subpixel
-    xmaxs = xmaxs.astype(cp.float32) + (xmaxs_sub.astype(cp.float32) - midx) / subpixel
+    zmaxs = zmaxs.astype(cp.float32) + (zmaxs_sub.astype(cp.float32) - midz) / subpixel[0]
+    ymaxs = ymaxs.astype(cp.float32) + (ymaxs_sub.astype(cp.float32) - midy) / subpixel[1]
+    xmaxs = xmaxs.astype(cp.float32) + (xmaxs_sub.astype(cp.float32) - midx) / subpixel[2]
 
     return zmaxs, ymaxs, xmaxs
 
@@ -1715,7 +1717,7 @@ def nonrigid_3d_gpu(
     phase_corrs = None
     if save_phasecorrs:
         phase_corrs = cp.zeros(
-            (nt, nb, int(ncc[0]), int(ncc[1]), int(ncc[2])), dtype=cp.float32
+            (nt,2, nb, int(ncc[0]), int(ncc[1]), int(ncc[2])), dtype=cp.float32
         )
 
     total_batches = int(n.ceil(nt / batch_size))
@@ -1739,7 +1741,9 @@ def nonrigid_3d_gpu(
 
         phase_corr = reg_3d_gpu_blocks(mov_blocks, refs_nr_f)
         # print(phase_corr.shape)
-        phase_corr = unwrap_fft_3d(phase_corr, nr)
+        phase_corr = unwrap_fft_3d(phase_corr, nr)        
+        if save_phasecorrs:
+            phase_corrs[t1:t2, 0] = phase_corr.copy()
 
         # TODO: consider iterative smoothing (multiple passes) after initial validation
         pc, snr_batch = compute_snr_and_smooth_3d(
@@ -1747,7 +1751,7 @@ def nonrigid_3d_gpu(
         )
 
         if save_phasecorrs:
-            phase_corrs[t1:t2] = pc
+            phase_corrs[t1:t2, 1] = pc
 
         zsub, ysub, xsub = get_subpixel_shifts_3d(
             pc, max_shift, npad, subpixel, n_gpu_threads_per_block

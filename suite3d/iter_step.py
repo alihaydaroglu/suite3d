@@ -776,8 +776,12 @@ def register_dataset_gpu(
         all_offsets = {}
         all_offsets["xmaxs_rr"] = n.concatenate(xmaxs_rr, axis=0)
         all_offsets["ymaxs_rr"] = n.concatenate(ymaxs_rr, axis=0)
-        all_offsets["xmaxs_nr"] = n.concatenate(xmaxs_nr, axis=0)
-        all_offsets["ymaxs_nr"] = n.concatenate(ymaxs_nr, axis=0)
+        if nonrigid:
+            all_offsets["xmaxs_nr"] = n.concatenate(xmaxs_nr, axis=0)
+            all_offsets["ymaxs_nr"] = n.concatenate(ymaxs_nr, axis=0)
+        else:
+            all_offsets["xmaxs_nr"] = None
+            all_offsets["ymaxs_nr"] = None
 
         log_cb("After all GPU Batches:", level=3, log_mem_usage=True)
 
@@ -1006,6 +1010,7 @@ def register_dataset_gpu_3d(
     frate_hz = params.get("fs", 4)
     nonrigid = params.get("nonrigid", False)
     job_reg_data_dir = dirs["registered_fused_data"]
+    reference_params['smooth_sigma_nr'] = params.get('smooth_sigma_nr', 1.15)
 
     # choose the top 2% of pix in each plane to run
     # quality metrics on
