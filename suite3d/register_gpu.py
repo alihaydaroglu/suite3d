@@ -40,7 +40,7 @@ def nonrigid_2d_reg_gpu(
     mult_mask,
     add_mask,
     refs_nr_f,
-    yblocks,
+yblocks,
     xblocks,
     snr_thresh,
     smooth_mat,
@@ -290,7 +290,7 @@ def rigid_2d_reg_gpu(
     xmaxs = cp.zeros((nz, nt), dtype=cp.float32)
     cmaxs = cp.zeros((nz, nt), dtype=cp.float32)
     ncc = int(max_reg_xy * 2 + 1)
-    phase_corr = cp.zeros((nt, ncc, ncc))
+    phase_corr = cp.zeros((nz,nt, ncc, ncc))
 
     load_t = time.time()
     # log_cb("Loaded mov and masks to GPU for rigid reg in %.2f sec" % ((load_t-start_t),), 4)
@@ -332,8 +332,8 @@ def rigid_2d_reg_gpu(
             add_mask_gpu[zidx],
         )
         mov_gpu[zidx] = convolve_2d_gpu(mov_gpu[zidx], refs_f_gpu[zidx])
-        unwrap_fft_2d(mov_gpu[zidx].real, max_reg_xy, out=phase_corr)
-        ymaxs[zidx], xmaxs[zidx], cmaxs[zidx] = get_max_cc_coord(phase_corr, max_reg_xy)
+        unwrap_fft_2d(mov_gpu[zidx].real, max_reg_xy, out=phase_corr[zidx])
+        ymaxs[zidx], xmaxs[zidx], cmaxs[zidx] = get_max_cc_coord(phase_corr[zidx], max_reg_xy)
         reg_t += time.time() - reg_tic
 
         if shift:
@@ -361,8 +361,8 @@ def rigid_2d_reg_gpu(
     # log_cb("Freeing all blocks", 3)
     # log_cb(log_gpu_memory(mempool), 4)
     if shift:
-        return mov_shifted, ymaxs, xmaxs, cmaxs
-    return ymaxs, xmaxs, cmaxs
+        return mov_shifted, ymaxs, xmaxs, cmaxs, phase_corr
+    return ymaxs, xmaxs, cmaxs, phase_corr
 
 
 def rigid_2d_reg_cpu(

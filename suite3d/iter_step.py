@@ -623,6 +623,7 @@ def register_dataset_gpu(
         mov_shifted = []
         ymaxs_nr = []
         xmaxs_nr = []
+        phase_corrs = []
 
         mov_shifted = None
         # print(mov_cpu.shape)
@@ -640,7 +641,7 @@ def register_dataset_gpu(
             #        (n.percentile(mov_cpu[10,idx0:idx1],0.5), n.percentile(mov_cpu[10,idx0:idx1],99.5),
             #         mov_cpu[10,idx0:idx1].mean(), mov_cpu[10,idx0:idx1].min(), mov_cpu[10,idx0:idx1].max()))
 
-            mov_shifted_gpu, ymaxs_rr_gpu, xmaxs_rr_gpu, __ = reg_gpu.rigid_2d_reg_gpu(
+            mov_shifted_gpu, ymaxs_rr_gpu, xmaxs_rr_gpu, __, phase_corr = reg_gpu.rigid_2d_reg_gpu(
                 mov_cpu[:, idx0:idx1],
                 mask_mul,
                 mask_offset,
@@ -692,7 +693,7 @@ def register_dataset_gpu(
                 ymaxs_nr_cpu = ymaxs_nr_gpu.get()
                 xmaxs_nr_cpu = xmaxs_nr_gpu.get()
             else:
-                print("NO NONRIGID\n\n\n")
+                # print("NO NONRIGID\n\n\n")
                 tic_get = time.time()
                 xmaxs_nr_cpu = n.zeros_like(ymaxs_rr_gpu)
                 ymaxs_nr_cpu = n.zeros_like(ymaxs_rr_gpu)
@@ -761,6 +762,8 @@ def register_dataset_gpu(
             xmaxs_rr.append(xmaxs_rr_cpu.T)
             ymaxs_nr.append(ymaxs_nr_cpu)
             xmaxs_nr.append(xmaxs_nr_cpu)
+            # print(phase_corr.shape)?
+            phase_corrs.append(phase_corr.get())
 
             mempool = cp.get_default_memory_pool()
             mempool.free_all_blocks()
@@ -768,14 +771,15 @@ def register_dataset_gpu(
             log_cb("After GPU Batch:", level=3, log_mem_usage=True)
 
         concat_t = time.time()
-        log_cb("Concatenating movie", 2)
+        # log_cb("Concatenating movie", 2)
         # mov_shifted = mov_shifted_cpu # n.concatenate(mov_shifted,axis=0)
         # print("CONCAT")
         # print(mov_shifted.shape)
-        log_cb("Concat in %.2f sec" % (time.time() - concat_t), 3)
+        # log_cb("Concat in %.2f sec" % (time.time() - concat_t), 3)
         all_offsets = {}
         all_offsets["xmaxs_rr"] = n.concatenate(xmaxs_rr, axis=0)
         all_offsets["ymaxs_rr"] = n.concatenate(ymaxs_rr, axis=0)
+        all_offsets["phase_corrs"] = n.swapaxes(n.concatenate(phase_corrs, axis=1), 0, 1)
         if nonrigid:
             all_offsets["xmaxs_nr"] = n.concatenate(xmaxs_nr, axis=0)
             all_offsets["ymaxs_nr"] = n.concatenate(ymaxs_nr, axis=0)
@@ -1190,7 +1194,7 @@ def register_dataset_gpu_3d(
 
         time_pre_reg = time.time()
         # log time it takes
-        phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts, mov_cpu = (
+        phase_corr_shifted, int_shift, pc_peak_loc, sub_pixel_shifts, mov_shifted = (
             reg_3d.rigid_3d_ref_gpu(
                 mov_cpu,
                 mask_mul,
@@ -1200,8 +1204,8 @@ def register_dataset_gpu_3d(
                 batch_size=gpu_reg_batchsize,  # TODO make xpad/ypad automatically integers
                 rmins=rmins,
                 rmaxs=rmaxs,
+                shift_reg = True,
                 crosstalk_coeff=crosstalk_coeff,
-                shift_reg=False,
                 xpad=int(xpad),
                 ypad=int(ypad),
                 fuse_shift=fuse_shift,
@@ -1218,13 +1222,13 @@ def register_dataset_gpu_3d(
         time_shift = time.time()
         # shift entire abtch on cpu at once
         # log this info
-        mov_shifted = reg_3d.shift_mov_fast(mov_cpu, -int_shift)
+        # mov_shifted = reg_3d.shift_mov_fast(mov_cpu, -int_shift)
 
-        if apply_z_shift:
-            # if there is at least one 
-            if n.max(int_shift[0]) > 1:
-                mov_shifted = reg_3d.shift_mov_z(mov_shifted, int_shift)
-        log_cb(f"Shifted the mov in: {time.time() - time_shift}s")
+        # if apply_z_shift:
+        #     # if there is at least one 
+        #     if n.max(int_shift[0]) > 1:
+        #         mov_shifted = reg_3d.shift_mov_z(mov_shifted, int_shift)
+        # log_cb(f"Shifted the mov in: {time.time() - time_shift}s")
 
     
     
@@ -1263,6 +1267,24 @@ def register_dataset_gpu_3d(
                 "Computed 3D nonrigid shifts in %.2f sec" % (time.time() - tic_nonrigid),
                 3,
             )
+
+            tic_nonrigid_apply = time.time()
+            # mov_shifted = reg_3d.nonrigid_transform_data_3d_gpu(
+            #     mov_shifted,
+            #     zshifts_nr,
+            #     yshifts_nr,
+            #     xshifts_nr,
+            #     zblocks,
+            #     yblocks,
+            #     xblocks,
+            #     batch_size=gpu_reg_batchsize,
+            #     log_cb=log_cb,
+            # )
+            # log_cb(
+            #     "Applied 3D nonrigid correction in %.2f sec"
+            #     % (time.time() - tic_nonrigid_apply),
+            #     3,
+            # )
 
         # NOTE changed this so gets int_shifts + sub_pixel shifts etc
         all_offsets = {}

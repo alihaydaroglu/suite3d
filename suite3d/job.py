@@ -2055,7 +2055,9 @@ class Job:
                 results[key].append(offset[key])
 
         for key in results.keys():
-            results[key] = n.concatenate(results[key],axis=0)
+            if len(results[key]) > 0 and results[key][0] is not None:
+            
+                results[key] = n.concatenate(results[key],axis=0)
 
 
         results["metrics"] = all_metrics

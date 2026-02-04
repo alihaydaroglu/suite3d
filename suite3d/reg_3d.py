@@ -1,6 +1,7 @@
 # new function used for the 3d registration
 import os
 from functools import lru_cache
+import time
 import numpy as n
 
 from .reference_image import HAS_CUPY
@@ -460,6 +461,141 @@ def make_blocks_3d(Lz, Ly, Lx, block_size=(8, 128, 128)):
     return zblock, yblock, xblock, [nz, ny, nx], block_size, nonrigid_smoothing_matrix
 
 
+def _block_centers_3d(zblocks, yblocks, xblocks):
+    zstarts = n.array([zb[0] for zb in zblocks], dtype=n.float32)
+    ystarts = n.array([yb[0] for yb in yblocks], dtype=n.float32)
+    xstarts = n.array([xb[0] for xb in xblocks], dtype=n.float32)
+
+    zuniq = n.unique(zstarts)
+    yuniq = n.unique(ystarts)
+    xuniq = n.unique(xstarts)
+
+    bz = float(zblocks[0][1] - zblocks[0][0])
+    by = float(yblocks[0][1] - yblocks[0][0])
+    bx = float(xblocks[0][1] - xblocks[0][0])
+
+    zcenters = zuniq + bz * 0.5
+    ycenters = yuniq + by * 0.5
+    xcenters = xuniq + bx * 0.5
+
+    return zcenters, ycenters, xcenters
+
+
+def _make_block_index_grid_3d(Lz, Ly, Lx, zcenters, ycenters, xcenters):
+    zcenters = cp.asarray(zcenters, dtype=cp.float32)
+    ycenters = cp.asarray(ycenters, dtype=cp.float32)
+    xcenters = cp.asarray(xcenters, dtype=cp.float32)
+
+    nzb = zcenters.shape[0]
+    nyb = ycenters.shape[0]
+    nxb = xcenters.shape[0]
+
+    z_idx = cp.interp(
+        cp.arange(Lz, dtype=cp.float32),
+        zcenters,
+        cp.arange(nzb, dtype=cp.float32),
+    )
+    y_idx = cp.interp(
+        cp.arange(Ly, dtype=cp.float32),
+        ycenters,
+        cp.arange(nyb, dtype=cp.float32),
+    )
+    x_idx = cp.interp(
+        cp.arange(Lx, dtype=cp.float32),
+        xcenters,
+        cp.arange(nxb, dtype=cp.float32),
+    )
+
+    zq, yq, xq = cp.meshgrid(z_idx, y_idx, x_idx, indexing="ij")
+    return zq, yq, xq
+
+
+def nonrigid_transform_data_3d_gpu(
+    mov_cpu,
+    zshifts,
+    yshifts,
+    xshifts,
+    zblocks,
+    yblocks,
+    xblocks,
+    batch_size=5,
+    order=1,
+    mode="nearest",
+    log_cb=default_log,
+):
+    """
+    Apply 3D nonrigid block shifts to a movie on GPU using trilinear interpolation.
+
+    Parameters
+    ----------
+    mov_cpu : ndarray (nz, nt, ny, nx)
+        Movie to correct (CPU)
+    zshifts, yshifts, xshifts : ndarray (nt, nzb, nyb, nxb)
+        Block-wise 3D shifts (GPU or CPU)
+    zblocks, yblocks, xblocks : list
+        Block boundary arrays
+    batch_size : int
+        Time batch size for GPU processing
+    order : int
+        Interpolation order for map_coordinates (1 = linear)
+    mode : str
+        Boundary mode for map_coordinates
+
+    Returns
+    -------
+    mov_corrected : ndarray (nz, nt, ny, nx)
+        Nonrigid-corrected movie (CPU)
+    """
+    if not HAS_CUPY:
+        raise ImportError(
+            "GPU nonrigid correction requires cupy. Please install cupy to use this function."
+        )
+
+    nz, nt, ny, nx = mov_cpu.shape
+    zcenters, ycenters, xcenters = _block_centers_3d(zblocks, yblocks, xblocks)
+    zq, yq, xq = _make_block_index_grid_3d(nz, ny, nx, zcenters, ycenters, xcenters)
+
+    zz, yy, xx = cp.meshgrid(
+        cp.arange(nz, dtype=cp.float32),
+        cp.arange(ny, dtype=cp.float32),
+        cp.arange(nx, dtype=cp.float32),
+        indexing="ij",
+    )
+
+    mov_gpu = cp.asarray(mov_cpu, dtype=cp.float32)
+    mov_gpu = mov_gpu.swapaxes(0, 1)
+
+    zshifts = cp.asarray(zshifts, dtype=cp.float32)
+    yshifts = cp.asarray(yshifts, dtype=cp.float32)
+    xshifts = cp.asarray(xshifts, dtype=cp.float32)
+
+    mov_out = cp.zeros_like(mov_gpu)
+
+    total_batches = int(n.ceil(nt / batch_size))
+    for b in range(total_batches):
+        t0 = b * batch_size
+        t1 = int(n.min((nt, (b + 1) * batch_size)))
+
+        for tid in range(t0, t1):
+            zup = cuimage.map_coordinates(
+                zshifts[tid], [zq, yq, xq], order=order, mode="nearest"
+            )
+            yup = cuimage.map_coordinates(
+                yshifts[tid], [zq, yq, xq], order=order, mode="nearest"
+            )
+            xup = cuimage.map_coordinates(
+                xshifts[tid], [zq, yq, xq], order=order, mode="nearest"
+            )
+
+            coords = [zz + zup, yy + yup, xx + xup]
+            mov_out[tid] = cuimage.map_coordinates(
+                mov_gpu[tid], coords, order=order, mode=mode, cval=0.0
+            )
+
+    mov_out = mov_out.swapaxes(0, 1)
+    return mov_out.get()
+
+
 def nonrigid_phasecorr_reference_3D(
     refImg0, maskSlope, smooth_sigma, zblock, yblock, xblock, sigz=None
 ):
@@ -632,6 +768,107 @@ def mask_filter_fft_ref(ref_img, mult_mask, add_mask, smooth=0.5):
     return fft_3d_ref_conj
 
 
+def spatial_autocorrelation_3d(
+    vol,
+    normalize=True,
+    mean_subtract=True,
+    use_gpu=None,
+    boxsize=None,
+    clip_percentiles=None,
+):
+    """
+    Compute the 3D spatial autocorrelation of a volume over z, y, x.
+
+    Parameters
+    ----------
+    vol : ndarray
+        Input 3D volume (nz, ny, nx).
+    normalize : bool
+        If True, normalize by the maximum value.
+    mean_subtract : bool
+        If True, subtract the mean before autocorrelation.
+    use_gpu : bool or None
+        Force GPU (True) or CPU (False). If None, use GPU when vol is a cupy array.
+    boxsize : tuple or None
+        If provided, return a centered box of size (bz, by, bx) with the peak at
+        (bz//2, by//2, bx//2). If length-2, interpreted as (bz, bxy) and returns
+        a (bz, bxy) array where each z-slice is the average of the centered X and
+        Y autocorrelation line profiles.
+    clip_percentiles : tuple or None
+        If provided, clip a copy of the volume to (low, high) percentiles before
+        autocorrelation.
+
+    Returns
+    -------
+    ndarray
+        Autocorrelation volume, centered with fftshift.
+    """
+    if use_gpu and not HAS_CUPY:
+        raise ImportError(
+            "GPU autocorrelation requires cupy. Please install cupy to use this function."
+        )
+
+    xp = cp if (use_gpu or (HAS_CUPY and isinstance(vol, cp.ndarray))) else np
+    vol_x = xp.asarray(vol).copy()
+    if clip_percentiles is not None:
+        p_low, p_high = clip_percentiles
+        lo = xp.percentile(vol_x, p_low)
+        hi = xp.percentile(vol_x, p_high)
+        vol_x = xp.clip(vol_x, lo, hi)
+    if mean_subtract:
+        vol_x = vol_x - vol_x.mean()
+
+    fft_vol = xp.fft.fftn(vol_x)
+    ac = xp.fft.ifftn(fft_vol * xp.conj(fft_vol)).real
+    ac = xp.fft.fftshift(ac)
+
+    if boxsize is not None:
+        if len(boxsize) == 2:
+            bz, bxy = (int(boxsize[0]), int(boxsize[1]))
+            cz, cy, cx = (ac.shape[0] // 2, ac.shape[1] // 2, ac.shape[2] // 2)
+            z0 = cz - bz // 2
+            z1 = z0 + bz
+            y0 = cy - bxy // 2
+            x0 = cx - bxy // 2
+            y1 = y0 + bxy
+            x1 = x0 + bxy
+            if (
+                z0 < 0
+                or y0 < 0
+                or x0 < 0
+                or z1 > ac.shape[0]
+                or y1 > ac.shape[1]
+                or x1 > ac.shape[2]
+            ):
+                raise ValueError("boxsize exceeds autocorrelation volume dimensions")
+
+            out = xp.zeros((bz, bxy), dtype=ac.dtype)
+            for zi, zidx in enumerate(range(z0, z1)):
+                line_x = ac[zidx, cy, x0:x1]
+                line_y = ac[zidx, y0:y1, cx]
+                out[zi] = 0.5 * (line_x + line_y)
+            if normalize:
+                out = out / (out.max() + 1e-8)
+            return out
+
+        bz, by, bx = (int(boxsize[0]), int(boxsize[1]), int(boxsize[2]))
+        cz, cy, cx = (ac.shape[0] // 2, ac.shape[1] // 2, ac.shape[2] // 2)
+        z0 = cz - bz // 2
+        y0 = cy - by // 2
+        x0 = cx - bx // 2
+        z1 = z0 + bz
+        y1 = y0 + by
+        x1 = x0 + bx
+        if z0 < 0 or y0 < 0 or x0 < 0 or z1 > ac.shape[0] or y1 > ac.shape[1] or x1 > ac.shape[2]:
+            raise ValueError("boxsize exceeds autocorrelation volume dimensions")
+        ac = ac[z0:z1, y0:y1, x0:x1]
+
+    if normalize:
+        ac = ac / (ac.max() + 1e-8)
+
+    return ac
+
+
 def clip_mov_cpu(mov, rmin, rmax):
     """
     Clip the movie per plane between rmin and rmax, numba seems to be slower
@@ -767,6 +1004,8 @@ def rigid_3d_ref_gpu(
     rmaxs=None,
     crosstalk_coeff=None,
     shift_reg=False,
+    shift_reg_subpixel=True,
+    shift_reg_subpixel_method="map",
     xpad=None,
     ypad=None,
     fuse_shift=None,
@@ -775,6 +1014,7 @@ def rigid_3d_ref_gpu(
     plane_shifts=None,
     process_mov=False,
     cavity_size=15,
+    log_cb=default_log,
 ):
     """
     Runs rigid registration on the gpu.
@@ -824,17 +1064,17 @@ def rigid_3d_ref_gpu(
     sub_pixel_shifts = np.zeros((nt, 3))
     mov_cpu_processed = None
 
-    if shift_reg == True:
-        mov_shifted = np.zeros_like(mov_cpu)
+    mov_shifted = None
     total_batches = int(np.ceil(nt / batch_size))
     for b in range(total_batches):
         mempool.free_all_blocks()
         t1 = b * batch_size  # starting time point of batch
         t2 = int(np.min((nt, (b + 1) * batch_size)))  # end time point of batch
 
+        mov_gpu_full = None
         if process_mov:
             mov_gpu = cp.asarray(mov_cpu[:, t1:t2, :, :])
-            mov_gpu, mov_cpu_processed_tmp = process_mov_gpu(
+            mov_gpu, mov_cpu_processed_tmp, mov_gpu_full = process_mov_gpu(
                 mov_gpu,
                 plane_shifts,
                 xpad,
@@ -862,6 +1102,9 @@ def rigid_3d_ref_gpu(
             mov_gpu = cp.asarray(mov_cpu[:, t1:t2, :, :])
             if crosstalk_coeff is not None:
                 mov_gpu = utils.crosstalk_subtract(mov_gpu, crosstalk_coeff, cavity_size)
+        if shift_reg and mov_gpu_full is not None:
+            mov_gpu = mov_gpu.copy()
+
         mult_mask = cp.asarray(mult_mask)
         add_mask = cp.asarray(add_mask)
 
@@ -879,10 +1122,39 @@ def rigid_3d_ref_gpu(
         ) = process_phase_corr_gpu(phase_corr_tmp, cp.asarray(pc_size))
 
         if shift_reg == True:
-            mov_gpu = shift_gpu(mov_gpu, int_shift[t1:t2])
-            mov_shifted[:, t1:t2, :, :] = mov_gpu.get()
+            mov_gpu_for_shift = mov_gpu_full if mov_gpu_full is not None else mov_gpu
+            shift_start = time.perf_counter()
+            if shift_reg_subpixel:
+                if shift_reg_subpixel_method == "fft":
+                    mov_gpu_for_shift = shift_gpu_subpixel_fft(
+                        mov_gpu_for_shift, sub_pixel_shifts[t1:t2]
+                    )
+                else:
+                    mov_gpu_for_shift = shift_gpu_subpixel_map(
+                        mov_gpu_for_shift, sub_pixel_shifts[t1:t2]
+                    )
+            else:
+                mov_gpu_for_shift = shift_gpu(mov_gpu_for_shift, int_shift[t1:t2])
+            shift_elapsed = time.perf_counter() - shift_start
+            # log_cb(
+            #     f"Shift op ({'subpixel ' + shift_reg_subpixel_method if shift_reg_subpixel else 'integer'}) "
+            #     f"batch {b} took {shift_elapsed:.4f}s"
+            )
+            if mov_shifted is None:
+                mov_shifted = np.zeros(
+                    (
+                        mov_gpu_for_shift.shape[0],
+                        nt,
+                        mov_gpu_for_shift.shape[2],
+                        mov_gpu_for_shift.shape[3],
+                    ),
+                    dtype=mov_gpu_for_shift.dtype,
+                )
+            mov_shifted[:, t1:t2, :, :] = mov_gpu_for_shift.get()
 
         del mov_gpu
+        if mov_gpu_full is not None:
+            del mov_gpu_full
         del phase_corr_tmp
         mempool.free_all_blocks()
 
@@ -912,6 +1184,9 @@ def rigid_3d_ref_gpu_dev(
     rmaxs=None,
     crosstalk_coeff=None,
     shift_reg=False,
+    shift_reg_subpixel=True,
+    shift_reg_subpixel_method="map",
+    log_cb=default_log,
 ):
     """
     Runs rigid registration on the gpu.
@@ -988,7 +1263,19 @@ def rigid_3d_ref_gpu_dev(
         ) = process_phase_corr_gpu(phase_corr_tmp, cp.asarray(pc_size))
 
         if shift_reg == True:
-            mov_gpu = shift_gpu(mov_gpu, int_shift[t1:t2])
+            shift_start = time.perf_counter()
+            if shift_reg_subpixel:
+                if shift_reg_subpixel_method == "fft":
+                    mov_gpu = shift_gpu_subpixel_fft(mov_gpu, sub_pixel_shifts[t1:t2])
+                else:
+                    mov_gpu = shift_gpu_subpixel_map(mov_gpu, sub_pixel_shifts[t1:t2])
+            else:
+                mov_gpu = shift_gpu(mov_gpu, int_shift[t1:t2])
+            shift_elapsed = time.perf_counter() - shift_start
+            # log_cb(
+            #     f"Shift op ({'subpixel ' + shift_reg_subpixel_method if shift_reg_subpixel else 'integer'}) "
+            #     f"batch {b} took {shift_elapsed:.4f}s"
+            # )
             mov_shifted[:, t1:t2, :, :] = mov_gpu.get()
 
         print(f"completed batch {b}")
@@ -1018,6 +1305,85 @@ def shift_gpu(mov_gpu, shift_batch):
             mov_gpu[:, t, shift_batch[t, 1] :, :] = 0
 
     return mov_gpu
+
+
+def shift_gpu_subpixel_fft(mov_gpu, shifts_zyx):
+    """
+    Apply subpixel 3D shifts using the Fourier shift theorem.
+
+    Parameters
+    ----------
+    mov_gpu : cp.ndarray (nz, nt, ny, nx)
+    shifts_zyx : array-like (nt, 3)
+        Shifts in (z, y, x) order per frame.
+    """
+    if not HAS_CUPY:
+        raise ImportError(
+            "GPU subpixel shifting requires cupy. Please install cupy to use this function."
+        )
+
+    nz, ntb, ny, nx = mov_gpu.shape
+    shifts_zyx = cp.asarray(shifts_zyx, dtype=cp.float32)
+
+    kz = cp.fft.fftfreq(nz).astype(cp.float32)[:, None, None]
+    ky = cp.fft.fftfreq(ny).astype(cp.float32)[None, :, None]
+    kx = cp.fft.fftfreq(nx).astype(cp.float32)[None, None, :]
+
+    out = cp.empty_like(mov_gpu)
+    for t in range(ntb):
+        dz, dy, dx = shifts_zyx[t]
+        phase = cp.exp(-2j * cp.pi * (dz * kz + dy * ky + dx * kx))
+        fft_vol = cufft.fftn(mov_gpu[:, t, :, :], axes=(0, 1, 2))
+        shifted = cufft.ifftn(fft_vol * phase, axes=(0, 1, 2)).real
+        out[:, t, :, :] = shifted.astype(mov_gpu.dtype, copy=False)
+
+    return out
+
+
+def shift_gpu_subpixel_map(mov_gpu, shifts_zyx, order=1, mode="constant", cval=0.0):
+    """
+    Apply subpixel 3D shifts using map_coordinates (trilinear by default).
+
+    Parameters
+    ----------
+    mov_gpu : cp.ndarray (nz, nt, ny, nx)
+    shifts_zyx : array-like (nt, 3)
+        Shifts in (z, y, x) order per frame.
+    order : int
+        Interpolation order (1 = linear).
+    mode : str
+        Boundary mode for map_coordinates.
+    cval : float
+        Constant value for padding when mode="constant".
+    """
+    if not HAS_CUPY:
+        raise ImportError(
+            "GPU subpixel shifting requires cupy. Please install cupy to use this function."
+        )
+
+    nz, ntb, ny, nx = mov_gpu.shape
+    shifts_zyx = cp.asarray(shifts_zyx, dtype=cp.float32)
+
+    zz, yy, xx = cp.meshgrid(
+        cp.arange(nz, dtype=cp.float32),
+        cp.arange(ny, dtype=cp.float32),
+        cp.arange(nx, dtype=cp.float32),
+        indexing="ij",
+    )
+
+    out = cp.empty_like(mov_gpu)
+    for t in range(ntb):
+        dz, dy, dx = shifts_zyx[t]
+        coords = cp.stack([zz + dz, yy + dy, xx + dx])
+        out[:, t, :, :] = cuimage.map_coordinates(
+            mov_gpu[:, t, :, :],
+            coords,
+            order=order,
+            mode=mode,
+            cval=cval,
+        ).astype(mov_gpu.dtype, copy=False)
+
+    return out
 
 
 def clip_mov_gpu(mov, rmin, rmax):
@@ -1058,12 +1424,13 @@ def process_mov_gpu(
     mov_gpu = shift_mov_lbm_gpu(mov_gpu, plane_shifts)
     # get the processed movie on the cpu
     mov_cpu_processed_tmp = mov_gpu.get()
+    mov_gpu_full = mov_gpu
     # crop the movie so only full z-planes count
     if xpad > 0:
         mov_gpu = mov_gpu[:, :, :, xpad:-xpad]
     if ypad > 0:
         mov_gpu = mov_gpu[:, :, ypad:-ypad, :]
-    return mov_gpu, mov_cpu_processed_tmp
+    return mov_gpu, mov_cpu_processed_tmp, mov_gpu_full
 
 
 # TODO changed from register_gpu, 1. pads became int
@@ -1312,11 +1679,132 @@ def unwrap_fft_3d(mov_float, pc_size, out=None):
     return out
 
 
+def center_phasecorrs(arr, normalize_max=True):
+    """
+    Center phase-correlation peaks over the last two dimensions.
+
+    Parameters
+    ----------
+    arr : ndarray
+        Input array of arbitrary shape. The last two dimensions are treated
+        as the 2D phase-correlation map.
+
+    normalize_max : bool
+        If True, divide each map by its maximum so the centered peak is 1.
+
+    Returns
+    -------
+    ndarray
+        Array of same shape as input, with each [*, *] map rolled so its
+        maximum is at the center of the last two dimensions.
+    """
+    if arr.ndim < 2:
+        raise ValueError("arr must have at least 2 dimensions")
+
+    xp = cp if (HAS_CUPY and isinstance(arr, cp.ndarray)) else n
+    ny, nx = arr.shape[-2], arr.shape[-1]
+    cy, cx = ny // 2, nx // 2
+
+    out = arr.copy()
+    flat = out.reshape(-1, ny, nx)
+    for idx in range(flat.shape[0]):
+        argmax = xp.argmax(flat[idx])
+        y, x = xp.unravel_index(argmax, (ny, nx))
+        shift_y = int(cy - y)
+        shift_x = int(cx - x)
+        rolled = xp.roll(flat[idx], shift=(shift_y, shift_x), axis=(-2, -1))
+        if normalize_max:
+            max_val = rolled.max()
+            if max_val != 0:
+                rolled = rolled / max_val
+        flat[idx] = rolled
+
+    return out.reshape(arr.shape)
+
+def compute_fwhm_2d(arr):
+    """
+    Compute the full-width at half-maximum (FWHM) of 2D peaks in an array.
+
+    Parameters
+    ----------
+    arr : ndarray (nt, ny, nx)
+        Input array containing 2D peaks along the last two dimensions.
+
+    Returns
+    -------
+    fwhms : ndarray (nt, 2)
+        FWHM values along y and x for each 2D peak.
+    """
+    nt, ny, nx = arr.shape
+    fwhms = n.zeros((nt, 2), dtype=n.float32)
+
+    for t in range(nt):
+        peak = arr[t]
+        half_max = peak.max() / 2.0
+
+        # Y-axis FWHM
+        y_indices = n.where(peak >= half_max)[0]
+        if y_indices.size > 0:
+            fwhm_y = y_indices[-1] - y_indices[0] + 1
+        else:
+            fwhm_y = 0
+
+        # X-axis FWHM
+        x_indices = n.where(peak >= half_max)[1]
+        if x_indices.size > 0:
+            fwhm_x = x_indices[-1] - x_indices[0] + 1
+        else:
+            fwhm_x = 0
+
+        fwhms[t, 0] = fwhm_y
+        fwhms[t, 1] = fwhm_x
+
+    return fwhms
+
+def get_phasecorr_snr_2d(phasecorrs, npad_xy):
+    # a SIMPLE version of get_snr_3d which works for an array of 2D phasecorrs without cupy
+    nt, ny, nx = phasecorrs.shape
+    snrs = n.zeros(nt, dtype=n.float32)
+
+    for t in range(nt):
+        peak = phasecorrs[t]
+        half_max = peak.max() / 2.0
+        
+        # Create padded region mask
+        pad_mask = n.zeros_like(peak, dtype=bool)
+        if npad_xy > 0:
+            pad_mask[:npad_xy, :] = True
+            pad_mask[-npad_xy:, :] = True
+            pad_mask[:, :npad_xy] = True
+            pad_mask[:, -npad_xy:] = True
+        
+        # Get max in non-padded region
+        peak_nopad = peak.copy()
+        peak_nopad[pad_mask] = 0
+        max_nopad = peak_nopad.max()
+        
+        # Zero out region around max in padded region
+        max_idx = n.unravel_index(n.argmax(peak_nopad), peak.shape)
+        y_min = max(0, max_idx[0] - npad_xy)
+        y_max = min(ny, max_idx[0] + npad_xy + 1)
+        x_min = max(0, max_idx[1] - npad_xy)
+        x_max = min(nx, max_idx[1] + npad_xy + 1)
+        peak_nopad[y_min:y_max, x_min:x_max] = 0
+        
+        # Get max in background (outside padded region and around peak)
+        max_background = peak_nopad.max()
+        
+        snrs[t] = max_nopad / n.maximum(1e-10, max_background)
+
+    return snrs
+
+
 def compute_snr_and_smooth_3d(
     phase_corr, smooth_mat, n_smooth_iters=1, snr_thresh=1.2, npad=3, log_cb=default_log
 ):
     pc = phase_corr.copy()
     pc_smooth = pc.copy()
+    snr0 = get_snr_3d(pc, npad)
     for i in range(n_smooth_iters):
         snrs = get_snr_3d(pc, npad)
         idx_to_smooth = snrs < snr_thresh
@@ -1326,8 +1814,8 @@ def compute_snr_and_smooth_3d(
             break
         pc_smooth = cp.moveaxis(cp.tensordot(smooth_mat, pc_smooth, ((1,), (1,))), 0, 1)
         pc[idx_to_smooth] = pc_smooth[idx_to_smooth]
-    snrs = get_snr_3d(pc, npad)
-    return pc, snrs
+    # snrs = get_snr_3d(pc, npad)
+    return pc, snr0
 
 
 def get_snr_3d(phase_corr, npad=3, kernel=None, n_thread_per_block=512, slow=False):
@@ -1351,23 +1839,26 @@ def get_snr_3d(phase_corr, npad=3, kernel=None, n_thread_per_block=512, slow=Fal
     y_slice = slice(npad[1], -npad[1] if npad[1] > 0 else None)
     x_slice = slice(npad[2], -npad[2] if npad[2] > 0 else None)
     
+    # print(z_slice, y_slice, x_slice)
     max_nopad = phase_corr[:, :, z_slice, y_slice, x_slice].max(axis=(-1, -2, -3))
 
     pc_flat = phase_corr.reshape(nball, nccz * nccy * nccx)
+    # print(pc_flat.shape)
     argmaxs = cp.argmax(pc_flat, axis=-1)
+    # print(argmaxs.shape)
     argmax_zs, argmax_ys, argmax_xs = cp.unravel_index(argmaxs, (nccz, nccy, nccx))
 
     xmin = argmax_xs - npad[2]
     xmin[xmin < 0] = 0
-    xmax = argmax_xs + npad[2]
+    xmax = argmax_xs + npad[2] + 1
     xmax[xmax > nccx] = nccx
     ymin = argmax_ys - npad[1]  
     ymin[ymin < 0] = 0
-    ymax = argmax_ys + npad[1]
+    ymax = argmax_ys + npad[1] + 1
     ymax[ymax > nccy] = nccy
     zmin = argmax_zs - npad[0]
     zmin[zmin < 0] = 0
-    zmax = argmax_zs + npad[0]
+    zmax = argmax_zs + npad[0] + 1  # 
     zmax[zmax > nccz] = nccz
 
     if slow:

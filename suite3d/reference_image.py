@@ -759,7 +759,7 @@ def get_reference_img_gpu(
             idx1 = min(
                 frames.shape[1], (i + 1) * batch_size
             )  # catch the case when the final idx would be larger than the array
-            tmp_frames, tmp_ymax, tmp_xmax, tmp_cmax = reg.rigid_2d_reg_gpu(
+            tmp_frames, tmp_ymax, tmp_xmax, tmp_cmax, tmp_pcs = reg.rigid_2d_reg_gpu(
                 frames[:, i * batch_size : idx1, :, :],
                 mult_mask,
                 add_mask,
