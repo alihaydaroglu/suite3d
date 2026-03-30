@@ -1,3 +1,6 @@
+import os
+import glob
+
 import numpy as n
 from . import quality_utils as qu
 
@@ -266,32 +269,72 @@ def _pca_expvars_svd(data, n_pcs):
     return expvars[:n_pcs]
 
 
-def overmerge_scores_for_rois(stats, mov, n_pcs=5, key_prefix=''):
-    '''Compute per-ROI overmerge scores using voxel-level PCA.
+def overmerge_scores_fast(stats, mov, n_pcs=5, key_prefix='',
+                          max_rois=200, max_frames_per_roi=200,
+                          use_active_frames=True):
+    '''Fast overmerge scores on a random subset of ROIs using active frames.
 
-    For each ROI, extracts pixel timeseries, computes SVD, and derives
-    the overmerge score from explained variance ratios.
+    Uses each ROI's stored active_frames to extract only the relevant
+    temporal subset, making the SVD much cheaper. Only computes for a
+    random sample of ROIs by default.
 
     Args:
         stats (list[dict]): ROI statistics with coords and lam keys.
         mov (ndarray): (nt, nz, ny, nx) movie data.
         n_pcs (int): Number of PCA components.
         key_prefix (str): Prefix for coord/lam keys in stats.
+        max_rois (int): Max number of ROIs to compute (random sample).
+        max_frames_per_roi (int): Max frames to use per ROI for SVD.
+        use_active_frames (bool): If True, use active_frames from stats
+            to select temporal subset. Falls back to random frames.
 
     Returns:
-        pca_expvars (ndarray): (n_rois, n_pcs) explained variances.
-        overmerge_scores (ndarray): (n_rois,) overmerge scores.
+        pca_expvars (ndarray): (n_rois, n_pcs) — NaN for unsampled ROIs.
+        overmerge_scores (ndarray): (n_rois,) — NaN for unsampled ROIs.
     '''
     nc = len(stats)
+    nt_mov = mov.shape[0]
     pca_expvars = n.full((nc, n_pcs), n.nan)
 
-    for roi_idx, stat in enumerate(stats):
+    # Select which ROIs to compute
+    # Filter to ROIs with enough pixels
+    eligible = [i for i in range(nc)
+                if len(stats[i].get(key_prefix + 'lam', [])) >= n_pcs + 1]
+    if len(eligible) > max_rois:
+        roi_indices = n.array(sorted(n.random.choice(eligible, max_rois, replace=False)))
+    else:
+        roi_indices = n.array(eligible)
+
+    for roi_idx in roi_indices:
+        stat = stats[roi_idx]
         zc, yc, xc = stat[key_prefix + 'coords']
         lam = stat[key_prefix + 'lam']
-        if len(lam) < n_pcs + 1:
-            continue
 
-        fpixs = mov[:, zc, yc, xc]  # (nt, n_pix)
+        # Determine which frames to use
+        if use_active_frames and 'active_frames' in stat:
+            af = n.asarray(stat['active_frames'])
+            # active_frames may be indices into the original movie
+            af = af[af < nt_mov]
+            if len(af) < n_pcs + 1:
+                # Fall back to all frames
+                af = n.arange(min(nt_mov, max_frames_per_roi))
+            elif len(af) > max_frames_per_roi:
+                af = af[n.random.choice(len(af), max_frames_per_roi, replace=False)]
+        else:
+            # Use random subset of frames
+            if nt_mov > max_frames_per_roi:
+                af = n.sort(n.random.choice(nt_mov, max_frames_per_roi, replace=False))
+            else:
+                af = n.arange(nt_mov)
+
+        fpixs = mov[af][:, zc, yc, xc]  # (n_frames, n_pix)
+
+        # Cap pixels for large ROIs — subsample highest-weight voxels
+        max_pix = 200
+        if fpixs.shape[1] > max_pix:
+            top_idx = n.argsort(lam)[-max_pix:]
+            fpixs = fpixs[:, top_idx]
+
         n_components = min(n_pcs, fpixs.shape[1], fpixs.shape[0])
         if n_components < n_pcs:
             continue
@@ -307,38 +350,87 @@ def overmerge_scores_for_rois(stats, mov, n_pcs=5, key_prefix=''):
     return pca_expvars, om_scores
 
 
-def overmerge_scores_batched(stats, mov, n_pcs=5, key_prefix='', batch_size=500):
-    '''Batched version of overmerge_scores_for_rois for memory efficiency.
+def overmerge_from_pixel_raster(fpixs, n_pcs=5):
+    '''Compute overmerge score from a pixel raster already in memory.
 
-    Same interface but processes ROIs in batches to limit memory use
-    when many ROIs have large footprints.
+    Intended to be called during trace extraction when the (npix, nt)
+    raster is already loaded. This is the fast path — no movie loading needed.
+
+    Args:
+        fpixs (ndarray): (nt, npix) or (npix, nt) pixel timeseries for one ROI.
+        n_pcs (int): Number of PCA components.
+
+    Returns:
+        float: Overmerge score (0 = single source, 1 = likely merged).
+        ndarray: (n_pcs,) explained variances.
     '''
-    nc = len(stats)
-    pca_expvars = n.full((nc, n_pcs), n.nan)
+    if fpixs.ndim != 2:
+        return n.nan, n.full(n_pcs, n.nan)
 
-    for start in range(0, nc, batch_size):
-        end = min(start + batch_size, nc)
-        for roi_idx in range(start, end):
-            stat = stats[roi_idx]
-            zc, yc, xc = stat[key_prefix + 'coords']
-            lam = stat[key_prefix + 'lam']
-            if len(lam) < n_pcs + 1:
-                continue
+    # Ensure (nt, npix) orientation
+    if fpixs.shape[0] < fpixs.shape[1]:
+        fpixs = fpixs.T
 
-            fpixs = mov[:, zc, yc, xc]
-            n_components = min(n_pcs, fpixs.shape[1], fpixs.shape[0])
-            if n_components < n_pcs:
-                continue
+    nt, npix = fpixs.shape
+    if npix < n_pcs + 1 or nt < n_pcs + 1:
+        return n.nan, n.full(n_pcs, n.nan)
 
-            expvars = _pca_expvars_svd(fpixs, n_pcs)
-            pca_expvars[roi_idx, :len(expvars)] = expvars
+    expvars = _pca_expvars_svd(fpixs, n_pcs)
+    padded = n.full(n_pcs, n.nan)
+    padded[:len(expvars)] = expvars
 
-    valid = ~n.isnan(pca_expvars[:, 0])
-    om_scores = n.full(nc, n.nan)
-    if valid.any():
-        om_scores[valid] = overmerge_score_calc(pca_expvars[valid])
+    score = overmerge_score_calc(padded[n.newaxis, :])[0]
+    return score, padded
 
-    return pca_expvars, om_scores
+
+# =============================================================================
+# Movie loading helpers
+# =============================================================================
+
+def load_movie_subset(reg_dir, max_frames=500):
+    '''Load a temporal subset of the registered movie for overmerge computation.
+
+    Args:
+        reg_dir (str): Path to registered_fused_data directory.
+        max_frames (int): Maximum number of frames to load.
+
+    Returns:
+        ndarray: (nt, nz, ny, nx) movie subset, or None if not available.
+    '''
+    files = sorted(glob.glob(os.path.join(reg_dir, 'fused_reg_data*.npy')))
+    if not files:
+        return None
+
+    # Load first file to get shape
+    d0 = n.load(files[0])
+    nz, nt_per, ny, nx = d0.shape
+
+    # Figure out how many files to load
+    total_frames = len(files) * nt_per
+    if total_frames <= max_frames:
+        files_to_load = files
+    else:
+        n_files = max(1, max_frames // nt_per)
+        # Evenly space files across the recording
+        indices = n.linspace(0, len(files) - 1, n_files, dtype=int)
+        files_to_load = [files[i] for i in indices]
+
+    chunks = []
+    loaded = 0
+    for f in files_to_load:
+        d = n.load(f)  # (nz, nt, ny, nx)
+        remaining = max_frames - loaded
+        if remaining <= 0:
+            break
+        if d.shape[1] > remaining:
+            d = d[:, :remaining]
+        chunks.append(d)
+        loaded += d.shape[1]
+
+    mov = n.concatenate(chunks, axis=1)  # (nz, nt, ny, nx)
+    # Transpose to (nt, nz, ny, nx) for overmerge functions
+    mov = mov.transpose(1, 0, 2, 3).astype(n.float32)
+    return mov
 
 
 # =============================================================================
@@ -426,7 +518,7 @@ def compute_roi_metrics(stats, F=None, meds_um=None, voxel_size_um=None,
 
     # Overmerge scores
     if mov is not None:
-        pca_expvars, om_scores = overmerge_scores_batched(stats, mov, n_pcs=n_pcs)
+        pca_expvars, om_scores = overmerge_scores_fast(stats, mov, n_pcs=n_pcs)
         results['overmerge_scores'] = om_scores
         results['pca_expvars'] = pca_expvars
     else:

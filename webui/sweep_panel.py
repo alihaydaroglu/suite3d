@@ -34,7 +34,9 @@ class SweepPanel(param.Parameterized):
         self.voxel_size_um = (1, 1, 1)
         self.frate_hz = 1.0
 
-        # Bokeh sources for the 4 main plots
+        self.mov_subset = None  # cached movie subset for overmerge
+
+        # Bokeh sources for the 5 main plots
         self.roi_count_source = ColumnDataSource(data=dict(
             x=[], total=[], filtered=[], labels=[],
         ))
@@ -44,12 +46,13 @@ class SweepPanel(param.Parameterized):
         self.noise_source = ColumnDataSource(data=dict(
             x=[], median=[], q25=[], q75=[], labels=[],
         ))
+        self.overmerge_source = ColumnDataSource(data=dict(
+            x=[], median=[], pct_above=[], labels=[],
+        ))
         # Scatter source for duplication corr vs dist
         self.dup_scatter_source = ColumnDataSource(data=dict(
             dist=[], corr=[], combo=[],
         ))
-        # Size distribution: one source per combo, stored in a list
-        self.size_sources = []
 
         self._build_ui(max_height)
 
@@ -131,6 +134,19 @@ class SweepPanel(param.Parameterized):
         )
         self.noise_plot.xaxis.major_label_orientation = 0.7
 
+        # 5. Overmerge bar chart
+        self.overmerge_plot = figure(
+            height=300, width=400, title="Overmerge Score",
+            x_range=[], toolbar_location="above",
+            tools="pan,reset,save,wheel_zoom",
+        )
+        self.overmerge_plot.vbar(
+            x='x', top='median', width=0.6, source=self.overmerge_source,
+            color=Category10_10[4], alpha=0.7,
+        )
+        self.overmerge_plot.xaxis.major_label_orientation = 0.7
+        self.overmerge_plot.yaxis.axis_label = "Median overmerge score"
+
         # --- Bind callbacks ---
         pn.bind(self._on_sweep_change, self.sweep_select, watch=True)
         self.refresh_btn.on_click(self._on_refresh)
@@ -154,13 +170,17 @@ class SweepPanel(param.Parameterized):
             pn.pane.Bokeh(self.roi_plot),
             pn.pane.Bokeh(self.dup_plot),
         )
-        bottom_row = pn.Row(
+        mid_row = pn.Row(
             pn.pane.Bokeh(self.dup_scatter_plot),
             pn.pane.Bokeh(self.noise_plot),
+        )
+        bottom_row = pn.Row(
+            pn.pane.Bokeh(self.overmerge_plot),
         )
 
         plots = pn.Column(
             top_row,
+            mid_row,
             bottom_row,
             self.summary_table,
             sizing_mode="stretch_both",
@@ -179,6 +199,18 @@ class SweepPanel(param.Parameterized):
         self.job = job_interface.job
         self.voxel_size_um = self.job.params.get('voxel_size_um', (1, 1, 1))
         self.frate_hz = self.job.params.get('fs', 1.0)
+
+        # Pre-load movie subset for overmerge computation
+        reg_dir = self.job.dirs.get('registered_fused_data',
+                                     os.path.join(self.job.job_dir, 'registered_fused_data'))
+        if os.path.isdir(reg_dir):
+            try:
+                self.mov_subset = qm.load_movie_subset(reg_dir, max_frames=500)
+                if self.mov_subset is not None:
+                    print(f"  Loaded movie subset: {self.mov_subset.shape} for overmerge")
+            except Exception as e:
+                print(f"  Could not load movie subset: {e}")
+                self.mov_subset = None
 
         # Find all sweep directories
         sweeps_parent = os.path.join(self.job.job_dir, 'sweeps')
@@ -255,6 +287,7 @@ class SweepPanel(param.Parameterized):
                 stats, F=F,
                 voxel_size_um=self.voxel_size_um,
                 frate_hz=self.frate_hz,
+                mov=self.mov_subset,
                 near_thresh=20.0,
                 min_npix=self.min_npix_input.value,
             )
@@ -284,6 +317,8 @@ class SweepPanel(param.Parameterized):
         noise_meds = []
         noise_q25s = []
         noise_q75s = []
+        om_meds = []
+        om_pct_above = []
         all_dists = []
         all_corrs = []
         all_combos = []
@@ -305,6 +340,8 @@ class SweepPanel(param.Parameterized):
                 noise_meds.append(0)
                 noise_q25s.append(0)
                 noise_q75s.append(0)
+                om_meds.append(0)
+                om_pct_above.append(0)
                 continue
 
             nv = m['n_voxels']
@@ -330,6 +367,13 @@ class SweepPanel(param.Parameterized):
             noise_meds.append(med_noise)
             noise_q25s.append(q25)
             noise_q75s.append(q75)
+
+            # Overmerge
+            om = m['overmerge_scores']
+            valid_om = om[~np.isnan(om)]
+            om_meds.append(float(np.median(valid_om)) if len(valid_om) > 0 else 0)
+            om_pct_above.append(float((valid_om > 0.5).sum() / max(len(valid_om), 1) * 100)
+                                if len(valid_om) > 0 else 0)
 
             # Scatter data (subsample if too many)
             if len(dc) > 0:
@@ -371,26 +415,41 @@ class SweepPanel(param.Parameterized):
             x=x_vals, median=noise_meds, q25=noise_q25s, q75=noise_q75s, labels=labels,
         )
 
+        # Update overmerge plot
+        self.overmerge_plot.x_range.factors = x_vals
+        has_om = any(v > 0 for v in om_meds)
+        if has_om:
+            self.overmerge_plot.title.text = "Median Overmerge Score"
+        else:
+            self.overmerge_plot.title.text = "Overmerge Score (no movie loaded)"
+        self.overmerge_source.data = dict(
+            x=x_vals, median=om_meds, pct_above=om_pct_above, labels=labels,
+        )
+
         # Summary HTML table
         rows = []
         for i in range(n):
             m = self.all_metrics[i]
             if m is None:
                 rows.append(f"<tr><td>C{i}</td><td>{labels[i]}</td>"
-                            "<td colspan='4'>not completed</td></tr>")
+                            "<td colspan='5'>not completed</td></tr>")
                 continue
             nv = m['n_voxels']
             dc = m['duplicate_corrs']
             n_dup = int((dc > dup_thresh).sum()) if len(dc) > 0 else -1
             valid_noise = m['shot_noise'][~np.isnan(m['shot_noise'])]
             med_n = f"{np.median(valid_noise):.4f}" if len(valid_noise) > 0 else "N/A"
+            om = m['overmerge_scores']
+            valid_om = om[~np.isnan(om)]
+            med_om = f"{np.median(valid_om):.3f}" if len(valid_om) > 0 else "N/A"
             rows.append(
                 f"<tr><td>C{i}</td><td>{labels[i]}</td>"
                 f"<td>{m['n_rois']}</td>"
                 f"<td>{int((nv >= min_npix).sum())}</td>"
                 f"<td>{np.median(nv):.0f}</td>"
                 f"<td>{n_dup}</td>"
-                f"<td>{med_n}</td></tr>"
+                f"<td>{med_n}</td>"
+                f"<td>{med_om}</td></tr>"
             )
 
         table_html = f"""
@@ -403,6 +462,7 @@ class SweepPanel(param.Parameterized):
             <th style="padding: 4px; border: 1px solid #ddd;">Med vx</th>
             <th style="padding: 4px; border: 1px solid #ddd;">Dups</th>
             <th style="padding: 4px; border: 1px solid #ddd;">Noise</th>
+            <th style="padding: 4px; border: 1px solid #ddd;">Overmerge</th>
         </tr></thead>
         <tbody>{''.join(rows)}</tbody>
         </table>
