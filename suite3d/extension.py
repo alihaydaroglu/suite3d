@@ -139,11 +139,10 @@ def detect_cells(
     if savepath is not None:
         log("Saving cells to %s" % savepath, 1)
         n.save(savepath, stats)
-        # bad way to change the ...//stats.npy path to iscell.npy
         is_cell_path = savepath[:-9] + "iscell.npy"
-        is_cell = n.ones((len(stats), 2), dtype=int)
+        from .utils import make_iscell, save_iscell
         log("Saving iscell.npy to %s" % is_cell_path, 1)
-        n.save(is_cell_path, is_cell)
+        save_iscell(is_cell_path, make_iscell(len(stats)))
     return stats
 
 
@@ -401,9 +400,9 @@ def save_final_results(savepath, stats, log):
         log(f"Saving cells to {savepath}", 1)
         n.save(savepath, stats)
         is_cell_path = savepath[:-9] + "iscell.npy"
-        is_cell = n.ones((len(stats), 2), dtype=int)
+        from .utils import make_iscell, save_iscell
         log(f"Saving iscell.npy to {is_cell_path}", 1)
-        n.save(is_cell_path, is_cell)
+        save_iscell(is_cell_path, make_iscell(len(stats)))
 
 
 def detect_cells_worker(
@@ -969,7 +968,7 @@ def extract_activity(
                 mov_batch = mov[start:end].swapaxes(0, 1).compute()
             else:
                 mov_batch = mov[:, start:end].compute()
-        except:
+        except Exception:
             log("NOT A DASK ARRAY!", 3)
             mov_batch = mov[:, start:end]
         log("Batch size: %d GB" % (mov_batch.nbytes / (1024**3),), 4)

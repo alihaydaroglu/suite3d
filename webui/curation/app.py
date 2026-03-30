@@ -6,9 +6,9 @@ import panel as pn
 from sklearn.cluster import KMeans
 import json
 from pathlib import Path
-from webui.curation.umap_visualiser import UMAPVisualiser
-from webui.curation.box_viewer import BoxViewer
-from webui.curation.hist_viewer import HistViewer
+from .umap_visualiser import UMAPVisualiser
+from .box_viewer import BoxViewer
+from .hist_viewer import HistViewer
 
 pn.extension()
 
@@ -402,10 +402,8 @@ def get_curation_panel(umap_file=r"/home/ali/packages/s3d-dev/devbooks/webui_dat
     """Get the curation panel for embedding in other applications"""
     return create_app(umap_file, hdf5_path)
 
-# app = create_app("contrastive_umap.npy", r"\\znas.cortexlab.net\Lab\Share\Ali\for-suyash\data\dataset.h5")
-app = create_app(r"/home/ali/packages/s3d-dev/devbooks/webui_data/outputs/umap_2d.npy",
-                  r"/home/ali/packages/s3d-dev/devbooks/webui_data/dataset.h5")
-app.servable()
-
 if __name__ == "__main__":
+    app = create_app(r"/home/ali/packages/s3d-dev/devbooks/webui_data/outputs/umap_2d.npy",
+                      r"/home/ali/packages/s3d-dev/devbooks/webui_data/dataset.h5")
+    app.servable()
     app.show(port=5007)

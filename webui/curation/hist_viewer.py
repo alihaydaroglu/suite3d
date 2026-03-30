@@ -445,7 +445,7 @@ class HistViewer:
         if self.hdf5_file is not None:
             try:
                 self.hdf5_file.close()
-            except:
+            except Exception:
                 pass
 
 

@@ -16,7 +16,7 @@ try:
     from PyQt5.QtCore import QSize
     from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox, QSizePolicy
     from PyQt5.QtGui import QKeySequence
-except:
+except ImportError:
     print("Problems importing napari or PyQT. No UI available")
 
 default_display_params = {
@@ -158,7 +158,7 @@ class GenericNapariUI:
         '''
         if self.viewer is not None:
             try: self.viewer.close()
-            except: print("Couldn't close old viewer")
+            except Exception: print("Couldn't close old viewer")
             self.viewer = None
         self.viewer = napari.Viewer(title="Suite3D: %s" % self.base_dir.absolute())
 
@@ -489,21 +489,23 @@ class CurationUI(GenericNapariUI):
                     self.n_roi_activity = file_nroi
 
         if self.verbose: print("Loading iscell files")
+        from .utils import normalize_iscell, make_iscell
         for file in iscell_files:
-            self.iscells[file] = self.load_file(file + '.npy')
-        
+            raw = self.load_file(file + '.npy')
+            self.iscells[file] = normalize_iscell(raw) if raw is not None else None
+
         # if we don't find iscell_extracted, that probably means extraction hasn't happened
         # maybe this should mean that no traces should be displayed?
         # for now, if iscell_extracted isn't found, assume all ROIs are extracted. We'll
         # double check that self.n_roi is equal to the number of rois in the activity files
-        # the displayed cell/not-cell labels, a 1D array of size n_roi     
+        # the displayed cell/not-cell labels, a 1D boolean array of size n_roi
         if self.display_activity:
             if self.iscells['iscell_extracted'] is None:
                 warn(warnings['missing_iscell_extracted'], RuntimeWarning)
-                self.iscells['iscell_extracted'] = n.ones((self.n_roi,2))
-            self.n_roi_extracted = self.iscells['iscell_extracted'][:,0].sum()
-            self.extracted_roi_idxs = n.where(self.iscells['iscell_extracted'][:,0])[0]
-            self.extracted_roi_flag = self.iscells['iscell_extracted'][:,0]
+                self.iscells['iscell_extracted'] = make_iscell(self.n_roi)
+            self.n_roi_extracted = int(self.iscells['iscell_extracted'].sum())
+            self.extracted_roi_idxs = n.where(self.iscells['iscell_extracted'])[0]
+            self.extracted_roi_flag = self.iscells['iscell_extracted']
             if self.n_roi_extracted != self.n_roi_activity:
                 warn(warnings['activity_mismatch'],RuntimeWarning)
                 self.display_activity=False
@@ -810,7 +812,7 @@ class CurationUI(GenericNapariUI):
         self.button_area.addItem(self.save_button_proxy, row=0, col=0)
 
     def update_iscell(self):
-        self.iscells['iscell'][:] = self.display_roi_labels.astype(int)[:,n.newaxis]
+        self.iscells['iscell'] = self.display_roi_labels.astype(bool)
         if self.verbose:
             print("Updating iscell with %d / %d ROIs marked as cells" % (self.display_roi_labels.sum(),self.n_roi))
         self.save_file('iscell.npy', self.iscells['iscell'], overwrite=True)

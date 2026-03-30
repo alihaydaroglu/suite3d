@@ -1,30 +1,16 @@
-import numpy as n 
+import numpy as n
 import os
-import sys
 from pathlib import Path
-
 
 import panel as pn
 
-from bokeh.io import curdoc
-from bokeh.layouts import column, row
-from bokeh.models import ColumnDataSource, Slider, TextInput, RangeSlider
-from bokeh.plotting import figure, show
-from bokeh.models import LinearColorMapper
-from bokeh.models import FileInput
-from bokeh.layouts import gridplot
-from bokeh.palettes import Turbo256,Greys256
-
-# this adds the general suite3d directory to the python path
-# it's a hack, and it only works if you call this function from the main suite3d dir
-# eventually, the package manager should add packages/suite3d (or the general root dir) to PYTHONPATH during a proper installation
-sys.path.insert(0,'.')
-from webui.volume_vis import VolumeWidget
-from webui.job_interface import JobInterface
-from webui.init_pass_panel import InitPanel
-from webui.corrmap_panel import CorrmapPanel
-from webui.registration_panel import RegistrationPanel
-from webui.curation.app import get_curation_panel
+from .volume_vis import VolumeWidget
+from .job_interface import JobInterface
+from .init_pass_panel import InitPanel
+from .corrmap_panel import CorrmapPanel
+from .registration_panel import RegistrationPanel
+from .footprint_panel import FootprintPanel
+from .curation.app import get_curation_panel
 
 
 pn.extension(design="native")
@@ -37,33 +23,37 @@ job_widget_vis_button.name = 'Show create/load job widget'
 init_panel = InitPanel(max_height=800)
 reg_panel = RegistrationPanel(max_height=800)
 corrmap_panel = CorrmapPanel(max_height=800)
+footprint_panel = FootprintPanel(max_height=800)
 
 # Create curation tab
 curation_layout = get_curation_panel()
 
 ui = pn.Tabs(
-    ("Job Interface", job_interface.job_widget), 
-    ("Initialization", init_panel.layout), 
-    ("Registration", reg_panel.layout), 
+    ("Job Interface", job_interface.job_widget),
+    ("Initialization", init_panel.layout),
+    ("Registration", reg_panel.layout),
     ("Correlation Map", corrmap_panel.layout),
-    ("Curation", curation_layout)
+    ("Footprints", footprint_panel.layout),
+    ("Curation", curation_layout),
 )
 
 def job_load_callback(value):
     if value:
         try:
             init_panel.load_job(job_interface)
-        except:
-            print("Could not load init panel")
+        except Exception as e:
+            print("Could not load init panel:", e)
         try:
             reg_panel.load_job(job_interface)
-        except:
-            print("Could not load registration panel")
+        except Exception as e:
+            print("Could not load registration panel:", e)
         try:
             corrmap_panel.load_job(job_interface)
-        except:
-            print("Could not load corrmap panel")
+        except Exception as e:
+            print("Could not load corrmap panel:", e)
+        try:
+            footprint_panel.load_job(job_interface)
+        except Exception as e:
+            print("Could not load footprint panel:", e)
 
 pn.bind(job_load_callback, job_interface.param.job_loaded, watch=True)
-
-ui.servable()

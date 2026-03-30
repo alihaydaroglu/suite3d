@@ -43,7 +43,6 @@ def get_params():
     params.update({
         "t_batch_size": 300,         # number of frames to compute per iteration
         "n_proc_corr": 1,           # number of processors for correlation map calculation
-        "mproc_batchsize": 5,        # frames per smaller batch within the larger batch
         "n_init_files": 1,           # number of TIFFs used for initialization
     })
 

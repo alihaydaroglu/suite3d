@@ -34,19 +34,24 @@ class VolumeWidget(param.Parameterized):
 
 
     def setup_figure(self):
-        self.vmin = n.percentile(self.volume, 20)
-        self.vmax = n.percentile(self.volume, 99.9)
+        self.vmin = float(n.percentile(self.volume, 20))
+        self.vmax = float(n.percentile(self.volume, 99.9))
+        if self.vmax <= self.vmin:
+            self.vmax = self.vmin + 1.0
 
-        print('title is', self.title)
-        self.source = ColumnDataSource(data=dict(image=[self.volume[self.zidx]]))
+        self.source = ColumnDataSource(data=dict(
+            image=[self.volume[self.zidx]],
+            dw=[self.nx],
+            dh=[self.ny],
+        ))
         self.plot = figure(height=self.size[0], width=self.size[1], title=self.title,
                     tools="pan,reset,save,wheel_zoom", aspect_ratio=1, match_aspect=True,
                     active_scroll="wheel_zoom", sizing_mode='scale_both')
         self.plot.grid.grid_line_width = 0
 
         self.mapper = LinearColorMapper(palette=Greys256, low=self.vmin, high=self.vmax)
-        self.plot.image(source=self.source,  x=0, y=0, dw=self.nx, dh=self.ny,color_mapper=self.mapper,
-                    image="image")
+        self.plot.image(source=self.source, x=0, y=0, dw="dw", dh="dh",
+                    color_mapper=self.mapper, image="image")
         
     def add_sliders(self):
         self.sliders = {
@@ -65,33 +70,38 @@ class VolumeWidget(param.Parameterized):
             self.mapper.high = self.vmax
             print('New vlims:', self.vmin,self.vmax, ' zidx: ', self.zidx)
 
-        def change_zidx(attrname, old ,new):
+        def change_zidx(attrname, old, new):
             self.zidx = self.sliders['zidx'].value
-            print("New updated zidx:" , self.zidx)
-            
-            self.source.data.update(image = [self.volume[self.zidx]])
-            print("    Updated zidx")
-            # self.source.data['image'] = self.volume[self.zidx]
+            self.source.data.update(
+                image=[self.volume[self.zidx]],
+                dw=[self.nx],
+                dh=[self.ny],
+            )
             
             
         self.sliders['zidx'].on_change("value_throttled", change_zidx)
         self.sliders['image_range'].on_change("value_throttled",update_limits)
 
     def update_volume(self, new_volume):
-        print("Vol update call!! ")
         self.volume = new_volume
         self.nz, self.ny, self.nx = self.volume.shape
         self.zidx = self.nz // 2
-        self.vmin = n.percentile(self.volume, 20)
-        self.vmax = n.percentile(self.volume, 99.5)
-        self.sliders['image_range'].start = self.volume.min()
-        self.sliders['image_range'].end = self.volume.max() + 1e-5
-        self.sliders['image_range'].value=(self.vmin, self.vmax)
+        self.vmin = float(n.percentile(self.volume, 20))
+        self.vmax = float(n.percentile(self.volume, 99.5))
+        if self.vmax <= self.vmin:
+            self.vmax = self.vmin + 1.0
+        vmin_data = float(self.volume.min())
+        vmax_data = float(self.volume.max()) + 1e-5
+        self.sliders['image_range'].start = vmin_data
+        self.sliders['image_range'].end = vmax_data
+        self.sliders['image_range'].value = (self.vmin, self.vmax)
         self.sliders['zidx'].start = 0
-        self.sliders['zidx'].end = self.nz-1
+        self.sliders['zidx'].end = self.nz - 1
         self.sliders['zidx'].value = self.zidx
-        self.source.data.update(image = [self.volume[self.zidx]])
+        self.source.data.update(
+            image=[self.volume[self.zidx]],
+            dw=[self.nx],
+            dh=[self.ny],
+        )
         self.mapper.low = self.vmin
         self.mapper.high = self.vmax
-        
-        print("Updated data!")

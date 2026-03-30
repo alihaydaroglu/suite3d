@@ -63,10 +63,14 @@ class Suite3DProcessor:
         if info_path.exists():
             session_data['info'] = np.load(info_path, allow_pickle=True).item()
         
-        # Load cell classification
+        # Load cell classification (1D boolean array)
         iscell_path = session_path / "iscell.npy"
         if iscell_path.exists():
-            session_data['iscell'] = np.load(iscell_path)
+            raw = np.load(iscell_path, allow_pickle=True)
+            # Normalize legacy (N,2) format to 1D boolean
+            if raw.ndim == 2:
+                raw = raw[:, 0]
+            session_data['iscell'] = raw.ravel().astype(bool)
             
         # Load cell statistics
         stats_path = session_path / "stats.npy"

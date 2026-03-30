@@ -111,7 +111,7 @@ def compute_reference_and_masks(
         # correct bad tvec estimates
         if reference_params.get("fix_shallow_plane_shift_estimates", True):
             shallow_plane_thresh = reference_params.get(
-                "fix_shallow_plane_shift_esimate_threshold", 20
+                "fix_shallow_plane_shift_estimate_threshold", 20
             )
             peaks = n.abs(uncorrected_tvecs[:shallow_plane_thresh]).max(axis=0)
             bad_planes = n.logical_or(
@@ -1267,7 +1267,7 @@ def compute_reference_and_masks_3d(
     # print(tvecs)
     if reference_params.get("fix_shallow_plane_shift_estimates", False):
         shallow_plane_thresh = reference_params.get(
-            "fix_shallow_plane_shift_esimate_threshold", 20
+            "fix_shallow_plane_shift_estimate_threshold", 20
         )
         peaks = n.abs(tvecs[:shallow_plane_thresh]).max(axis=0)
         bad_planes = n.logical_or(
@@ -1280,8 +1280,8 @@ def compute_reference_and_masks_3d(
 
     mov_cpu, xpad, ypad = pad_mov(mov_cpu, tvecs)  # pad the movie to correct size
     pad_sizes = [xpad, ypad]
-    xpad = int(xpad)
-    ypad = int(ypad)
+    xpad = int(n.asarray(xpad).ravel()[0])
+    ypad = int(n.asarray(ypad).ravel()[0])
 
     log_cb("Applying plane alignment shifts", 1)
     # print(mov_cpu.shape)

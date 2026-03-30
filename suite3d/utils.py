@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 try:
     import imreg_dft as imreg
-except:
+except ImportError:
     print("No Imreg DFT")
 from multiprocessing import Pool, shared_memory
 from scipy.ndimage import gaussian_filter1d
@@ -23,7 +23,7 @@ try:
     from dask_image import ndfilters as dafilt
     from skimage.measure import moments
     from skimage.metrics import normalized_mutual_information
-except:
+except ImportError:
     print("Missing some packages")
 from datetime import datetime
 from multiprocessing import cpu_count
@@ -38,6 +38,77 @@ except ImportError:
     pass
 
 colors = ["#90be6d", "#e98a15", "#b26c98", "#1b9aaa", "#3a405a"]
+
+
+# ============================================================================
+# iscell utilities
+#
+# iscell is always a 1D boolean array of shape (n_rois,).
+# True = cell, False = not a cell.
+#
+# File variants (all stored as 1D boolean .npy):
+#   iscell.npy              - initial classification from detection
+#   iscell_extracted.npy    - subset of iscell for ROIs that had traces extracted
+#   iscell_curated.npy      - after manual curation (e.g. napari UI)
+#   iscell_curated_slider.npy - after slider-based filtering in the UI
+# ============================================================================
+
+def load_iscell(path):
+    """Load an iscell array from disk and normalize to 1D boolean.
+
+    Handles legacy formats:
+    - (N, 2) suite2p-style arrays: extracts column 0
+    - (N, 1) arrays: squeezes to 1D
+    - int/float arrays: converts to boolean
+
+    Args:
+        path (str): Path to an iscell .npy file.
+
+    Returns:
+        numpy.ndarray: 1D boolean array of shape (n_rois,).
+    """
+    arr = n.load(path, allow_pickle=True)
+    return normalize_iscell(arr)
+
+
+def normalize_iscell(arr):
+    """Normalize an iscell array to 1D boolean.
+
+    Args:
+        arr (numpy.ndarray): iscell array in any legacy format.
+
+    Returns:
+        numpy.ndarray: 1D boolean array of shape (n_rois,).
+    """
+    if arr.ndim == 2:
+        arr = arr[:, 0]
+    arr = arr.ravel().astype(bool)
+    return arr
+
+
+def make_iscell(n_rois, default=True):
+    """Create a new iscell array.
+
+    Args:
+        n_rois (int): Number of ROIs.
+        default (bool): Default classification. Defaults to True (all cells).
+
+    Returns:
+        numpy.ndarray: 1D boolean array of shape (n_rois,).
+    """
+    if default:
+        return n.ones(n_rois, dtype=bool)
+    return n.zeros(n_rois, dtype=bool)
+
+
+def save_iscell(path, iscell):
+    """Save an iscell array to disk as 1D boolean.
+
+    Args:
+        path (str): Path to save the .npy file.
+        iscell (numpy.ndarray): iscell array (will be normalized).
+    """
+    n.save(path, normalize_iscell(iscell))
 
 
 def set_num_processors(n_procs):
@@ -117,7 +188,11 @@ def edge_crop_movie(mov, summary=None, edge_crop_npix=None):
     if edge_crop_npix is None or edge_crop_npix < 1:
         return mov
     __, nz, ny, nx = mov.shape
-    yt, yb, xl, xr = get_shifted_plane_bounds(summary["plane_shifts"], ny, nx, summary["ypad"][0], summary["xpad"][0])
+    ypad = summary["ypad"]
+    xpad = summary["xpad"]
+    ypad = int(ypad[0]) if hasattr(ypad, '__getitem__') and n.ndim(ypad) > 0 else int(ypad)
+    xpad = int(xpad[0]) if hasattr(xpad, '__getitem__') and n.ndim(xpad) > 0 else int(xpad)
+    yt, yb, xl, xr = get_shifted_plane_bounds(summary["plane_shifts"], ny, nx, ypad, xpad)
     for i in range(nz):
         mov[:, i, : yt[i] + edge_crop_npix] = 0
         mov[:, i, yb[i] - edge_crop_npix :] = 0

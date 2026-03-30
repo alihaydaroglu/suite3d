@@ -1,5 +1,4 @@
-import sys
-import numpy as n 
+import numpy as n
 import os
 from pathlib import Path
 

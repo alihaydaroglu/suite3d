@@ -17,6 +17,7 @@ share/python-wheels/
 MANIFEST
 
 __pycache__/
+.ipynb_checkpoints/
 exclude/
 runs/
 dev/

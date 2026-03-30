@@ -1139,7 +1139,7 @@ def rigid_3d_ref_gpu(
             # log_cb(
             #     f"Shift op ({'subpixel ' + shift_reg_subpixel_method if shift_reg_subpixel else 'integer'}) "
             #     f"batch {b} took {shift_elapsed:.4f}s"
-            )
+            # )
             if mov_shifted is None:
                 mov_shifted = np.zeros(
                     (

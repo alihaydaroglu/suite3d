@@ -6,22 +6,20 @@ import copy
 
 try:
     import mrcfile
-except:
+except ImportError:
     print("No MRCFile")
 try:
     import napari
-except:
+except ImportError:
     print("No Napari")
 try:
     import pyqtgraph as pg
-except:
+except ImportError:
     print("No PyQtGraph")
-
-    
 
 try:
     from napari._qt.widgets.qt_range_slider_popup import QRangeSliderPopup
-except:
+except ImportError:
     pass
 
 
@@ -36,20 +34,15 @@ def load_outputs(output_dir, load_traces=False, trace_names=["F", "Fneu", "spks"
     outputs["fs"] = info["all_params"]["fs"]
     outputs["stats"] = n.load(os.path.join(output_dir, "stats.npy"), allow_pickle=True)
 
+    from suite3d.utils import load_iscell, make_iscell, normalize_iscell
     if "iscell.npy" in files:
-        outputs["iscell"] = n.load(os.path.join(output_dir, "iscell.npy"))
+        outputs["iscell"] = load_iscell(os.path.join(output_dir, "iscell.npy"))
     else:
-        outputs["iscell"] = n.ones((len(outputs["stats"], 2)))
-    if "iscell_extracted.npy" in files:
-        outputs["iscell_extracted"] = n.load(
-            os.path.join(output_dir, "iscell_extracted.npy")
-        )
-    if "iscell_curated.npy" in files:
-        outputs["iscell_curated"] = n.load(os.path.join(output_dir, "iscell_curated.npy"))
-    if "iscell_curated_slider.npy" in files:
-        outputs["iscell_curated_slider"] = n.load(
-            os.path.join(output_dir, "iscell_curated_slider.npy")
-        )
+        outputs["iscell"] = make_iscell(len(outputs["stats"]))
+    for variant in ["iscell_extracted", "iscell_curated", "iscell_curated_slider"]:
+        path = os.path.join(output_dir, variant + ".npy")
+        if variant + ".npy" in files:
+            outputs[variant] = load_iscell(path)
 
     if load_traces:
         traces = {}
@@ -88,10 +81,11 @@ def make_label_vols(stats, shape, lam_max=0.5, iscell=None, cmap="Set3", coords=
         n_cmap = cmap.N
     cell_id_vol = n.zeros(shape, int)
     cell_rgb_vol = n.zeros(shape + (4,))
+    from suite3d.utils import make_iscell, normalize_iscell
     if iscell is None:
-        iscell = n.ones((n_roi, 2))
-    if len(iscell.shape) > 1:
-        iscell = iscell[:, 0]
+        iscell = make_iscell(n_roi)
+    else:
+        iscell = normalize_iscell(iscell)
     plot_cell_idx = 0
     for i in range(n_roi):
         if iscell[i]:
@@ -119,11 +113,11 @@ def create_ui(
     mean_img = outputs["mean_img"]
     vmap = outputs["vmap"]
     max_img = outputs["max_img"]
+    from suite3d.utils import normalize_iscell
     iscell = (
         outputs[iscell_label] if iscell_label in outputs.keys() else outputs["iscell"]
     )
-    if len(iscell.shape) < 2:
-        iscell = iscell[:, n.newaxis]
+    iscell = normalize_iscell(iscell)
     shape = vmap.shape
     coords = [stat["coords"] for stat in stats]
     lams = [stat["lam"] for stat in stats]
@@ -177,23 +171,23 @@ def add_callbacks_to_ui(
     Fneu = outputs.get("Fneu", n.zeros_like(spks))
 
     if add_curation:
-        iscell = outputs.get("iscell_extracted", n.ones(len(outputs["stats"])))
-        if len(iscell.shape) < 2:
-            iscell = iscell[:, n.newaxis]
+        from suite3d.utils import normalize_iscell, make_iscell, load_iscell, save_iscell
+        iscell = outputs.get("iscell_extracted", make_iscell(len(outputs["stats"])))
+        iscell = normalize_iscell(iscell)
         iscell_savepath = os.path.join(savedir, "iscell_curated.npy")
         if not overwrite and os.path.exists(iscell_savepath):
             string = datetime.datetime.now().strftime("%d-%m-%y_%H-%M-%S")
-            iscell_curated = n.load(iscell_savepath)
+            iscell_curated = load_iscell(iscell_savepath)
             print(
                 "Found old curated iscell with %d of %d marked as cells"
-                % (iscell_curated[:, 0].sum(), iscell_curated.shape[0])
+                % (iscell_curated.sum(), iscell_curated.shape[0])
             )
             backup_path = os.path.join(savedir, "iscell_curated_old_%s.npy" % string)
             print("Saving old iscell_curated to backup path %s" % backup_path)
             n.save(backup_path, iscell_curated)
         else:
             iscell_curated = iscell.copy()
-        n.save(iscell_savepath, iscell_curated)
+        save_iscell(iscell_savepath, iscell_curated)
 
     n_roi, nt = spks.shape
     ts = n.arange(nt) / outputs["fs"]
@@ -222,20 +216,20 @@ def add_callbacks_to_ui(
 
     if add_sliders:
         iscell_slider_path = os.path.join(savedir, "iscell_curated_slider.npy")
-        n.save(iscell_slider_path, iscell_curated)
+        save_iscell(iscell_slider_path, iscell_curated)
         if not overwrite and os.path.exists(iscell_slider_path):
             string = datetime.datetime.now().strftime("%d-%m-%y_%H-%M-%S")
-            iscell_curated_slider_old = n.load(iscell_slider_path)
+            iscell_curated_slider_old = load_iscell(iscell_slider_path)
             print(
                 "Found old curated + slider-ed iscell with %d of %d marked as cells"
-                % (iscell_curated_slider_old[:, 0].sum(), iscell_curated.shape[0])
+                % (iscell_curated_slider_old.sum(), iscell_curated.shape[0])
             )
             backup_path = os.path.join(
                 savedir, "iscell_curated_slider_old_%s.npy" % string
             )
             print("Saving old iscell_curated to backup path %s" % backup_path)
             n.save(backup_path, iscell_curated_slider_old)
-            n.save(iscell_slider_path, iscell_curated_slider_old)
+            save_iscell(iscell_slider_path, iscell_curated_slider_old)
         sliders, values, ranges = add_curation_sliders(
             v,
             iscell_savepath,
@@ -277,8 +271,8 @@ def add_callbacks_to_ui(
             update_plot(widgets, value - 1)
         elif add_curation and event.button == 2:
             if value > 0:
-                iscell_curated[value - 1] = 1 - iscell_curated[value - 1]
-                n.save(iscell_savepath, iscell_curated)
+                iscell_curated[value - 1] = ~iscell_curated[value - 1]
+                save_iscell(iscell_savepath, iscell_curated)
                 print("Updating cell %d" % (value - 1))
                 if add_sliders:
                     slider_callback(
@@ -311,11 +305,13 @@ def update_vols(
     scale=(15, 4, 4),
     update_layers=True,
 ):
+    from suite3d.utils import normalize_iscell
+    iscell = normalize_iscell(iscell)
     cell_id_vol, cell_rgb_vol = make_label_vols(
         stats, shape, iscell=iscell, cmap=cmap, lam_max=lam_max
     )
     noncell_id_vol, noncell_rgb_vol = make_label_vols(
-        stats, shape, iscell=1 - iscell, cmap=cmap, lam_max=lam_max
+        stats, shape, iscell=~iscell, cmap=cmap, lam_max=lam_max
     )
     if update_layers:
         print(layers["cvol_layer"])
@@ -368,9 +364,8 @@ def add_curation_sliders(
 def slider_callback(
     v, sliders, ranges, iscell_path, iscell_save_path, values, outputs, layers
 ):
-    iscell = n.load(iscell_path)
-    if iscell.shape[1] < 2:
-        iscell = n.concatenate([iscell, iscell], axis=1)
+    from suite3d.utils import load_iscell, save_iscell
+    iscell = load_iscell(iscell_path)
     iscell_out = iscell.copy()
     for i, slider in enumerate(sliders):
         rng = list(slider.slider.value())
@@ -379,10 +374,9 @@ def slider_callback(
         if rng[1] == ranges[i][1]:
             rng[1] = values[i].max()
         valid = get_valid_cells(values[i], rng)
-        iscell_out[:, 0] = n.logical_and(iscell_out[:, 0], valid)
-        iscell_out[:, 1] = iscell_out[:, 0]
-    n.save(iscell_save_path, iscell_out)
-    print("%d, %d cells valid" % (iscell_out[:, 0].sum(), iscell_out[:, 1].sum()))
+        iscell_out = n.logical_and(iscell_out, valid)
+    save_iscell(iscell_save_path, iscell_out)
+    print("%d cells valid" % iscell_out.sum())
     update_vols(
         outputs["stats"], outputs["vmap"].shape, iscell_out, layers, update_layers=True
     )
@@ -452,8 +446,9 @@ def load_outputs_old(
                 if "vmap_patch" in outputs["info"].keys():
                     outputs["vmap_patch"] = outputs["info"]["vmap_patch"]
     if "iscell" not in outputs.keys() or regen_iscell:
-        iscell = n.ones((len(outputs["stats"]), 2), dtype=int)
-        n.save(os.path.join(dir, "iscell.npy"), iscell)
+        from suite3d.utils import make_iscell, save_iscell
+        iscell = make_iscell(len(outputs["stats"]))
+        save_iscell(os.path.join(dir, "iscell.npy"), iscell)
         outputs["iscell"] = iscell
     if additional_outputs is not None:
         outputs.update(additional_outputs)
@@ -562,12 +557,11 @@ def create_napari_ui(
         vmap = outputs["vmap_patch"]
     else:
         vmap = outputs["vmap"]
+    from suite3d.utils import normalize_iscell
     if use_filtered_iscell and "iscell_filtered" in outputs.keys():
-        iscell = outputs["iscell_filtered"]
+        iscell = normalize_iscell(outputs["iscell_filtered"])
     else:
-        iscell = outputs["iscell"]
-    if len(iscell.shape) > 1:
-        iscell = iscell[:, 0]
+        iscell = normalize_iscell(outputs["iscell"])
     cell_labels = make_cell_label_vol(
         outputs["stats"],
         iscell,
@@ -577,7 +571,7 @@ def create_napari_ui(
     )
     not_cell_labels = make_cell_label_vol(
         outputs["stats"],
-        1 - iscell,
+        ~iscell,
         vmap.shape,
         lam_thresh=lam_thresh,
         use_patch_coords=use_patch_coords,

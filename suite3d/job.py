@@ -2,7 +2,7 @@ from .init_pass import run_init_pass
 
 try:
     import tifffile
-except:
+except ImportError:
     print("No tifffile")
 import datetime
 import os
@@ -18,19 +18,18 @@ from matplotlib import pyplot as plt
 
 try:
     from skimage.io import imread
-except:
+except ImportError:
     print("No skimage")
 
 try:
     import psutil
-except:
+except ImportError:
     print("No psutil")
 
 from suite3d import dcnv
 
 from . import utils
 
-# from . import lbmio
 from .io import lbmio
 from .io import get_frame_counts
 
@@ -47,7 +46,7 @@ from .iter_step import (
     register_dataset_gpu_from_existing_shifts,
 )
 
-from .default_params import get_default_params
+from .default_params import get_default_params, get_section_params, validate_params
 from . import ui
 
 
@@ -421,27 +420,6 @@ class Job:
         self.save_dirs()
         self.save_dirs("old_dirs", old_dirs)
 
-    # def make_new_dir(self, dir_name, parent_dir_name = None, exist_ok=True, dir_tag = None):
-    #     if parent_dir_name is None:
-    #         parent_dir = self.job_dir
-    #     else:
-    #         if parent_dir_name  not in self.dirs.keys():
-    #             self.log("Creating parent directory % s" % parent_dir_name)
-    #             self.make_new_dir(parent_dir_name)
-    #         parent_dir = self.dirs[parent_dir_name]
-    #     if dir_tag is None:
-    #         dir_tag = dir_name
-
-    #     dir_path = os.path.join(parent_dir, dir_name)
-    #     if os.path.exists(dir_path):
-    #         self.log("Found dir %s with tag %s" % (dir_path, dir_tag), 2)
-    #     else:
-    #         os.makedirs(dir_path, exist_ok = exist_ok)
-    #         self.log("Created dir %s with tag %s" % (dir_path, dir_tag))
-    #     self.dirs[dir_tag] = dir_path
-    #     n.save(os.path.join(self.job_dir, 'dirs.npy'), self.dirs)
-    #     return dir_path
-
     def init_job_dir(self, root_dir, job_id, exist_ok=False):
         """Create a job directory and nested dirs
 
@@ -658,12 +636,8 @@ class Job:
             iter_limit (int, optional): Number of batches to run. Set to None for the whole recording. Defaults to None.
             output_dir_name (str, optional): Name of the parent directory to place results in. Defaults to None.
         """
-        if save:
-            corr_map_dir = self.make_new_dir("corrmap", parent_dir_name=output_dir_name)
-            mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
-        else:
-            corr_map_dir = self.make_new_dir("corrmap", parent_dir_name=output_dir_name)
-            mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
+        corr_map_dir = self.make_new_dir("corrmap", parent_dir_name=output_dir_name)
+        mov_sub_dir = self.make_new_dir("mov_sub", parent_dir_name=output_dir_name)
 
         if self.params.get("detection_timebin") is None:
             self.params["detection_timebin"] = 2 * int(n.round(self.params["fs"] / (self.params["tau"])))
@@ -873,8 +847,6 @@ class Job:
 
         sweep_summary = self.setup_sweep(params_to_sweep, sweep_name, all_combinations=all_combinations)
         sweep_summary["sweep_type"] = "segmentation"
-        sweep_summary["results"] = []
-        sweep_summary["sweep_type"] = "segmentation"
         sweep_dir_path = sweep_summary["sweep_dir_path"]
         sweep_summary["results"] = []
         combinations = sweep_summary["combinations"]
@@ -960,8 +932,6 @@ class Job:
             maps["vmap"] = vmap
 
         nt, nz, ny, nx = mov_sub.shape
-        if ts is None:
-            ts = (0, nt)
         if ts is None:
             ts = (0, nt)
 
@@ -1061,8 +1031,10 @@ class Job:
             #     patch_idx=patch_idx,
             #     offset=(zs[0], ys[0], xs[0]),
             # )
+            seg_params = get_section_params(self.params, "segmentation", "compute")
             stats = seg.segment_rois(
-                mov_patch,vmap_patch, log=self.log, savepath=stats_path, patch_idx=patch_idx, offset=(zs[0], ys[0], xs[0]), **self.params
+                mov_patch, vmap_patch, log=self.log, savepath=stats_path,
+                patch_idx=patch_idx, offset=(zs[0], ys[0], xs[0]), **seg_params
             )
             mini_info['vmap_subtracted'] = vmap_patch
             n.save(info_path, mini_info)
@@ -1300,22 +1272,20 @@ class Job:
         if save_dir is None:
             save_dir = stats_dir
         if iscell is None:
-            iscell = n.ones((len(stats), 2), int)
-        if type(iscell) == str:
-            if iscell[-4:] != ".npy":
+            iscell = utils.make_iscell(len(stats))
+        if isinstance(iscell, str):
+            if not iscell.endswith(".npy"):
                 iscell += ".npy"
-            iscell = n.load(os.path.join(stats_dir, iscell))
-        if len(iscell.shape) < 2:
-            iscell = iscell[:, n.newaxis]
-        print(len(stats))
+            iscell = utils.load_iscell(os.path.join(stats_dir, iscell))
+        else:
+            iscell = utils.normalize_iscell(iscell)
         assert iscell.shape[0] == len(stats)
 
-        valid_stats = [stat for i, stat in enumerate(stats) if iscell[i, 0]]
-        save_iscell = os.path.join(save_dir, "iscell_extracted.npy")
-        self.log("Extracting %d valid cells, and saving cell flags to %s" % (len(valid_stats), save_iscell))
+        valid_stats = [stat for i, stat in enumerate(stats) if iscell[i]]
+        iscell_extracted_path = os.path.join(save_dir, "iscell_extracted.npy")
+        self.log("Extracting %d valid cells, and saving cell flags to %s" % (len(valid_stats), iscell_extracted_path))
         stats = valid_stats
-        # return stats
-        n.save(save_iscell, iscell)
+        utils.save_iscell(iscell_extracted_path, iscell)
         # print(offset, batchsize_frames, n_frames)
         # return mov, stats
         if not load_F_from_dir:
@@ -1379,11 +1349,12 @@ class Job:
         patch_dir = self.get_patch_dir(patch_idx, parent_dir_name)
         stats = n.load(os.path.join(patch_dir, "stats.npy"), allow_pickle=True)
         info = n.load(os.path.join(patch_dir, "info.npy"), allow_pickle=True).item()
+        iscell_path = os.path.join(patch_dir, "iscell.npy")
         try:
-            iscell = n.load(os.path.join(patch_dir, "iscell.npy"))
+            iscell = utils.load_iscell(iscell_path)
         except FileNotFoundError:
-            iscell = n.ones((len(stats), 2), dtype=int)
-            n.save(os.path.join(patch_dir, "iscell.npy"), iscell)
+            iscell = utils.make_iscell(len(stats))
+            utils.save_iscell(iscell_path, iscell)
         return stats, info, iscell
 
     def combine_patches(
@@ -1477,7 +1448,7 @@ class Job:
             self.log("Saving combined files to %s" % output_dir_path)
             n.save(os.path.join(output_dir_path, "stats.npy"), stats)
             self.log("Saved stats", 2)
-            n.save(os.path.join(output_dir_path, "iscell.npy"), iscell)
+            utils.save_iscell(os.path.join(output_dir_path, "iscell.npy"), iscell)
             self.log("Saved iscell", 2)
             if info_use_idx is not None:
                 n.save(os.path.join(output_dir_path, "info.npy"), info)
@@ -1740,8 +1711,12 @@ class Job:
         if summary is None:
             summary = self.load_summary()
         nz, nt, ny, nx = mov.shape
+        ypad = summary["ypad"]
+        xpad = summary["xpad"]
+        ypad = int(ypad[0]) if hasattr(ypad, '__getitem__') and n.ndim(ypad) > 0 else int(ypad)
+        xpad = int(xpad[0]) if hasattr(xpad, '__getitem__') and n.ndim(xpad) > 0 else int(xpad)
         yt, yb, xl, xr = utils.get_shifted_plane_bounds(
-            summary["plane_shifts"], ny, nx, summary["ypad"][0], summary["xpad"][0]
+            summary["plane_shifts"], ny, nx, ypad, xpad
         )
         self.log(str(yt) + str(yb))
         self.log(str(xl) + str(xr))
@@ -1956,8 +1931,7 @@ class Job:
             try:
                 tstamp = datetime.datetime.strptime(line[1:20], "%Y-%m-%d %H:%M:%S")
                 timestamps.append(tstamp)
-            except:
-                # print("Could not parse line %s" % line)
+            except ValueError:
                 continue
 
             tag = "Total Used: "

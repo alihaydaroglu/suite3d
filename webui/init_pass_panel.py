@@ -1,19 +1,13 @@
-import numpy as n 
+import numpy as n
 import os
-import sys
 from pathlib import Path
-
 
 import panel as pn
 import param
 from bokeh.plotting import figure
 
-# this adds the general suite3d directory to the python path
-# it's a hack, and it only works if you call this function from the main suite3d dir
-# eventually, the package manager should add packages/suite3d (or the general root dir) to PYTHONPATH during a proper installation
-sys.path.insert(0,'.')
-from webui.volume_vis import VolumeWidget
-from webui.job_interface import JobInterface
+from .volume_vis import VolumeWidget
+from .job_interface import JobInterface
 
 
 class InitPanel(param.Parameterized):

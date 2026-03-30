@@ -119,7 +119,7 @@ def calculate_corrmap(
         # if that fails (if mov is not a dask array), do it in numpy
         try:
             mov_batch = darr.swapaxes(mov_batch, 0, 1).compute().astype(dtype)
-        except:
+        except Exception:
             log("Not a dask array", 3)
             mov_batch = n.swapaxes(mov_batch, 0, 1).astype(dtype)
         # compute the correlation map for this batch and update accumulators
