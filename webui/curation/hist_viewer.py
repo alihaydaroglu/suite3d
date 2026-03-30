@@ -59,10 +59,10 @@ class HistViewer:
         # Callback for individual sample changes (set by BoxViewer)
         self.on_individual_sample_changed = None
         
-        # Initialize
+        self._population_computed = False
+
+        # Open HDF5 but defer histogram computation to first use
         self._open_hdf5()
-        if self.dataset is not None:
-            self._compute_population_histograms()
     
     def _open_hdf5(self):
         """Open HDF5 file for reading (same pattern as BoxViewer)"""
@@ -292,8 +292,15 @@ class HistViewer:
         except Exception as e:
             self.status_text.object = f"**Error:** Failed to process individual sample: {str(e)}"
     
+    def _ensure_population_computed(self):
+        """Compute population histograms on first use."""
+        if not self._population_computed and self.dataset is not None:
+            self._compute_population_histograms()
+            self._population_computed = True
+
     def _update_plot(self):
         """Update the histogram plot based on current selections"""
+        self._ensure_population_computed()
         selected_property = self.property_selector.value
         
         # Remove existing individual span if it exists
@@ -413,6 +420,8 @@ class HistViewer:
         self.cluster_cache = {}
         self.current_cluster_id = None
         self.current_individual_properties = None
+        self.population_cache = None
+        self._population_computed = False
         self.status_text.object = "**Status:** Cache cleared"
         self._update_plot()
     

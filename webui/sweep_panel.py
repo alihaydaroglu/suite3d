@@ -4,10 +4,16 @@ Segmentation sweep panel for the suite3d web UI.
 Shows results of segmentation parameter sweeps with interactive comparison
 of ROI counts, size distributions, duplication indices, and shot noise.
 Designed to update incrementally as sweep combinations complete.
+
+Performance notes:
+- Basic metrics (ROI count, sizes) shown instantly from sweep_summary
+- Duplication + shot noise require F.npy (computed on load, cached to disk)
+- Overmerge requires movie data (triggered by button, cached to disk)
 """
 import numpy as np
 import os
-import glob
+import hashlib
+import threading
 from pathlib import Path
 
 import panel as pn
@@ -33,10 +39,9 @@ class SweepPanel(param.Parameterized):
         self.combinations = []
         self.voxel_size_um = (1, 1, 1)
         self.frate_hz = 1.0
+        self.mov_subset = None
 
-        self.mov_subset = None  # cached movie subset for overmerge
-
-        # Bokeh sources for the 5 main plots
+        # Bokeh sources
         self.roi_count_source = ColumnDataSource(data=dict(
             x=[], total=[], filtered=[], labels=[],
         ))
@@ -49,7 +54,6 @@ class SweepPanel(param.Parameterized):
         self.overmerge_source = ColumnDataSource(data=dict(
             x=[], median=[], pct_above=[], labels=[],
         ))
-        # Scatter source for duplication corr vs dist
         self.dup_scatter_source = ColumnDataSource(data=dict(
             dist=[], corr=[], combo=[],
         ))
@@ -66,6 +70,9 @@ class SweepPanel(param.Parameterized):
         self.refresh_btn = pn.widgets.Button(
             name="Refresh", button_type="primary", width=100,
         )
+        self.compute_overmerge_btn = pn.widgets.Button(
+            name="Compute Overmerge", button_type="warning", width=150,
+        )
         self.min_npix_input = pn.widgets.IntInput(
             name="Min voxels filter", value=10, start=0, end=10000, step=1, width=120,
         )
@@ -76,7 +83,6 @@ class SweepPanel(param.Parameterized):
         self.summary_table = pn.pane.HTML("", sizing_mode="stretch_width")
 
         # --- Plots ---
-        # 1. ROI count bar chart
         self.roi_plot = figure(
             height=300, width=400, title="ROI Counts",
             x_range=[], toolbar_location="above",
@@ -96,7 +102,6 @@ class SweepPanel(param.Parameterized):
         self.roi_plot.legend.location = "top_left"
         self.roi_plot.legend.label_text_font_size = "8pt"
 
-        # 2. Duplication bar chart
         self.dup_plot = figure(
             height=300, width=400, title="Duplicate Pairs",
             x_range=[], toolbar_location="above",
@@ -108,7 +113,6 @@ class SweepPanel(param.Parameterized):
         )
         self.dup_plot.xaxis.major_label_orientation = 0.7
 
-        # 3. Duplication scatter: corr vs distance
         self.dup_scatter_plot = figure(
             height=300, width=400, title="Duplication: Corr vs Distance",
             x_axis_label="Distance (um)", y_axis_label="Pairwise correlation",
@@ -122,7 +126,6 @@ class SweepPanel(param.Parameterized):
                         line_color='red', line_dash='dashed', line_width=1)
         self.dup_scatter_plot.add_layout(dup_line)
 
-        # 4. Shot noise bar chart
         self.noise_plot = figure(
             height=300, width=400, title="Median Shot Noise",
             x_range=[], toolbar_location="above",
@@ -134,9 +137,8 @@ class SweepPanel(param.Parameterized):
         )
         self.noise_plot.xaxis.major_label_orientation = 0.7
 
-        # 5. Overmerge bar chart
         self.overmerge_plot = figure(
-            height=300, width=400, title="Overmerge Score",
+            height=300, width=400, title="Overmerge Score (click button to compute)",
             x_range=[], toolbar_location="above",
             tools="pan,reset,save,wheel_zoom",
         )
@@ -150,6 +152,7 @@ class SweepPanel(param.Parameterized):
         # --- Bind callbacks ---
         pn.bind(self._on_sweep_change, self.sweep_select, watch=True)
         self.refresh_btn.on_click(self._on_refresh)
+        self.compute_overmerge_btn.on_click(self._on_compute_overmerge)
         pn.bind(self._on_filter_change, self.min_npix_input, watch=True)
         pn.bind(self._on_filter_change, self.dup_thresh_input, watch=True)
 
@@ -161,6 +164,8 @@ class SweepPanel(param.Parameterized):
             pn.layout.Divider(),
             self.min_npix_input,
             self.dup_thresh_input,
+            pn.layout.Divider(),
+            self.compute_overmerge_btn,
             pn.layout.Divider(),
             self.status_text,
             width=280,
@@ -194,23 +199,14 @@ class SweepPanel(param.Parameterized):
             max_height=max_height,
         )
 
+    # ---- Data loading ----
+
     def load_job(self, job_interface):
-        """Load available sweeps from the current job."""
+        """Load available sweeps from the current job. No movie loading here."""
         self.job = job_interface.job
         self.voxel_size_um = self.job.params.get('voxel_size_um', (1, 1, 1))
         self.frate_hz = self.job.params.get('fs', 1.0)
-
-        # Pre-load movie subset for overmerge computation
-        reg_dir = self.job.dirs.get('registered_fused_data',
-                                     os.path.join(self.job.job_dir, 'registered_fused_data'))
-        if os.path.isdir(reg_dir):
-            try:
-                self.mov_subset = qm.load_movie_subset(reg_dir, max_frames=500)
-                if self.mov_subset is not None:
-                    print(f"  Loaded movie subset: {self.mov_subset.shape} for overmerge")
-            except Exception as e:
-                print(f"  Could not load movie subset: {e}")
-                self.mov_subset = None
+        self.mov_subset = None  # loaded lazily on overmerge button
 
         # Find all sweep directories
         sweeps_parent = os.path.join(self.job.job_dir, 'sweeps')
@@ -228,11 +224,11 @@ class SweepPanel(param.Parameterized):
             return
 
         self.sweep_select.options = sweep_names
-        self.sweep_select.value = sweep_names[-1]  # most recent
+        self.sweep_select.value = sweep_names[-1]
         self._load_sweep(sweep_names[-1])
 
     def _load_sweep(self, sweep_name):
-        """Load a sweep's summary and compute metrics for completed combinations."""
+        """Load sweep summary and compute fast metrics (no overmerge)."""
         if self.job is None:
             return
 
@@ -247,11 +243,35 @@ class SweepPanel(param.Parameterized):
         self.param_names = self.sweep_summary.get('param_names', [])
         self.combinations = self.sweep_summary.get('combinations', [])
 
-        self._compute_metrics()
+        # Try to load cached metrics first
+        cache_path = os.path.join(self.sweep_dir, 'sweep_metrics_cache.npy')
+        if os.path.exists(cache_path):
+            try:
+                cached = np.load(cache_path, allow_pickle=True).item()
+                if cached.get('n_results') == len(self.sweep_summary.get('results', [])):
+                    self.all_metrics = cached['metrics']
+                    self.all_stats = cached.get('stats_refs', [None] * len(self.all_metrics))
+                    self._update_plots()
+                    n_done = len(self.all_metrics)
+                    n_combs = len(self.combinations)
+                    self.status_text.object = (
+                        f"**{n_done} / {n_combs} done (cached)**\n\n"
+                        f"Params: {', '.join(self.param_names)}"
+                    )
+                    return
+            except Exception:
+                pass  # cache invalid, recompute
+
+        self._compute_metrics(include_overmerge=False)
         self._update_plots()
 
-    def _compute_metrics(self):
-        """Compute quality metrics for all completed sweep combinations."""
+    def _compute_metrics(self, include_overmerge=False):
+        """Compute quality metrics for completed sweep combinations.
+
+        Args:
+            include_overmerge: If True, loads movie subset and computes
+                PCA-based overmerge scores (slow). Otherwise skips overmerge.
+        """
         if self.sweep_summary is None:
             return
 
@@ -268,7 +288,7 @@ class SweepPanel(param.Parameterized):
                 stats = stats.get('stats', [])
             self.all_stats.append(stats)
 
-            # Try to load F from the combo's roi directory
+            # Try to load F
             F = None
             roi_dir = res.get('roi_dir', '')
             if roi_dir and isinstance(roi_dir, str):
@@ -283,21 +303,64 @@ class SweepPanel(param.Parameterized):
                 self.all_metrics.append(None)
                 continue
 
+            mov = self.mov_subset if include_overmerge else None
             m = qm.compute_roi_metrics(
                 stats, F=F,
                 voxel_size_um=self.voxel_size_um,
                 frate_hz=self.frate_hz,
-                mov=self.mov_subset,
+                mov=mov,
                 near_thresh=20.0,
                 min_npix=self.min_npix_input.value,
             )
             self.all_metrics.append(m)
 
-        # Status
+        # Cache to disk
+        self._save_metrics_cache()
+
         self.status_text.object = (
             f"**{n_done} / {n_combs} combinations done**\n\n"
             f"Params: {', '.join(self.param_names)}"
         )
+
+    def _save_metrics_cache(self):
+        """Save computed metrics to disk for fast reload."""
+        if self.sweep_dir is None:
+            return
+        try:
+            cache = {
+                'n_results': len(self.sweep_summary.get('results', [])),
+                'metrics': self.all_metrics,
+            }
+            cache_path = os.path.join(self.sweep_dir, 'sweep_metrics_cache.npy')
+            np.save(cache_path, cache, allow_pickle=True)
+        except Exception as e:
+            print(f"  Could not save metrics cache: {e}")
+
+    def _ensure_movie_loaded(self):
+        """Lazily load movie subset for overmerge computation."""
+        if self.mov_subset is not None:
+            return True
+        if self.job is None:
+            return False
+
+        reg_dir = self.job.dirs.get(
+            'registered_fused_data',
+            os.path.join(self.job.job_dir, 'registered_fused_data')
+        )
+        if not os.path.isdir(reg_dir):
+            return False
+
+        self.status_text.object = "**Loading movie subset for overmerge...**"
+        try:
+            self.mov_subset = qm.load_movie_subset(reg_dir, max_frames=300)
+            if self.mov_subset is not None:
+                print(f"  Loaded movie subset: {self.mov_subset.shape}")
+                return True
+        except Exception as e:
+            print(f"  Could not load movie: {e}")
+        return False
+
+    # ---- Plot updates ----
 
     def _update_plots(self):
         """Update all plots with current metrics."""
@@ -387,41 +450,34 @@ class SweepPanel(param.Parameterized):
                     all_corrs.extend(dc.tolist())
                 all_combos.extend([short_label] * min(len(dc), max_pts))
 
-        # Update ROI count plot
+        # Update all bokeh sources
         self.roi_plot.x_range.factors = x_vals
         self.roi_count_source.data = dict(
             x=x_vals, total=totals, filtered=filtered_counts, labels=labels,
         )
 
-        # Update dup plot
         self.dup_plot.x_range.factors = x_vals
         self.dup_plot.title.text = f"Duplicate Pairs (corr > {dup_thresh})"
         self.dup_source.data = dict(
             x=x_vals, dup_count=dup_counts, dup_rate=dup_rates, labels=labels,
         )
 
-        # Update dup scatter
         self.dup_scatter_source.data = dict(
             dist=all_dists, corr=all_corrs, combo=all_combos,
         )
-        # Update threshold line
-        for r in self.dup_scatter_plot.renderers:
-            if hasattr(r, 'location') and hasattr(r, 'dimension'):
-                r.location = dup_thresh
 
-        # Update noise plot
         self.noise_plot.x_range.factors = x_vals
         self.noise_source.data = dict(
             x=x_vals, median=noise_meds, q25=noise_q25s, q75=noise_q75s, labels=labels,
         )
 
-        # Update overmerge plot
+        # Overmerge
         self.overmerge_plot.x_range.factors = x_vals
         has_om = any(v > 0 for v in om_meds)
         if has_om:
             self.overmerge_plot.title.text = "Median Overmerge Score"
         else:
-            self.overmerge_plot.title.text = "Overmerge Score (no movie loaded)"
+            self.overmerge_plot.title.text = "Overmerge Score (click button to compute)"
         self.overmerge_source.data = dict(
             x=x_vals, median=om_meds, pct_above=om_pct_above, labels=labels,
         )
@@ -482,5 +538,29 @@ class SweepPanel(param.Parameterized):
 
     def _on_filter_change(self, value):
         """Re-compute metrics with new filter thresholds."""
-        self._compute_metrics()
+        self._compute_metrics(include_overmerge=False)
         self._update_plots()
+
+    def _on_compute_overmerge(self, event):
+        """Load movie and compute overmerge scores (triggered by button)."""
+        self.status_text.object = "**Loading movie for overmerge...**"
+        self.compute_overmerge_btn.disabled = True
+
+        def _do_overmerge():
+            try:
+                if not self._ensure_movie_loaded():
+                    self.status_text.object = "**Could not load movie for overmerge**"
+                    self.compute_overmerge_btn.disabled = False
+                    return
+                self.status_text.object = "**Computing overmerge scores...**"
+                self._compute_metrics(include_overmerge=True)
+                self._update_plots()
+                self.status_text.object = "**Overmerge computed and cached**"
+            except Exception as e:
+                self.status_text.object = f"**Overmerge error:** {e}"
+            finally:
+                self.compute_overmerge_btn.disabled = False
+
+        # Run in thread to not block UI
+        thread = threading.Thread(target=_do_overmerge, daemon=True)
+        thread.start()
