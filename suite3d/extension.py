@@ -929,10 +929,22 @@ def extract_activity(
     mov_shape_tfirst=False,
     npil_to_roi_npix_ratio=None,
     min_npil_npix=0,
+    compute_overmerge=False,
+    overmerge_max_pix=50,
 ):
-    # if you run out of memory, reduce batchsize_frames
-    # if offset is not None:
-    # mov = mov[offset[0][0]:offset[0][1],offset[1][0]:offset[1][1],offset[2][0]:offset[2][1]]
+    """Extract fluorescence traces from a movie for each ROI.
+
+    Args:
+        compute_overmerge (bool): If True, accumulate per-cell pixel covariance
+            matrices across batches and compute overmerge scores at the end.
+        overmerge_max_pix (int): Max pixels per cell for overmerge computation.
+            Cells with more pixels are subsampled to the top-weighted ones.
+            Memory: n_cells * max_pix * max_pix * 4 bytes (fp32).
+
+    Returns:
+        F_roi, F_neu: (n_cells, nt) fluorescence and neuropil traces.
+        If compute_overmerge: also returns overmerge_scores (n_cells,) array.
+    """
 
     if mov_shape_tfirst:
         nt, nz, ny, nx = mov.shape
@@ -949,16 +961,80 @@ def extract_activity(
         else:
             mov = mov[:, :n_frames]
             nt = mov.shape[1]
-    # print(mov.shape)
+
     ns = len(stats)
     F_roi = n.zeros((ns, nt))
     F_neu = n.zeros((ns, nt))
-    # print(offset)
+
+    # --- Overmerge accumulator setup ---
+    om_pix_indices = None
+    om_sum = None
+    om_ssq = None
+    om_n = None
+    om_p = None  # actual p per cell (may be < overmerge_max_pix)
+
+    if compute_overmerge:
+        p = overmerge_max_pix
+        # Check projected size: ns * p * p * 4 bytes
+        projected_bytes = ns * p * p * 4
+        projected_gb = projected_bytes / (1024**3)
+        if projected_gb > 20:
+            old_p = p
+            # Scale p down so total stays under 20 GB
+            p = int(n.sqrt(20 * 1024**3 / (ns * 4)))
+            p = max(p, 5)  # absolute minimum
+            log("WARNING: Overmerge accumulator would be %.1f GB at p=%d. "
+                "Auto-scaling to p=%d (%.1f GB)" % (projected_gb, old_p, p, ns * p * p * 4 / 1024**3))
+            overmerge_max_pix = p
+
+        log("Overmerge: accumulating covariance for %d cells, p=%d (%.1f MB)" %
+            (ns, overmerge_max_pix, ns * overmerge_max_pix * overmerge_max_pix * 4 / (1024**2)), 2)
+
+        # Pre-compute which pixels to use per cell (top by lam weight)
+        om_pix_indices = []
+        om_p = n.zeros(ns, dtype=int)
+        for i, stat in enumerate(stats):
+            if stat is None:
+                om_pix_indices.append(None)
+                continue
+            lam = stat.get("lam", n.array([]))
+            npix = len(lam)
+            if npix < 6:  # need at least 6 pixels for 5 PCs
+                om_pix_indices.append(None)
+                continue
+            if npix <= overmerge_max_pix:
+                om_pix_indices.append(n.arange(npix))
+                om_p[i] = npix
+            else:
+                top_idx = n.argsort(lam)[-overmerge_max_pix:]
+                om_pix_indices.append(top_idx)
+                om_p[i] = overmerge_max_pix
+
+        # Allocate accumulators — use memmap if large, else in-memory
+        if projected_gb > 2:
+            log("Overmerge: using memmap accumulators (%.1f GB)" % projected_gb, 2)
+            tmpdir = intermediate_save_dir or "."
+            om_sum_path = os.path.join(tmpdir, "_om_sum_tmp.npy")
+            om_ssq_path = os.path.join(tmpdir, "_om_ssq_tmp.npy")
+            # Create files
+            om_sum = n.lib.format.open_memmap(
+                om_sum_path, mode='w+', dtype=n.float32,
+                shape=(ns, overmerge_max_pix))
+            om_ssq = n.lib.format.open_memmap(
+                om_ssq_path, mode='w+', dtype=n.float32,
+                shape=(ns, overmerge_max_pix, overmerge_max_pix))
+        else:
+            om_sum = n.zeros((ns, overmerge_max_pix), dtype=n.float32)
+            om_ssq = n.zeros((ns, overmerge_max_pix, overmerge_max_pix), dtype=n.float32)
+        om_n = n.zeros(ns, dtype=n.int64)
+
+    # --- Main extraction loop ---
     n_batches = int(n.ceil(nt / batchsize_frames))
     batch_save_interval = 100
     log("Will extract in %d batches of %d" % (n_batches, batchsize_frames), 3)
     if intermediate_save_dir is not None:
         log("Saving intermediate results to %s" % intermediate_save_dir)
+
     for batch_idx in range(n_batches):
         log("Extracting batch %04d of %04d" % (batch_idx, n_batches), 4)
         start = batch_idx * batchsize_frames
@@ -972,16 +1048,12 @@ def extract_activity(
             log("NOT A DASK ARRAY!", 3)
             mov_batch = mov[:, start:end]
         log("Batch size: %d GB" % (mov_batch.nbytes / (1024**3),), 4)
+
         for i in range(ns):
             stat = stats[i]
             if stat is None:
                 continue
-            # if offset is not None:
-            #     zc, yc, xc = stat['coords_patch']
-            #     npzc, npyc, npxc = stat['npcoords_patch']
-            #     print(stat['npcoords_patch'])
-            #     print(stat['npcoords'])
-            # else:
+
             zc, yc, xc = stat["coords"]
             npzc, npyc, npxc = stat["npcoords"]
             if npil_to_roi_npix_ratio is not None:
@@ -990,7 +1062,6 @@ def extract_activity(
                 if npix_npil > npix_roi * npil_to_roi_npix_ratio:
                     n_sample = max(min_npil_npix, int(npix_roi * npil_to_roi_npix_ratio))
                     if npix_npil < n_sample:
-                        print("Very few npix pixels")
                         n_sample = npix_npil
 
                     sample_idxs = n.random.choice(
@@ -1000,9 +1071,21 @@ def extract_activity(
                     npyc = npyc[sample_idxs]
                     npxc = npxc[sample_idxs]
 
+            # Pixel raster: (n_pix, nt_batch)
+            fpixs = mov_batch[zc, :, yc, xc]
             lam = stat["lam"] / stat["lam"].sum()
-            F_roi[i, start:end] = lam @ mov_batch[zc, :, yc, xc]
+            F_roi[i, start:end] = lam @ fpixs
             F_neu[i, start:end] = mov_batch[npzc, :, npyc, npxc].mean(axis=0)
+
+            # Overmerge: accumulate covariance on subsampled pixels
+            if compute_overmerge and om_pix_indices[i] is not None:
+                pidx = om_pix_indices[i]
+                pi = om_p[i]
+                pix = fpixs[pidx, :].astype(n.float32)  # (pi, nt_batch)
+                om_sum[i, :pi] += pix.sum(axis=1)
+                om_ssq[i, :pi, :pi] += pix @ pix.T  # (pi, pi)
+                om_n[i] += pix.shape[1]
+
         if (
             (intermediate_save_dir is not None)
             and (batch_idx > 0)
@@ -1014,7 +1097,66 @@ def extract_activity(
             )
             n.save(os.path.join(intermediate_save_dir, "F.npy"), F_roi)
             n.save(os.path.join(intermediate_save_dir, "Fneu.npy"), F_neu)
+
+    # --- Compute overmerge scores from accumulators ---
+    if compute_overmerge:
+        log("Computing overmerge scores from accumulated covariance matrices...", 2)
+        overmerge_scores = _finalize_overmerge(om_sum, om_ssq, om_n, om_p, ns, overmerge_max_pix)
+
+        # Clean up memmap temp files
+        if isinstance(om_sum, n.memmap):
+            del om_sum, om_ssq
+            tmpdir = intermediate_save_dir or "."
+            for fname in ["_om_sum_tmp.npy", "_om_ssq_tmp.npy"]:
+                fpath = os.path.join(tmpdir, fname)
+                if os.path.exists(fpath):
+                    os.remove(fpath)
+
+        return F_roi, F_neu, overmerge_scores
+
     return F_roi, F_neu
+
+
+def _finalize_overmerge(om_sum, om_ssq, om_n, om_p, ns, max_pix, n_pcs=5):
+    """Compute overmerge scores from accumulated sufficient statistics.
+
+    For each cell, computes the covariance matrix from the running sum and
+    sum-of-squares, then extracts the top eigenvalues to derive the
+    overmerge score.
+    """
+    from .quality_metrics import overmerge_score_calc
+
+    overmerge_scores = n.full(ns, n.nan, dtype=n.float32)
+
+    for i in range(ns):
+        ni = om_n[i]
+        pi = om_p[i]
+        if ni < n_pcs + 1 or pi < n_pcs + 1:
+            continue
+
+        mean_i = om_sum[i, :pi] / ni  # (pi,)
+        # cov = E[X X^T] - E[X] E[X]^T
+        cov_i = om_ssq[i, :pi, :pi] / ni - n.outer(mean_i, mean_i)
+
+        # Eigenvalues of the covariance matrix (ascending order)
+        try:
+            eigvals = n.linalg.eigvalsh(cov_i)
+        except n.linalg.LinAlgError:
+            continue
+
+        # Take top n_pcs eigenvalues (descending)
+        top_eigvals = eigvals[-n_pcs:][::-1]
+
+        if len(top_eigvals) < n_pcs:
+            padded = n.zeros(n_pcs)
+            padded[:len(top_eigvals)] = top_eigvals
+            top_eigvals = padded
+
+        # Compute overmerge score
+        score = overmerge_score_calc(top_eigvals[n.newaxis, :])[0]
+        overmerge_scores[i] = score
+
+    return overmerge_scores
 
 
 def prune_overlapping_cells(stats, dist_thresh=5, lam_overlap_thresh=0.5):

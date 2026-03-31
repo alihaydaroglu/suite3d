@@ -1226,6 +1226,8 @@ class Job:
         save_dir=None,
         crop=True,
         mov_shape_tfirst=False,
+        compute_overmerge=False,
+        overmerge_max_pix=50,
     ):
         self.save_params()
         if stats_dir is None and patch_idx is not None:
@@ -1290,7 +1292,7 @@ class Job:
         # return mov, stats
         if not load_F_from_dir:
             self.log("Extracting activity")
-            F_roi, F_neu = ext.extract_activity(
+            result = ext.extract_activity(
                 mov,
                 stats,
                 batchsize_frames=batchsize_frames,
@@ -1301,7 +1303,18 @@ class Job:
                 log=self.log,
                 npil_to_roi_npix_ratio=self.params["npil_to_roi_npix_ratio"],
                 min_npil_npix=self.params["min_npil_npix"],
+                compute_overmerge=compute_overmerge,
+                overmerge_max_pix=overmerge_max_pix,
             )
+            if compute_overmerge:
+                F_roi, F_neu, overmerge_scores = result
+                n.save(os.path.join(save_dir, "overmerge_scores.npy"), overmerge_scores)
+                valid = ~n.isnan(overmerge_scores)
+                if valid.any():
+                    self.log("Overmerge: %d/%d cells scored, median=%.3f" %
+                             (valid.sum(), len(overmerge_scores), n.median(overmerge_scores[valid])))
+            else:
+                F_roi, F_neu = result
             n.save(os.path.join(save_dir, "F.npy"), F_roi)
             n.save(os.path.join(save_dir, "Fneu.npy"), F_neu)
         else:
