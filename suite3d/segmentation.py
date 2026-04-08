@@ -22,7 +22,7 @@ def segment_rois(msub, vmap, n_proc_detect = 8, peak_thresh = 1.0, activity_thre
     msub_vars = ((msub**2).sum(axis=0))
     # log("Loaded", 3)
 
-    n_iters = max_iter // n_proc_detect
+    n_iters = int(max_iter // n_proc_detect)
     worker_idxs = n.arange(n_proc_detect)
     roi_idx = 0
     nt, nz, ny, nx = msub.shape

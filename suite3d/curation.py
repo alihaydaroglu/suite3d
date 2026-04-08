@@ -490,9 +490,29 @@ class CurationUI(GenericNapariUI):
 
         # load the info.npy file
         self.info = self.load_file('info.npy')
-        self.log("Loaded info.npy")
-        # save the shape of the volume 
-        self.shape = self.info['vmap'].shape
+        if self.info is None:
+            self.info = {}
+            self.log("No info.npy found — images will not be displayed")
+
+        # Try to load standalone image files if not in info dict
+        for key, filename in [('vmap', 'vmap.npy'), ('mean_img', 'mean_img.npy'), ('max_img', 'max_img.npy')]:
+            if key not in self.info or self.info[key] is None:
+                standalone = self.load_file(filename)
+                if standalone is not None:
+                    self.info[key] = standalone
+
+        # Determine volume shape from whichever image is available
+        for key in ['vmap', 'mean_img', 'max_img']:
+            if key in self.info and self.info[key] is not None:
+                self.shape = self.info[key].shape
+                break
+        else:
+            # Fall back to bounding box of ROI coordinates
+            if self.coords:
+                all_coords = n.concatenate(self.coords, axis=1)
+                self.shape = tuple(all_coords.max(axis=1) + 1)
+            else:
+                self.shape = (1, 1, 1)
 
         # other  files to look for in the path
         activity_files = ['F', 'Fneu', 'spks'] # these will be memmapped
@@ -596,16 +616,20 @@ class CurationUI(GenericNapariUI):
         
     def add_images_to_viewer(self):
         '''
-        Take the mean, maximum and correlation map images from info.npy and add them to the UI
+        Take the mean, maximum and correlation map images from info.npy and add them to the UI.
+        Skips any images that are not available.
         '''
         scale = self.display_params['scale']
         pmin, pmax = self.display_params['contrast_percentiles']
         image_keys = [ 'max_img', 'mean_img' ,'vmap']
         image_labels = ['Max Image', 'Mean Image', 'Corr. Map', ]
         for image_key, image_label in zip(image_keys, image_labels):
-            image = self.info[image_key]
+            image = self.info.get(image_key, None)
+            if image is None:
+                self.log("Skipping %s (not available)" % image_label)
+                continue
             clims = get_percentiles(image, pmin=pmin,pmax=pmax)
-            self.layers[image_key] = self.viewer.add_image(image, name=image_label, 
+            self.layers[image_key] = self.viewer.add_image(image, name=image_label,
                                     contrast_limits=clims, scale=scale)
 
         
@@ -981,18 +1005,24 @@ class SweepUI(GenericNapariUI):
         if self.sweep_type == 'corrmap':
             self.sweep_results, self.sweep_params = collate_sweep_results(self.sweep_summary,
                                                                           result_key='corrmap')
-            self.vol_shape = self.sweep_summary['mean_img'].shape
-            self.mean_img = self.sweep_summary['mean_img']
-            self.max_img = self.sweep_summary['max_img']
+            self.mean_img = self.sweep_summary.get('mean_img', None)
+            self.max_img = self.sweep_summary.get('max_img', None)
+            first_available = self.mean_img if self.mean_img is not None else self.max_img
+            self.vol_shape = first_available.shape if first_available is not None else None
 
         elif self.sweep_type == 'segmentation':
             self.sweep_results, self.sweep_params = collate_sweep_results(self.sweep_summary,
                                                                           result_key='stats')
-            self.info = self.sweep_summary['results'][0]['info']
-            self.mean_img = self.info['mean_img']
-            self.max_img = self.info['max_img']
-            self.corr_map = self.info['vmap']
-            self.shape = self.corr_map.shape
+            self.info = self.sweep_summary['results'][0].get('info', {})
+            self.mean_img = self.info.get('mean_img', None)
+            self.max_img = self.info.get('max_img', None)
+            self.corr_map = self.info.get('vmap', None)
+            if self.corr_map is not None:
+                self.shape = self.corr_map.shape
+            elif self.mean_img is not None:
+                self.shape = self.mean_img.shape
+            else:
+                self.shape = (1, 1, 1)
 
         if self.all_combinations:
             self.current_index = n.zeros(self.n_params, int)
@@ -1100,13 +1130,18 @@ class SweepUI(GenericNapariUI):
         scale = self.display_params['scale']
         pmin, pmax = self.display_params['contrast_percentiles']
 
-        clims = get_percentiles(self.mean_img, pmin, pmax)
-        self.viewer.add_image(self.mean_img, name='Mean Image', scale = scale, contrast_limits=clims)
+        if self.mean_img is not None:
+            clims = get_percentiles(self.mean_img, pmin, pmax)
+            self.layers['mean_img'] = self.viewer.add_image(self.mean_img, name='Mean Image', scale=scale, contrast_limits=clims)
 
-        clims = get_percentiles(self.max_img, pmin, pmax)
-        self.viewer.add_image(self.max_img, name='Max Image', scale = scale, contrast_limits=clims)
+        if self.max_img is not None:
+            clims = get_percentiles(self.max_img, pmin, pmax)
+            self.layers['max_img'] = self.viewer.add_image(self.max_img, name='Max Image', scale=scale, contrast_limits=clims)
 
     def add_corrmap_to_viewer(self):
+        if self.corr_map is None:
+            self.log("No correlation map available — skipping")
+            return
         scale = self.display_params['scale']
         pmin, pmax = self.display_params['contrast_percentiles']
         clims = get_percentiles(self.corr_map, pmin, pmax)
