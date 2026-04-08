@@ -54,8 +54,15 @@ def segment_rois(msub, vmap, n_proc_detect = 8, peak_thresh = 1.0, activity_thre
             # print('return')
             # print(len(new_rois))
             add_segmented_rois(new_rois, stats, msub, vmap, log, ext_subtract_iters=ext_subtract_iters)
-            # print('added')
-            # print(len(stats))
+
+            # Update variances for voxels affected by the subtracted cells
+            for stat in new_rois:
+                if stat is None:
+                    continue
+                zz_s = stat['coords'][0] - stat['offset'][0]
+                yy_s = stat['coords'][1] - stat['offset'][1]
+                xx_s = stat['coords'][2] - stat['offset'][2]
+                msub_vars[zz_s, yy_s, xx_s] = (msub[:, zz_s, yy_s, xx_s] ** 2).sum(axis=0)
             roi_idx = len(stats)
             n_rois = len(stats)
             n_rois_iter = n_rois - prev_n_rois
