@@ -355,7 +355,11 @@ class GenericNapariUI:
         
     def update_histogram_titles(self):
         for key in self.roi_features.keys():
-            self.hist_plots[key].setTitle(self.roi_feature_names[key] + '. Range: %.1f - %.1f' % self.roi_feature_ranges[key])
+            vals = self.roi_features[key][self.base_labels]
+            vmin, vmax = self.roi_feature_ranges[key]
+            n_valid = int(((vals >= vmin) & (vals <= vmax)).sum())
+            self.hist_plots[key].setTitle(
+                '%s. Range: %.1f - %.1f (%d valid)' % (self.roi_feature_names[key], vmin, vmax, n_valid))
 
     def update_feature_ranges(self, key, save=True):
         '''
@@ -582,6 +586,9 @@ class CurationUI(GenericNapariUI):
         self.create_toggles(self.curation_plot_area)
         self.create_base_labels_dropdown()
 
+        self.n_final_roi = self.display_roi_labels.sum()
+        self.update_histogram_title()
+
         self.dock_curation_window()
 
         if self.display_activity:
@@ -788,17 +795,31 @@ class CurationUI(GenericNapariUI):
         self.curation_window = pg.GraphicsLayoutWidget()
 
         # create the plot and button areas and attach them to curation_window
+        self.curation_title_area = pg.GraphicsLayout()
+        self.curation_title_area.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
         self.curation_plot_area = pg.GraphicsLayout()
         self.button_area = pg.GraphicsLayout()
         self.dropdown_area = pg.GraphicsLayout()
-        self.curation_window.addItem(self.dropdown_area, row=0,col=0)
-        self.curation_window.addItem(self.curation_plot_area, row=1,col=0)
-        self.curation_window.addItem(self.button_area, row=2, col=0)
+        self.curation_window.addItem(self.curation_title_area, row=0, col=0)
+        self.curation_window.addItem(self.dropdown_area, row=1,col=0)
+        self.curation_window.addItem(self.curation_plot_area, row=2,col=0)
+        self.curation_window.addItem(self.button_area, row=3, col=0)
+
+        # build the title label
+        self.histogram_title = QLabel()
+        self.histogram_title.setAlignment(QtCore.Qt.AlignCenter)
+        self.histogram_title.setStyleSheet(title_style)
+        self.histogram_title_proxy = QGraphicsProxyWidget()
+        self.histogram_title_proxy.setWidget(self.histogram_title)
+        self.curation_title_area.addItem(self.histogram_title_proxy)
 
     def dock_curation_window(self):
         # dock the curation window to napari
         self.docked_curation_window = self.viewer.window.add_dock_widget(self.curation_window, name='ROI Features', area='right')
 
+    def update_histogram_title(self):
+        self.histogram_title.setText(
+            "<b>%05d</b> displayed of <b>%05d</b> total ROIs" % (self.n_final_roi, self.n_roi))
 
     def create_click_plot(self):
         '''
@@ -904,6 +925,7 @@ def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Se
         cz,cy,cx = coords[i]
         lam = copy.copy(lams[i])
         lam /= lam.max()
+        lam = n.clip(lam, 0, None)
         lam /= lam_max; lam[lam > 1] = 1
         if iscell_1d[i]: # if is cell, add to cell volumes
             cell_idxs_vol[cz,cy,cx] = i
@@ -925,10 +947,11 @@ def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Se
 def fix_rgb_vals(unclipped_rgb_vol, cell_counter):
     rgb_vol = unclipped_rgb_vol.copy()
     alphas = rgb_vol[:,:,:,3].copy()
-    alphas[alphas > 1] = 1
-    
+    alphas = n.clip(alphas, 0, 1)
+
     rgb_vol[cell_counter > 0] = rgb_vol[cell_counter > 0] / cell_counter[cell_counter > 0][:,n.newaxis]
     rgb_vol[:,:,:,3] = alphas
+    rgb_vol = n.clip(rgb_vol, 0, 1)
     return rgb_vol
 
 
@@ -954,6 +977,7 @@ def update_label_vols(label_vols, old_roi_labels, new_roi_labels, coords, lams,
     for roi_idx in changed_idxs:
         cz,cy,cx = coords[roi_idx]
         lam = copy.copy(lams[roi_idx])
+        lam = n.clip(lam, 0, None)
         lam /= lam_max; lam[lam > 1] = 1
         if new_roi_labels[roi_idx] == 1: # if this ROI is marked a cell
             label_vols['non_cell_idxs'][cz,cy,cx] = -1 # remove from non-cell idxs
@@ -1084,9 +1108,8 @@ class SweepUI(GenericNapariUI):
         self.histogram_title_area.addItem(self.histogram_title_proxy)
 
     def update_histogram_title(self):
-        # print("UPdating title to %d, %d" % (self.n_final_roi, self.n_roi))
         self.histogram_title.setText(
-            "<b>%05d</b> of <b>%05d</b> ROIs displayed" % (self.n_final_roi, self.n_roi))
+            "<b>%05d</b> displayed of <b>%05d</b> total ROIs" % (self.n_final_roi, self.n_roi))
 
 
     def dock_histogram_window(self):
