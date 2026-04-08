@@ -645,24 +645,26 @@ class CurationUI(GenericNapariUI):
 
     def add_roi_index_callbacks(self):
         '''
-        Add left-click callbacks to cell/non-cell layers to display the clicked ROI index.
-        Always active regardless of whether activity traces are available.
+        Add left-click callbacks to ALL layers to display the clicked ROI index.
+        Checks both cell and non-cell index volumes so it works from any layer.
         '''
-        cell_layer = self.layers['cell_rgb']
-        non_cell_layer = self.layers['non_cell_rgb']
+        for layer in self.layers.values():
+            @layer.mouse_drag_callbacks.append
+            def roi_index_click(layer, event):
+                if event.button == 1:
+                    cz, cy, cx = n.array(layer.world_to_data(event.position)).astype(int)
+                    self.update_roi_index_from_position(cz, cy, cx)
 
-        @cell_layer.mouse_drag_callbacks.append
-        def roi_index_click_cell(layer, event):
-            if event.button == 1:
-                cz,cy,cx = n.array(layer.world_to_data(event.position)).astype(int)
-                roi_idx = self.get_roi_idx_from_position(cz,cy,cx, cell=True)
-                self.update_roi_index_label(roi_idx)
-        @non_cell_layer.mouse_drag_callbacks.append
-        def roi_index_click_non_cell(layer, event):
-            if event.button == 1:
-                cz,cy,cx = n.array(layer.world_to_data(event.position)).astype(int)
-                roi_idx = self.get_roi_idx_from_position(cz,cy,cx, cell=False)
-                self.update_roi_index_label(roi_idx)
+    def update_roi_index_from_position(self, cz, cy, cx):
+        '''Look up ROI at (cz, cy, cx) in both cell and non-cell index volumes.'''
+        shape = self.label_vols['cell_idxs'].shape
+        if not (0 <= cz < shape[0] and 0 <= cy < shape[1] and 0 <= cx < shape[2]):
+            self.roi_index_label.setText("Out of bounds")
+            return
+        roi_idx = self.label_vols['cell_idxs'][cz, cy, cx]
+        if roi_idx < 1:
+            roi_idx = self.label_vols['non_cell_idxs'][cz, cy, cx]
+        self.update_roi_index_label(roi_idx)
 
     def update_roi_index_label(self, roi_idx):
         if roi_idx < 1:
