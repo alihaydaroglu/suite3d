@@ -150,6 +150,20 @@ def calculate_corrmap(
                 n.save(mov_sub_paths[batch_idx], mov_sub_batch.astype(save_dtype))
         log("save", toc=True)
     gc.collect()
+
+    # Mask out border/padding regions where there is no signal.
+    # These voxels have zero mean intensity (they are zero-padded from
+    # plane alignment and motion correction) but can have inflated corrmap
+    # values due to edge effects in spatial filtering and sdnorm.
+    mean_vol = accums["mean_vol"]
+    padding_mask = mean_vol <= 0
+    if padding_mask.any():
+        n_masked = padding_mask.sum()
+        n_total = padding_mask.size
+        log("Masking %d/%d padding voxels (%.1f%%) in corrmap" %
+            (n_masked, n_total, 100 * n_masked / n_total), 2)
+        vmap_batch[padding_mask] = 0
+
     save_batch_results(vmap_batch, accums, batch_dir)
     return vmap_batch
 

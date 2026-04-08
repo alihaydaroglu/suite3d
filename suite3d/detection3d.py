@@ -89,27 +89,19 @@ def accumulate_sdmov(sdmov_2, batch, ns_previous, minibatch_size=500):
     return sdmov
 
 
-def normalize_movie_by_sdmov(mov, sdmov, sdnorm_exp=1.0, sdnorm_min_frac=0.2):
+def normalize_movie_by_sdmov(mov, sdmov, sdnorm_exp=1.0):
     """
-    Divide each voxel of the movie by sdmov ** sdnorm_exp.
-    Floors the normalization at sdnorm_min_frac * median(sdnorm), preventing
-    border/padding voxels with near-zero variance from being amplified to
-    extreme values.
+    Divide each voxel of the movie by sdmov ** sdnorm_exp
 
     Args:
         mov (ndarray): (nt,nz,ny,nx)
         sdmov (ndarray): (nz,ny,nx)
         sdnorm_exp (float, optional): Defaults to 1.0.
-        sdnorm_min_frac (float, optional): Floor as a fraction of the median
-            sdnorm value. Defaults to 0.2 (no voxel gets amplified more than
-            5x what the median voxel does).
 
     Returns:
         mov: normalized movie (edited inplace)
     """
     sdnorm = sdmov**sdnorm_exp
-    sdnorm_floor = sdnorm_min_frac * n.median(sdnorm)
-    sdnorm = n.maximum(sdnorm, sdnorm_floor)
     mov /= sdnorm
     return mov
 

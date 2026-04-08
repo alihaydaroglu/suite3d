@@ -577,6 +577,7 @@ class CurationUI(GenericNapariUI):
 
         self.build_curation_window()
         self.add_click_curation_callbacks()
+        self.add_roi_index_callbacks()
         self.create_click_plot()
         self.update_click_plot()
 
@@ -642,6 +643,36 @@ class CurationUI(GenericNapariUI):
         
         # self.update_displayed_roi_labels()
 
+    def add_roi_index_callbacks(self):
+        '''
+        Add left-click callbacks to cell/non-cell layers to display the clicked ROI index.
+        Always active regardless of whether activity traces are available.
+        '''
+        cell_layer = self.layers['cell_rgb']
+        non_cell_layer = self.layers['non_cell_rgb']
+
+        @cell_layer.mouse_drag_callbacks.append
+        def roi_index_click_cell(layer, event):
+            if event.button == 1:
+                cz,cy,cx = n.array(layer.world_to_data(event.position)).astype(int)
+                roi_idx = self.get_roi_idx_from_position(cz,cy,cx, cell=True)
+                self.update_roi_index_label(roi_idx)
+        @non_cell_layer.mouse_drag_callbacks.append
+        def roi_index_click_non_cell(layer, event):
+            if event.button == 1:
+                cz,cy,cx = n.array(layer.world_to_data(event.position)).astype(int)
+                roi_idx = self.get_roi_idx_from_position(cz,cy,cx, cell=False)
+                self.update_roi_index_label(roi_idx)
+
+    def update_roi_index_label(self, roi_idx):
+        if roi_idx < 1:
+            self.roi_index_label.setText("No ROI at this location")
+            return
+        cell_str = 'cell' if self.display_roi_labels[roi_idx] else 'non-cell'
+        cz, cy, cx = self.meds[roi_idx]
+        self.roi_index_label.setText(
+            "ROI <b>%05d</b> at (%02d, %03d, %03d) — %s" % (roi_idx, cz, cy, cx, cell_str))
+
     def add_activity_callbacks(self):
         '''
         Add callbacks to the cell_rgb and non_cell_rgb layers to allow right-click labelling
@@ -651,7 +682,7 @@ class CurationUI(GenericNapariUI):
 
         @cell_layer.mouse_drag_callbacks.append
         def click_handler_cell_layer(layer, event):
-            if event.button == 1: 
+            if event.button == 1:
                 cz,cy,cx = n.array(layer.world_to_data(event.position)).astype(int)
                 roi_idx = self.get_roi_idx_from_position(cz,cy,cx, cell=True)
                 self.update_activity_plot(roi_idx)
@@ -811,7 +842,15 @@ class CurationUI(GenericNapariUI):
         self.histogram_title.setStyleSheet(title_style)
         self.histogram_title_proxy = QGraphicsProxyWidget()
         self.histogram_title_proxy.setWidget(self.histogram_title)
-        self.curation_title_area.addItem(self.histogram_title_proxy)
+        self.curation_title_area.addItem(self.histogram_title_proxy, row=0, col=0)
+
+        # build the ROI index label (updated on left-click)
+        self.roi_index_label = QLabel("Click on an ROI")
+        self.roi_index_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.roi_index_label.setStyleSheet(title_style)
+        self.roi_index_label_proxy = QGraphicsProxyWidget()
+        self.roi_index_label_proxy.setWidget(self.roi_index_label)
+        self.curation_title_area.addItem(self.roi_index_label_proxy, row=1, col=0)
 
     def dock_curation_window(self):
         # dock the curation window to napari
