@@ -646,14 +646,31 @@ class CurationUI(GenericNapariUI):
     def add_roi_index_callbacks(self):
         '''
         Add left-click callbacks to ALL layers to display the clicked ROI index.
-        Checks both cell and non-cell index volumes so it works from any layer.
+        Uses a reference 3D image layer for coordinate conversion to avoid issues
+        with RGB layers (which have 4D data).
         '''
+        # pick a reference 3D image layer for world_to_data conversion
+        for key in ['max_img', 'mean_img', 'vmap']:
+            if key in self.layers:
+                self._ref_layer = self.layers[key]
+                break
+        else:
+            # fallback: use cell_idxs shape directly with scale
+            self._ref_layer = None
+
         for layer in self.layers.values():
             @layer.mouse_drag_callbacks.append
             def roi_index_click(layer, event):
                 if event.button == 1:
-                    cz, cy, cx = n.array(layer.world_to_data(event.position)).astype(int)
-                    self.update_roi_index_from_position(cz, cy, cx)
+                    try:
+                        if self._ref_layer is not None:
+                            coords = n.array(self._ref_layer.world_to_data(event.position)).astype(int)
+                        else:
+                            coords = n.array(layer.world_to_data(event.position)).astype(int)
+                        cz, cy, cx = coords[:3]
+                        self.update_roi_index_from_position(cz, cy, cx)
+                    except Exception as e:
+                        print("ROI index callback error: %s" % e)
 
     def update_roi_index_from_position(self, cz, cy, cx):
         '''Look up ROI at (cz, cy, cx) in both cell and non-cell index volumes.'''
