@@ -907,7 +907,7 @@ def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Se
         lam /= lam_max; lam[lam > 1] = 1
         if iscell_1d[i]: # if is cell, add to cell volumes
             cell_idxs_vol[cz,cy,cx] = i
-            cell_rgb_vol[cz,cy,cx, :3] += cmap(i % n_cmap)[:3]
+            cell_rgb_vol[cz,cy,cx, :3] += cmap((i % n_cmap) / n_cmap)[:3]
             cell_rgb_vol[cz,cy,cx, 3] += lam
             cell_rgb_vol_counter[cz,cy,cx] += 1
 
@@ -958,19 +958,19 @@ def update_label_vols(label_vols, old_roi_labels, new_roi_labels, coords, lams,
         if new_roi_labels[roi_idx] == 1: # if this ROI is marked a cell
             label_vols['non_cell_idxs'][cz,cy,cx] = -1 # remove from non-cell idxs
             label_vols['cell_idxs'][cz,cy,cx] = roi_idx # add to cell idxs
-            label_vols['non_cell_rgb_unclipped'][cz,cy,cx, :3] -= cmap(roi_idx % n_cmap)[:3]
+            label_vols['non_cell_rgb_unclipped'][cz,cy,cx, :3] -= cmap((roi_idx % n_cmap) / n_cmap)[:3]
             label_vols['non_cell_rgb_unclipped'][cz,cy,cx, 3] -= lam # remove from non-cell rgb
             label_vols['non_cell_rgb_counter'][cz,cy,cx] -= 1
-            label_vols['cell_rgb_unclipped'][cz,cy,cx, :3] += cmap(roi_idx % n_cmap)[:3]
+            label_vols['cell_rgb_unclipped'][cz,cy,cx, :3] += cmap((roi_idx % n_cmap) / n_cmap)[:3]
             label_vols['cell_rgb_unclipped'][cz,cy,cx, 3] += lam # add to cell rgb
             label_vols['cell_rgb_counter'][cz,cy,cx] += 1
         elif new_roi_labels[roi_idx] == 0: # if this ROI is marked a non-cell
             label_vols['cell_idxs'][cz,cy,cx] = -1 # remove from cell idxs
             label_vols['non_cell_idxs'][cz,cy,cx] = roi_idx # add to non-cell idxs
-            label_vols['cell_rgb_unclipped'][cz,cy,cx, :3] -= cmap(roi_idx % n_cmap)[:3]
+            label_vols['cell_rgb_unclipped'][cz,cy,cx, :3] -= cmap((roi_idx % n_cmap) / n_cmap)[:3]
             label_vols['cell_rgb_unclipped'][cz,cy,cx, 3] -= lam # remove from cell rgb
             label_vols['cell_rgb_counter'][cz,cy,cx] -= 1
-            label_vols['non_cell_rgb_unclipped'][cz,cy,cx, :3] += cmap(roi_idx % n_cmap)[:3]
+            label_vols['non_cell_rgb_unclipped'][cz,cy,cx, :3] += cmap((roi_idx % n_cmap) / n_cmap)[:3]
             label_vols['non_cell_rgb_unclipped'][cz,cy,cx, 3] += lam # add to non-cell rgb
             label_vols['non_cell_rgb_counter'][cz,cy,cx] += 1
     
