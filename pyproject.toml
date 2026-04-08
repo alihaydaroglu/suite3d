@@ -75,6 +75,7 @@ webui = [
     "pandas",
     "scikit-learn",
     "umap-learn",
+    "torchvision",
 ]
 # Everything except GPU
 all = [

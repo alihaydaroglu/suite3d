@@ -9,9 +9,10 @@ import time
 
 
 
-def segment_rois(msub, vmap, n_proc_detect = 8, peak_thresh = 1.0, activity_thresh=None, 
+def segment_rois(msub, vmap, n_proc_detect = 8, peak_thresh = 1.0, activity_thresh=None,
                  extend_thresh=0.2, roi_ext_iterations=10, roi_dilations_per_iter = 3, max_pix = 10000, min_pix = 4, use_power_iter_v1 = False,multi_source = True,
                  roi_power_iterations = 5, roi_min_active_frames = 50, roi_recompute_active_frames_interval=None, ext_subtract_iters=3,
+                 vox_snr_mp_correction=False,
                  savepath =None, patch_idx = -1, offset = (0,0,0), max_iter = 1e6, log=default_log, **kwargs):
 
     stats = []
@@ -45,8 +46,8 @@ def segment_rois(msub, vmap, n_proc_detect = 8, peak_thresh = 1.0, activity_thre
                 [
                     (shmem_par_msub, msub_vars, vmap, potential_rois[widx], activity_thresh, max_pix,min_pix,use_power_iter_v1,
                      roi_ext_iterations,roi_dilations_per_iter, roi_power_iterations, roi_min_active_frames, extend_thresh,
-                     multi_source, roi_recompute_active_frames_interval, 
-                     offset, False, t0, roi_idxs[widx], worker_idxs[widx], patch_idx)
+                     multi_source, roi_recompute_active_frames_interval,
+                     offset, False, t0, roi_idxs[widx], worker_idxs[widx], patch_idx, vox_snr_mp_correction)
                     for widx in range(len(potential_rois))
                 ]
             )            
@@ -128,9 +129,10 @@ def add_segmented_rois(new_rois, stats, msub, vmap, log, ext_subtract_iters=3, r
 
 
 def segment_roi(msub, variances, vmap, roi_init, activity_thresh = 5,max_pix=10000,min_pix=4,use_power_iter_v1 = False,
-                n_extend_iter = 1, roi_dilations_per_iter = 3, n_power_iter = 3, min_frames = 50,vox_snr_thresh=1.0,
-                multi_source=True,recompute_active_frames_interval=None, offset=(0,0,0), 
-                debug = False, t_start = 0, roi_idx = -1, worker_idx = -1, patch_idx = -1):
+                roi_ext_iterations = 1, roi_dilations_per_iter = 3, n_power_iter = 3, min_frames = 50,vox_snr_thresh=1.0,
+                multi_source=True,recompute_active_frames_interval=None, offset=(0,0,0),
+                debug = False, t_start = 0, roi_idx = -1, worker_idx = -1, patch_idx = -1,
+                vox_snr_mp_correction=False):
     '''
     assume a model where p(x) = v1 f1(t) + v2 f2(t) + noise
     '''
@@ -164,7 +166,7 @@ def segment_roi(msub, variances, vmap, roi_init, activity_thresh = 5,max_pix=100
     if debug: print(f"Time to init: {1000*(time.time() - t00):.5f} ms")
 
     extend_iter = 0
-    while extend_iter < n_extend_iter: 
+    while extend_iter < roi_ext_iterations: 
         extend_iter += 1
 
         t0 = time.time()   
@@ -192,7 +194,20 @@ def segment_roi(msub, variances, vmap, roi_init, activity_thresh = 5,max_pix=100
         else:
             v1_u = v1h_u 
 
-        vox_snrs = v1_u**2 / (variances[cz,cy,cx] - v1_u**2)
+        if vox_snr_mp_correction:
+            T_active = Fc.shape[0]
+            K = Fc.shape[1]
+            gamma = K / T_active
+            active_var = (Fc**2).sum(axis=0)
+            noise_var = (active_var - v1_u**2) / T_active
+            noise_var = n.maximum(noise_var, 1e-10)
+            term1 = v1_u**2 / T_active - (1 + gamma) * noise_var
+            term2 = n.sqrt(n.maximum(term1**2 - 4 * gamma * noise_var**2, 0))
+            alpha_sq = (T_active / 2) * (term1 + term2)
+            alpha_sq = n.maximum(alpha_sq, 0)
+            vox_snrs = alpha_sq / (T_active * noise_var)
+        else:
+            vox_snrs = v1_u**2 / (variances[cz,cy,cx] - v1_u**2)
         include = vox_snrs > vox_snr_thresh
         include[:len(seed_zz)] = True
 

@@ -267,6 +267,81 @@ def cluster_representatives(umap_2d, labels, full_features, save_path=None, save
 
 
 
+def run_visual_umap(
+    embeddings_path: str,
+    out_dir: str,
+    umap_neighbors: int = 30,
+    umap_min_dist: float = 0.1,
+    seed: int = 0,
+    savename: str = "umap_2d_visual",
+) -> str:
+    """Run UMAP on pre-computed visual embeddings."""
+    os.makedirs(out_dir, exist_ok=True)
+
+    Z = np.load(embeddings_path).astype(np.float32)
+    Z[~np.isfinite(Z)] = 0.0
+
+    scaler = StandardScaler()
+    Z_scaled = scaler.fit_transform(Z)
+
+    print(f"Running UMAP on visual embeddings {Z_scaled.shape}...")
+    umap_model = UMAP(
+        n_neighbors=umap_neighbors,
+        min_dist=umap_min_dist,
+        metric="euclidean",
+        random_state=seed,
+    )
+    Y = umap_model.fit_transform(Z_scaled)
+
+    np.save(os.path.join(out_dir, f"{savename}.npy"), Y.astype(np.float32))
+    save_scatter(os.path.join(out_dir, f"{savename}.png"), Y)
+    print(f"Visual UMAP saved to {out_dir}/{savename}.npy")
+    return out_dir
+
+
+def run_combined_umap(
+    pca_embeddings_path: str,
+    visual_embeddings_path: str,
+    out_dir: str,
+    pca_weight: float = 1.0,
+    visual_weight: float = 1.0,
+    umap_neighbors: int = 30,
+    umap_min_dist: float = 0.1,
+    seed: int = 0,
+    savename: str = "umap_2d_combined",
+) -> str:
+    """Concatenate PCA + visual embeddings (each scaled), then UMAP."""
+    os.makedirs(out_dir, exist_ok=True)
+
+    Z_pca = np.load(pca_embeddings_path).astype(np.float32)
+    Z_vis = np.load(visual_embeddings_path).astype(np.float32)
+    Z_pca[~np.isfinite(Z_pca)] = 0.0
+    Z_vis[~np.isfinite(Z_vis)] = 0.0
+
+    assert Z_pca.shape[0] == Z_vis.shape[0], (
+        f"Row count mismatch: PCA {Z_pca.shape[0]} vs visual {Z_vis.shape[0]}"
+    )
+
+    Z_pca_s = StandardScaler().fit_transform(Z_pca) * pca_weight
+    Z_vis_s = StandardScaler().fit_transform(Z_vis) * visual_weight
+    Z_combined = np.concatenate([Z_pca_s, Z_vis_s], axis=1)
+
+    print(f"Running UMAP on combined embeddings {Z_combined.shape} "
+          f"(pca_w={pca_weight}, vis_w={visual_weight})...")
+    umap_model = UMAP(
+        n_neighbors=umap_neighbors,
+        min_dist=umap_min_dist,
+        metric="euclidean",
+        random_state=seed,
+    )
+    Y = umap_model.fit_transform(Z_combined)
+
+    np.save(os.path.join(out_dir, f"{savename}.npy"), Y.astype(np.float32))
+    save_scatter(os.path.join(out_dir, f"{savename}.png"), Y)
+    print(f"Combined UMAP saved to {out_dir}/{savename}.npy")
+    return out_dir
+
+
 if __name__ == "__main__":
 
 

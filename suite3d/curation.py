@@ -162,6 +162,36 @@ class GenericNapariUI:
             self.viewer = None
         self.viewer = napari.Viewer(title="Suite3D: %s" % self.base_dir.absolute())
 
+    def set_viewer(self, viewer):
+        '''
+        Use an externally-created napari viewer instead of creating a new one.
+        '''
+        self.viewer = viewer
+
+    def clear_ui(self):
+        '''
+        Remove all layers and dock widgets added by this UI from the viewer.
+        '''
+        if self.viewer is None:
+            return
+        # Remove layers we added
+        for key in list(self.layers.keys()):
+            try:
+                self.viewer.layers.remove(self.layers[key])
+            except (ValueError, KeyError):
+                pass
+        self.layers.clear()
+        # Remove docked widgets
+        for attr in ['docked_curation_window', 'docked_activity_window',
+                     'docked_param_window', 'docked_histogram_window']:
+            widget = getattr(self, attr, None)
+            if widget is not None:
+                try:
+                    self.viewer.window.remove_dock_widget(widget)
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+
     def close(self):
         '''
         close the viewer
@@ -1182,13 +1212,216 @@ def get_percentiles(image, pmin=1, pmax=99, eps = 0.0001):
     return vmin, vmax
 
 
+class Suite3DViewer:
+    """Top-level napari viewer that launches once and lets you browse jobs."""
+
+    def __init__(self):
+        from suite3d.job_registry import get_registered_jobs, scan_job_dir, touch_job
+
+        self._scan_job_dir = scan_job_dir
+        self._touch_job = touch_job
+
+        self.viewer = napari.Viewer(title="Suite3D")
+        self._current_ui = None
+        self._jobs = get_registered_jobs()
+        self._manifest = {}
+
+        self._build_nav_widget()
+
+    def _build_nav_widget(self):
+        nav_widget = QtWidgets.QWidget()
+        layout = QVBoxLayout()
+        nav_widget.setLayout(layout)
+
+        # Job list
+        layout.addWidget(QLabel("Registered Jobs"))
+        self._job_list = QtWidgets.QListWidget()
+        self._job_list.setStyleSheet(dropdown_style)
+        self._refresh_job_list()
+        self._job_list.currentRowChanged.connect(self._on_job_selected)
+        layout.addWidget(self._job_list)
+
+        # Browse button
+        browse_btn = QPushButton("Browse for job...")
+        browse_btn.setStyleSheet(basicButtonStyle)
+        browse_btn.clicked.connect(self._browse_for_job)
+        layout.addWidget(browse_btn)
+
+        # Refresh button
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.setStyleSheet(basicButtonStyle)
+        refresh_btn.clicked.connect(self._refresh)
+        layout.addWidget(refresh_btn)
+
+        # Separator
+        layout.addWidget(QLabel(""))
+        layout.addWidget(QLabel("Available Outputs"))
+
+        # Output selector
+        self._output_list = QtWidgets.QListWidget()
+        self._output_list.setStyleSheet(dropdown_style)
+        self._output_list.itemDoubleClicked.connect(self._on_output_selected)
+        layout.addWidget(self._output_list)
+
+        # Status
+        self._status_label = QLabel("Select a job to get started")
+        self._status_label.setStyleSheet(dropdown_style)
+        layout.addWidget(self._status_label)
+
+        self.viewer.window.add_dock_widget(nav_widget, name="Suite3D Navigator", area="left")
+
+    def _refresh_job_list(self):
+        from suite3d.job_registry import get_registered_jobs
+        self._jobs = get_registered_jobs()
+        self._job_list.clear()
+        for job in self._jobs:
+            self._job_list.addItem("%s  (%s)" % (job["job_id"], job["path"]))
+
+    def _refresh(self):
+        self._refresh_job_list()
+        self._status_label.setText("Refreshed job list")
+
+    def _browse_for_job(self):
+        dir_path = QtWidgets.QFileDialog.getExistingDirectory(
+            None, "Select a suite3d job or output directory")
+        if not dir_path:
+            return
+        dir_path = str(Path(dir_path).resolve())
+
+        # Scan immediately — works whether it's a job root, rois/ dir, etc.
+        self._manifest = self._scan_job_dir(dir_path)
+
+        if not self._manifest:
+            self._status_label.setText("No suite3d outputs found in %s" % dir_path)
+            return
+
+        # Register if it looks like a job root (has s3d- prefix or multiple outputs)
+        from suite3d.job_registry import register_job
+        register_job(dir_path)
+        self._refresh_job_list()
+
+        # Populate output list
+        self._output_list.clear()
+        dirname = os.path.basename(dir_path)
+        if "rois" in self._manifest:
+            self._output_list.addItem("Curation (rois)")
+        if "corrmap" in self._manifest:
+            self._output_list.addItem("Correlation Map")
+        for sweep_name in self._manifest.get("sweeps", {}):
+            self._output_list.addItem("Sweep: %s" % sweep_name)
+
+        self._status_label.setText("Found outputs in %s — double-click to load" % dirname)
+
+        # If there's only one output, load it directly
+        if self._output_list.count() == 1:
+            self._on_output_selected(self._output_list.item(0))
+
+    def _on_job_selected(self, row):
+        if row < 0 or row >= len(self._jobs):
+            return
+        job = self._jobs[row]
+        job_path = job["path"]
+        self._touch_job(job_path)
+        self._manifest = self._scan_job_dir(job_path)
+        self._output_list.clear()
+
+        if not self._manifest:
+            self._status_label.setText("No outputs found in %s" % job["job_id"])
+            return
+
+        if "rois" in self._manifest:
+            self._output_list.addItem("Curation (rois)")
+        if "corrmap" in self._manifest:
+            self._output_list.addItem("Correlation Map")
+        for sweep_name in self._manifest.get("sweeps", {}):
+            self._output_list.addItem("Sweep: %s" % sweep_name)
+
+        self._status_label.setText("Job: %s — double-click an output to load" % job["job_id"])
+
+    def _on_output_selected(self, item):
+        text = item.text()
+
+        # Clear previous UI
+        if self._current_ui is not None:
+            self._current_ui.clear_ui()
+            self._current_ui = None
+
+        if text == "Curation (rois)":
+            ui = CurationUI(self._manifest["rois"])
+            ui.load_outputs()
+            ui.set_viewer(self.viewer)
+            ui.add_images_to_viewer()
+            ui.make_all_label_vols()
+            ui.load_click_curations()
+            ui.compute_roi_features()
+            ui.add_cells_to_viewer()
+            ui.build_curation_window()
+            ui.add_click_curation_callbacks()
+            ui.create_click_plot()
+            ui.update_click_plot()
+            ui.create_histograms(ui.curation_plot_area)
+            ui.update_histograms()
+            ui.create_save_button()
+            ui.create_toggles(ui.curation_plot_area)
+            ui.create_base_labels_dropdown()
+            ui.dock_curation_window()
+            if ui.display_activity:
+                ui.build_activity_window()
+                ui.create_activity_plot()
+                ui.add_activity_callbacks()
+                ui.dock_activity_window()
+            self._current_ui = ui
+
+        elif text == "Correlation Map":
+            # Lightweight view — just show the images
+            ui = GenericNapariUI(self._manifest["corrmap"])
+            ui.set_viewer(self.viewer)
+            info_path = Path(self._manifest["corrmap"])
+            import numpy as _n
+            vmap = _n.load(info_path / "vmap.npy", allow_pickle=True)
+            mean_img = _n.load(info_path / "mean_img.npy", allow_pickle=True)
+            max_img = _n.load(info_path / "max_img.npy", allow_pickle=True)
+            scale = ui.display_params['scale']
+            pmin, pmax = ui.display_params['contrast_percentiles']
+            ui.layers['mean_img'] = self.viewer.add_image(mean_img, name='Mean Image',
+                contrast_limits=get_percentiles(mean_img, pmin, pmax), scale=scale)
+            ui.layers['max_img'] = self.viewer.add_image(max_img, name='Max Image',
+                contrast_limits=get_percentiles(max_img, pmin, pmax), scale=scale)
+            ui.layers['vmap'] = self.viewer.add_image(vmap, name='Corr. Map',
+                contrast_limits=get_percentiles(vmap, pmin, pmax), scale=scale)
+            self._current_ui = ui
+
+        elif text.startswith("Sweep:"):
+            sweep_name = text[len("Sweep: "):]
+            sweep_path = self._manifest["sweeps"][sweep_name]
+            ui = SweepUI(sweep_path)
+            ui.load_outputs()
+            ui.set_viewer(self.viewer)
+            ui.add_background_images_to_viewer()
+            ui.add_corrmap_to_viewer()
+            if ui.sweep_type == 'segmentation':
+                ui.build_histogram_window()
+                ui.build_histogram_title()
+                ui.create_histograms(ui.histogram_plot_area)
+                ui.create_toggles(ui.histogram_plot_area)
+                ui.make_all_label_vols()
+                ui.add_cells_to_viewer()
+                ui.display_current_result()
+                ui.dock_histogram_window()
+            ui.create_param_display()
+            self._current_ui = ui
+
+        self._status_label.setText("Loaded: %s" % text)
+
+
 def create_arg_parser():
     # Creates and returns the ArgumentParser object
 
-    parser = argparse.ArgumentParser(description='Standalone viewer of Suite3D outputs.')
-    parser.add_argument('type', type=str, default='curation')
-    parser.add_argument('--output_dir', type=Path,default=None,
-                    help='Path to directory containing the Suite3D output, including stats.npy.')
+    parser = argparse.ArgumentParser(description='Suite3D Viewer — launch with no args to browse jobs.')
+    parser.add_argument('type', nargs='?', type=str, default=None,
+                        help='UI type: "curation", "sweep", or omit to launch the job browser')
+    parser.add_argument('--output_dir', type=Path, default=None,
+                    help='Path to directory containing the Suite3D output.')
     return parser
 
 
@@ -1242,25 +1475,34 @@ def collate_sweep_results(sweep_summary, result_key = 'stats'):
 
 
 if __name__ == '__main__':
-    
+
     arg_parser = create_arg_parser()
     parsed_args = arg_parser.parse_args(sys.argv[1:])
-    base_dir = parsed_args.output_dir
-    if base_dir is not None:
-        print("Running UI in %s" % base_dir.absolute())
-    else:
-        print("Running UI in current working dir")
 
-    print("Creating %s UI" % parsed_args.type)
-
-    if parsed_args.type == 'curation':
-        ui = CurationUI(base_dir)
-    elif parsed_args.type == 'sweep':
-        ui = SweepUI(base_dir)
+    if parsed_args.type is None:
+        # No arguments — launch the job browser
+        print("Launching Suite3D Viewer")
+        viewer = Suite3DViewer()
+        napari.run()
     else:
-        warn("Invalid argument")
-    ui.load_outputs()
-    ui.create_ui()
+        base_dir = parsed_args.output_dir
+        if base_dir is not None:
+            print("Running UI in %s" % base_dir.absolute())
+        else:
+            print("Running UI in current working dir")
+
+        print("Creating %s UI" % parsed_args.type)
+
+        if parsed_args.type == 'curation':
+            ui = CurationUI(base_dir)
+        elif parsed_args.type == 'sweep':
+            ui = SweepUI(base_dir)
+        else:
+            warn("Invalid argument")
+            sys.exit(1)
+        ui.load_outputs()
+        ui.create_ui()
+        napari.run()
         
 
     napari.run()

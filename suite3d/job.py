@@ -27,6 +27,7 @@ except ImportError:
     print("No psutil")
 
 from suite3d import dcnv
+from suite3d.job_registry import register_job
 
 from . import utils
 
@@ -459,6 +460,7 @@ class Job:
             else:
                 self.log("Found dir %s" % dir_name, 2)
         n.save(os.path.join(job_dir, "dirs.npy"), self.dirs)
+        register_job(job_dir, job_id)
 
     def run_init_pass(self):
         self.save_params(copy_dir_tag="summary")

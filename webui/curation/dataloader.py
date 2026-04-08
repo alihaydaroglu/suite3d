@@ -242,26 +242,30 @@ class Suite3DProcessor:
     def process_and_save_session(self, session_path: Path) -> Dict:
         """
         Process a single session and immediately save to disk.
-        
+
         Args:
             session_path: Path to session folder
-            
+
         Returns:
             Session info dictionary (patches are saved to disk, not returned)
         """
         print(f"Processing session: {session_path.name}")
-        
+
         # Load session data
         session_data = self.load_session_data(session_path)
-        
+
         # Check required data exists
         required_keys = ['info', 'stats']
         for key in required_keys:
             if key not in session_data:
                 raise ValueError(f"Required file {key}.npy not found in {session_path}")
-        
+
         info = session_data['info']
         stats = session_data['stats']
+
+        # Save stats for visual embedding pipeline
+        stats_file = self.output_dir / f"{session_path.name}_stats.npy"
+        np.save(stats_file, stats)
         
         # Get mean image and correlation map
         if 'mean_img' not in info:
@@ -452,7 +456,19 @@ class Suite3DProcessor:
         combined_patches_file = self.output_dir / "all_sessions_patches.npy"
         print(f"Saving combined patches to {combined_patches_file}")
         np.save(combined_patches_file, combined_patches)
-        
+
+        # Combine and save stats for visual embedding pipeline
+        combined_stats = []
+        for session_info in session_info_list:
+            stats_file = self.output_dir / f"{session_info['session_name']}_stats.npy"
+            if stats_file.exists():
+                session_stats = np.load(stats_file, allow_pickle=True)
+                combined_stats.extend(list(session_stats))
+        if combined_stats:
+            np.save(self.output_dir / "all_sessions_stats.npy",
+                    np.array(combined_stats, dtype=object))
+            print(f"Saved combined stats ({len(combined_stats)} cells)")
+
         # Create combined info
         combined_info = {
             'total_cells': total_cells,

@@ -137,6 +137,7 @@ PARAM_SECTIONS = {
     "roi_ext_iterations":           "segmentation",
     "roi_dilations_per_iter":       "segmentation",
     "ext_subtract_iters":           "segmentation",
+    "vox_snr_mp_correction":        "segmentation",
     "max_iter":                     "segmentation",
     "segmentation_timebin":         "segmentation",
     "segmentation_spatial_filt":    "segmentation",
@@ -349,12 +350,13 @@ params = {
     "n_power_iter": 3,                  # power iterations for footprints
     "use_power_iter_v1": True,          # use power iteration for v1
     "min_frames": 50,                   # minimum frames per patch
-    "roi_ext_iterations": 2,            # ROI extension iterations
+    "roi_ext_iterations": 20,            # ROI extension iterations
     "roi_dilations_per_iter": 1,
     "ext_subtract_iters": 0,            # exclusion iterations around cells
+    "vox_snr_mp_correction": False,     # Marchenko-Pastur correction for voxel SNR during ROI extension
     "max_iter": 10000,                  # max ROIs per patch
     "segmentation_timebin": 1,          # time binning for segmentation
-    "segmentation_spatial_filt": None,  # spatial filter before segmentation
+    "segmentation_spatial_filt": 2,     # uniform filter size in pixels (applied in xy per frame)
     "detection_time_crop": (None, None),
     # Local thresholding
     "local_thresh": True,
