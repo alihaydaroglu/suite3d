@@ -10,7 +10,7 @@ import time
 
 
 def segment_rois(msub, vmap, n_proc_detect = 8, peak_thresh = 1.0, activity_thresh=None,
-                 extend_thresh=0.2, roi_ext_iterations=10, roi_dilations_per_iter = 3, max_pix = 10000, min_pix = 4, use_power_iter_v1 = False,multi_source = True,
+                 vox_snr_thresh=1.0, roi_ext_iterations=10, roi_dilations_per_iter = 3, max_pix = 10000, min_pix = 4, use_power_iter_v1 = False,multi_source = True,
                  roi_power_iterations = 5, roi_min_active_frames = 50, roi_recompute_active_frames_interval=None, ext_subtract_iters=3,
                  vox_snr_mp_correction=False,
                  savepath =None, patch_idx = -1, offset = (0,0,0), max_iter = 1e6, log=default_log, **kwargs):
@@ -44,8 +44,8 @@ def segment_rois(msub, vmap, n_proc_detect = 8, peak_thresh = 1.0, activity_thre
             new_rois = p.starmap(
                 segment_roi,
                 [
-                    (shmem_par_msub, msub_vars, vmap, potential_rois[widx], activity_thresh, max_pix,min_pix,use_power_iter_v1,
-                     roi_ext_iterations,roi_dilations_per_iter, roi_power_iterations, roi_min_active_frames, extend_thresh,
+                    (shmem_par_msub, msub_vars, vmap, potential_rois[widx], activity_thresh, max_pix, min_pix, use_power_iter_v1,
+                     roi_ext_iterations, roi_dilations_per_iter, roi_power_iterations, roi_min_active_frames, vox_snr_thresh,
                      multi_source, roi_recompute_active_frames_interval,
                      offset, False, t0, roi_idxs[widx], worker_idxs[widx], patch_idx, vox_snr_mp_correction)
                     for widx in range(len(potential_rois))

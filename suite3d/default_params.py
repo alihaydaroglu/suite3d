@@ -129,7 +129,7 @@ PARAM_SECTIONS = {
     "patch_overlap_xy":             "segmentation",
     "activity_thresh":              "segmentation",
     "percentile":                   "segmentation",
-    "extend_thresh":                "segmentation",
+    "vox_snr_thresh":               "segmentation",
     "multi_source":                 "segmentation",
     "n_power_iter":                 "segmentation",
     "use_power_iter_v1":            "segmentation",
@@ -345,7 +345,7 @@ params = {
     "patch_overlap_xy": (25, 25),       # patch overlap
     "activity_thresh": 5.0,             # minimum activity for segmentation
     "percentile": 95.0,                 # activity percentile threshold
-    "extend_thresh": 0.05,              # ROI extension threshold
+    "vox_snr_thresh": 1.0,              # voxel SNR threshold for ROI inclusion
     "multi_source": True,               # multi-source correction
     "n_power_iter": 3,                  # power iterations for footprints
     "use_power_iter_v1": True,          # use power iteration for v1

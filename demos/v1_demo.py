@@ -79,7 +79,7 @@ def get_params(tifs):
 
         # Segmentation - experimental params from TC030 (March 2025)
         "peak_thresh": 0.03,
-        "extend_thresh": 0.04,
+        "vox_snr_thresh": 0.04,
         "roi_ext_iterations": 20,
         "roi_dilations_per_iter": 3,
         "max_pix": 10000,
@@ -418,7 +418,7 @@ def compute_and_plot_quality_metrics(job, stats, fig_dir, label="",
 def run_segmentation_sweep(job, fig_dir):
     """Run a parameter sweep over key segmentation parameters.
 
-    Sweeps extend_thresh, peak_thresh, and roi_ext_iterations.
+    Sweeps vox_snr_thresh, peak_thresh, and roi_ext_iterations.
     For each combination, computes # ROIs, size distribution,
     duplication, and overmerge metrics.
 
@@ -429,7 +429,7 @@ def run_segmentation_sweep(job, fig_dir):
     from suite3d.quality_metrics import compute_roi_metrics
 
     params_to_sweep = {
-        'extend_thresh': [0.02, 0.04, 0.08],
+        'vox_snr_thresh': [0.02, 0.04, 0.08],
         'peak_thresh': [0.02, 0.03, 0.05],
     }
 

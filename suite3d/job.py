@@ -1005,6 +1005,16 @@ class Job:
                 self.log("Applying spatial filter before segmentation: %s" % str(self.params['segmentation_spatial_filt']), 2)
                 mov_patch = seg.filter_movie(mov_patch, self.params['segmentation_spatial_filt'])
 
+            # Zero out padding regions in the movie so ROIs cannot seed or
+            # extend into them.  The padding mask is derived from the mean
+            # image: voxels that are always zero were never illuminated.
+            mean_patch = maps.get("mean_img", None)
+            if mean_patch is not None:
+                mean_patch = mean_patch[zs[0]:zs[1], ys[0]:ys[1], xs[0]:xs[1]]
+                padding = mean_patch <= 0
+                if padding.any():
+                    mov_patch[:, padding] = 0
+
             self.log(
                 "Loading %.2f GB movie to memory, shape: %s " % (mov_patch.nbytes / 1024**3, str(mov_patch.shape)),
                 3,

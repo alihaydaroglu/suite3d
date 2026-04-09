@@ -35,7 +35,7 @@ def get_params():
     params.update({
         "sdnorm_exp": 0.8,          # normalization exponent for correlation map
         "intensity_thresh": 0.7,      # threshold for the normalized, filtered movie
-        "extend_thresh": 0.15,
+        "vox_snr_thresh": 0.15,
         "detection_timebin": 25,
     })
 
