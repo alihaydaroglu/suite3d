@@ -21,6 +21,7 @@ except ImportError:
 
 default_display_params = {
     'lam_max' : 1.0, # Voxels with cell values above lam_max will have alpha=1
+    'lam_min' : 0.5, # Voxels with normalized lam below lam_min are hidden (alpha=0)
     'cmap' : 'Set3', # colormap to use
     'scale' : (15,3,3), # size of a voxel in z,y,x in microns
     'contrast_percentiles' : (20,99.9), # the contrast limits (expressed as percentile) on startup
@@ -239,13 +240,13 @@ class GenericNapariUI:
         Makes four volumes of size self.shape. Two of them are RGB volumes with each cell colored differently, one for ROIs labeled cells and one for non-cells. Two are integers, with -1 in all voxels that aren't part of an ROI, and cell_idx in all voxels that are part of an ROI, separated by cells and non-cells.
         '''
         lam_max = self.display_params['lam_max']
+        lam_min = self.display_params['lam_min']
         cmap = self.display_params['cmap']
         if self.display_roi_labels is None:
             self.display_roi_labels = n.ones(self.n_roi)
-        print(lam_max)
-        cell_idxs, cell_rgb,cell_rgb_unclipped,cell_rgb_counter = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, 
+        cell_idxs, cell_rgb,cell_rgb_unclipped,cell_rgb_counter = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, lam_min=lam_min,
                         iscell_1d = self.display_roi_labels, cmap=cmap)
-        non_cell_idxs, non_cell_rgb,non_cell_rgb_unclipped,non_cell_rgb_counter = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
+        non_cell_idxs, non_cell_rgb,non_cell_rgb_unclipped,non_cell_rgb_counter = make_label_vols(self.coords, self.lams, self.shape, lam_max = lam_max, lam_min=lam_min, iscell_1d = 1 - self.display_roi_labels, cmap=cmap)
         
         self.label_vols = {
         'cell_idxs' : cell_idxs,
@@ -403,8 +404,8 @@ class GenericNapariUI:
         self.log("%d cells left" % self.n_final_roi, 2)
 
         update_label_vols(self.label_vols, old_labels, self.display_roi_labels,
-                          self.coords, self.lams, self.display_params['lam_max'], 
-                          self.display_params['cmap'])
+                          self.coords, self.lams, self.display_params['lam_max'],
+                          self.display_params['lam_min'], self.display_params['cmap'])
         self.update_histogram_title()
         self.update_cells_in_viewer()
 
@@ -645,32 +646,33 @@ class CurationUI(GenericNapariUI):
 
     def add_roi_index_callbacks(self):
         '''
-        Add left-click callbacks to ALL layers to display the clicked ROI index.
-        Uses a reference 3D image layer for coordinate conversion to avoid issues
-        with RGB layers (which have 4D data).
+        Add left-click callback at the viewer level to display the clicked ROI index.
+        Uses viewer.mouse_drag_callbacks so it fires regardless of active tool/layer.
+        Falls back to a keybinding ('i') if viewer-level callbacks are not available.
         '''
-        # pick a reference 3D image layer for world_to_data conversion
-        for key in ['max_img', 'mean_img', 'vmap']:
-            if key in self.layers:
-                self._ref_layer = self.layers[key]
-                break
-        else:
-            # fallback: use cell_idxs shape directly with scale
-            self._ref_layer = None
+        scale = n.array(self.display_params['scale'])
 
-        for layer in self.layers.values():
-            @layer.mouse_drag_callbacks.append
-            def roi_index_click(layer, event):
+        def _get_roi_at_cursor():
+            try:
+                world_pos = n.array(self.viewer.cursor.position)
+                data_pos = (world_pos / scale).astype(int)
+                cz, cy, cx = data_pos[:3]
+                self.update_roi_index_from_position(cz, cy, cx)
+            except Exception as e:
+                print("ROI index callback error: %s" % e)
+
+        try:
+            @self.viewer.mouse_drag_callbacks.append
+            def roi_index_click(viewer, event):
                 if event.button == 1:
-                    try:
-                        if self._ref_layer is not None:
-                            coords = n.array(self._ref_layer.world_to_data(event.position)).astype(int)
-                        else:
-                            coords = n.array(layer.world_to_data(event.position)).astype(int)
-                        cz, cy, cx = coords[:3]
-                        self.update_roi_index_from_position(cz, cy, cx)
-                    except Exception as e:
-                        print("ROI index callback error: %s" % e)
+                    _get_roi_at_cursor()
+        except AttributeError:
+            pass
+
+        # keybinding as fallback/alternative: press 'i' to show ROI at cursor
+        @self.viewer.bind_key('i')
+        def roi_index_key(viewer):
+            _get_roi_at_cursor()
 
     def update_roi_index_from_position(self, cz, cy, cx):
         '''Look up ROI at (cz, cy, cx) in both cell and non-cell index volumes.'''
@@ -955,8 +957,8 @@ class CurationUI(GenericNapariUI):
     
 
 
-def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Set3'):
-    
+def make_label_vols(coords, lams, shape, lam_max = 0.3, lam_min=0.0, iscell_1d=None, cmap='Set3'):
+
     '''
     Make an RGBA volume with voxels occupied by cells having random colours
 
@@ -964,6 +966,8 @@ def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Se
         coords (list): list of size n_rois, each element is a list of size 3, with lists of z,y,x coordinates
         lams (list) : similar to coords, each element is a list of lams for each cell
         shape (tuple): shape of the volume to fill up
+        lam_max (float): voxels with normalized lam above this get alpha=1
+        lam_min (float): voxels with normalized lam below this are hidden (alpha=0)
         iscell_1d (ndarray, optional): _description_. Defaults to None.
         cmap (str, optional): _description_. Defaults to 'Set3'.
     '''
@@ -984,6 +988,9 @@ def make_label_vols(coords, lams, shape, lam_max = 0.3, iscell_1d=None, cmap='Se
         lam = copy.copy(lams[i])
         lam /= lam.max()
         lam = n.clip(lam, 0, None)
+        # Hide voxels below lam_min
+        mask = lam >= lam_min
+        cz, cy, cx, lam = cz[mask], cy[mask], cx[mask], lam[mask]
         lam /= lam_max; lam[lam > 1] = 1
         if iscell_1d[i]: # if is cell, add to cell volumes
             cell_idxs_vol[cz,cy,cx] = i
@@ -1013,8 +1020,8 @@ def fix_rgb_vals(unclipped_rgb_vol, cell_counter):
     return rgb_vol
 
 
-def update_label_vols(label_vols, old_roi_labels, new_roi_labels, coords, lams, 
-                      lam_max=0.3, cmap='Set3'):
+def update_label_vols(label_vols, old_roi_labels, new_roi_labels, coords, lams,
+                      lam_max=0.3, lam_min=0.0, cmap='Set3'):
     '''
     Change the label volumes based on updated roi labels of cell/not-cell
 
@@ -1028,14 +1035,17 @@ def update_label_vols(label_vols, old_roi_labels, new_roi_labels, coords, lams,
     # compare the old and new labels, and find the cell indices that have changed labels
     changed_idxs = n.where((new_roi_labels != old_roi_labels))[0]
     n_changed_rois = len(changed_idxs)
-    if n_changed_rois == 0: 
+    if n_changed_rois == 0:
         return label_vols
-    
+
     # loop through all changed cells
     for roi_idx in changed_idxs:
         cz,cy,cx = coords[roi_idx]
         lam = copy.copy(lams[roi_idx])
+        lam /= lam.max()
         lam = n.clip(lam, 0, None)
+        mask = lam >= lam_min
+        cz, cy, cx, lam = cz[mask], cy[mask], cx[mask], lam[mask]
         lam /= lam_max; lam[lam > 1] = 1
         if new_roi_labels[roi_idx] == 1: # if this ROI is marked a cell
             label_vols['non_cell_idxs'][cz,cy,cx] = -1 # remove from non-cell idxs

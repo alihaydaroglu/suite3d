@@ -364,7 +364,7 @@ params = {
     "local_thresh_pct": 50,
     # ROI constraints
     "allow_overlap": False,             # experimental, not fully functional
-    "max_pix": 500,                     # maximum pixels per cell
+    "max_pix": 10000,                    # maximum pixels per cell
     "detect_overlap_dist_thresh": 5,    # duplicate detection distance
     "detect_overlap_lam_thresh": 0.5,   # duplicate detection overlap
 
