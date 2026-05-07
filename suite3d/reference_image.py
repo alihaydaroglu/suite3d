@@ -991,9 +991,9 @@ def pad_mov(mov, plane_shifts):
     -------
     mov_pad : ndarray (nz, nt, new ny, new nx)
         The padded movie
-    xpad :
+    xpad : int
         The amount of x pixels padded
-    ypad :
+    ypad : int
         The amount of y pixels padded
     """
     nz, nt, nyo, nxo = mov.shape
@@ -1003,12 +1003,12 @@ def pad_mov(mov, plane_shifts):
     xrange = plane_shifts[:, 1].min(), plane_shifts[:, 1].max()
     yrange = plane_shifts[:, 0].min(), plane_shifts[:, 0].max()
 
-    ypad = n.ceil(n.abs(n.diff(yrange))).astype(int)[::-1]
+    ypad = n.ceil(n.abs(n.diff(yrange))).astype(int)[0]
     yshift = n.ceil(n.abs((yrange[0]))).astype(int)
-    xpad = n.ceil(n.abs(n.diff(xrange))).astype(int)[::-1]
+    xpad = n.ceil(n.abs(n.diff(xrange))).astype(int)[0]
     xshift = n.ceil(n.abs((xrange[0]))).astype(int)
-    nyn = nyo + ypad.sum()
-    nxn = nxo + xpad.sum()
+    nyn = nyo + ypad
+    nxn = nxo + xpad
 
     mov_pad = n.zeros((nz, nt, nyn, nxn), n.float32)
 
