@@ -1342,3 +1342,56 @@ def register_dataset_gpu_3d(
         n.save(offset_path, all_offsets)
 
         log_cb("After full batch saving:", level=3, log_mem_usage=True)
+
+    _log_rigid_saturation_diagnostic(job_reg_data_dir, pc_size, log_cb)
+
+
+def _log_rigid_saturation_diagnostic(reg_dir, pc_size, log_cb):
+    """Scan saved offsets for rigid sub_pixel_shifts pegged at the
+    search-window edge. Heavy z-saturation is usually caused by weak
+    phase-correlation peaks (low SNR or too-few z planes) rather than
+    real drift, since est_sub_pixel_shift falls back to the corner via
+    its periodic-wrap term when no clean peak exists."""
+    try:
+        offset_files = sorted(
+            os.path.join(reg_dir, f)
+            for f in os.listdir(reg_dir)
+            if f.startswith("offsets") and f.endswith(".npy")
+        )
+        if not offset_files:
+            return
+        sub = n.concatenate(
+            [n.load(f, allow_pickle=True).item()["sub_pixel_shifts"]
+             for f in offset_files]
+        )
+        n_total = len(sub)
+        for axis, name in enumerate(("z", "y", "x")):
+            cap = float(pc_size[axis]) + 0.5
+            n_sat = int(
+                (n.isclose(sub[:, axis], -cap)
+                 | n.isclose(sub[:, axis], +cap)).sum()
+            )
+            if n_sat == 0:
+                continue
+            pct = 100.0 * n_sat / n_total
+            msg = (
+                "Saturation diagnostic: %d/%d frames (%.2f%%) hit the "
+                "%s-axis search-window edge ±%.1f."
+                % (n_sat, n_total, pct, name, cap)
+            )
+            if pct >= 1.0:
+                msg += (
+                    " Heavy saturation usually reflects weak phase-corr "
+                    "peaks (low SNR or insufficient %s planes) rather "
+                    "than real drift."
+                ) % name
+                if name == "z":
+                    msg += (
+                        " If your recording has few z planes, consider "
+                        "3d_reg=False to disable z-axis correction."
+                    )
+                log_cb(msg, 0)
+            else:
+                log_cb(msg, 2)
+    except Exception as e:
+        log_cb("Saturation diagnostic skipped: %s" % str(e), 2)
