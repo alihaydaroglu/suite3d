@@ -287,7 +287,7 @@ params = {
     "pc_size": n.asarray((2, 40, 40)),  # phase correlation window
     # Nonrigid registration
     "nonrigid": False,
-    "apply_z_shift": False,
+    "apply_z_shift": True,              # apply the rigid z component during shift application; set False to keep 3D measurement but skip z apply (e.g. few-z-plane recordings where z phase-corr saturates)
     "smooth_sigma_nr": 1.15,
     "smooth_sigma": 1.15,
     "snr_thresh": 1.2,                  # SNR threshold for nonrigid (2D)

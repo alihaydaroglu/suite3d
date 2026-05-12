@@ -1045,6 +1045,7 @@ def rigid_3d_ref_gpu(
     plane_shifts=None,
     process_mov=False,
     cavity_size=15,
+    apply_z_shift=True,
     log_cb=default_log,
 ):
     """
@@ -1155,17 +1156,29 @@ def rigid_3d_ref_gpu(
         if shift_reg == True:
             mov_gpu_for_shift = mov_gpu_full if mov_gpu_full is not None else mov_gpu
             shift_start = time.perf_counter()
+            # Measurement (sub_pixel_shifts / int_shift) is preserved; we
+            # only optionally zero z at the apply step so 2D-effective
+            # registration can use the 3D code path without losing the
+            # 3D shift estimates from the saved offsets.
             if shift_reg_subpixel:
+                shifts_to_apply = sub_pixel_shifts[t1:t2]
+                if not apply_z_shift:
+                    shifts_to_apply = shifts_to_apply.copy()
+                    shifts_to_apply[:, 0] = 0
                 if shift_reg_subpixel_method == "fft":
                     mov_gpu_for_shift = shift_gpu_subpixel_fft(
-                        mov_gpu_for_shift, sub_pixel_shifts[t1:t2]
+                        mov_gpu_for_shift, shifts_to_apply
                     )
                 else:
                     mov_gpu_for_shift = shift_gpu_subpixel_map(
-                        mov_gpu_for_shift, sub_pixel_shifts[t1:t2]
+                        mov_gpu_for_shift, shifts_to_apply
                     )
             else:
-                mov_gpu_for_shift = shift_gpu(mov_gpu_for_shift, int_shift[t1:t2])
+                shifts_to_apply = int_shift[t1:t2]
+                if not apply_z_shift:
+                    shifts_to_apply = shifts_to_apply.copy()
+                    shifts_to_apply[:, 0] = 0
+                mov_gpu_for_shift = shift_gpu(mov_gpu_for_shift, shifts_to_apply)
             shift_elapsed = time.perf_counter() - shift_start
             # log_cb(
             #     f"Shift op ({'subpixel ' + shift_reg_subpixel_method if shift_reg_subpixel else 'integer'}) "

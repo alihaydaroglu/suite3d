@@ -1090,7 +1090,7 @@ def register_dataset_gpu_3d(
     split_tif_size = params.get("split_tif_size", None)
     n_ch_tif = params.get("n_ch_tif", 30)
     max_rigid_shift = params.get("max_rigid_shift_pix", 75)
-    apply_z_shift = params.get("apply_z_shift", False)
+    apply_z_shift = params.get("apply_z_shift", True)
     gpu_reg_batchsize = params.get("gpu_reg_batchsize", 10)
     max_shift_nr = params.get("max_shift_nr", 3)
     nr_npad = params.get("nr_npad", 3)
@@ -1215,6 +1215,7 @@ def register_dataset_gpu_3d(
                 plane_shifts=plane_shifts,
                 process_mov=True,
                 cavity_size=cavity_size,
+                apply_z_shift=apply_z_shift,
             )
         )
 
@@ -1343,15 +1344,20 @@ def register_dataset_gpu_3d(
 
         log_cb("After full batch saving:", level=3, log_mem_usage=True)
 
-    _log_rigid_saturation_diagnostic(job_reg_data_dir, pc_size, log_cb)
+    _log_rigid_saturation_diagnostic(job_reg_data_dir, pc_size, log_cb,
+                                     apply_z_shift=apply_z_shift)
 
 
-def _log_rigid_saturation_diagnostic(reg_dir, pc_size, log_cb):
+def _log_rigid_saturation_diagnostic(reg_dir, pc_size, log_cb,
+                                     apply_z_shift=True):
     """Scan saved offsets for rigid sub_pixel_shifts pegged at the
     search-window edge. Heavy z-saturation is usually caused by weak
     phase-correlation peaks (low SNR or too-few z planes) rather than
     real drift, since est_sub_pixel_shift falls back to the corner via
-    its periodic-wrap term when no clean peak exists."""
+    its periodic-wrap term when no clean peak exists. The z column of
+    sub_pixel_shifts is the raw measurement and is recorded regardless
+    of whether the z component is actually applied during shifting
+    (controlled by apply_z_shift)."""
     try:
         offset_files = sorted(
             os.path.join(reg_dir, f)
@@ -1386,10 +1392,20 @@ def _log_rigid_saturation_diagnostic(reg_dir, pc_size, log_cb):
                     "than real drift."
                 ) % name
                 if name == "z":
-                    msg += (
-                        " If your recording has few z planes, consider "
-                        "3d_reg=False to disable z-axis correction."
-                    )
+                    if apply_z_shift:
+                        msg += (
+                            " The z component IS being applied (apply_z_shift=True);"
+                            " consider apply_z_shift=False to skip just the z apply"
+                            " while keeping 3D measurement, or 3d_reg=False to"
+                            " switch to the 2D pipeline entirely."
+                        )
+                    else:
+                        msg += (
+                            " The z component is NOT being applied"
+                            " (apply_z_shift=False), so this is informational"
+                            " only -- the registered movie is unaffected by the"
+                            " z saturation."
+                        )
                 log_cb(msg, 0)
             else:
                 log_cb(msg, 2)
