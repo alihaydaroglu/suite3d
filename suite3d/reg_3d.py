@@ -490,21 +490,34 @@ def _make_block_index_grid_3d(Lz, Ly, Lx, zcenters, ycenters, xcenters):
     nyb = ycenters.shape[0]
     nxb = xcenters.shape[0]
 
-    z_idx = cp.interp(
-        cp.arange(Lz, dtype=cp.float32),
-        zcenters,
-        cp.arange(nzb, dtype=cp.float32),
-    )
-    y_idx = cp.interp(
-        cp.arange(Ly, dtype=cp.float32),
-        ycenters,
-        cp.arange(nyb, dtype=cp.float32),
-    )
-    x_idx = cp.interp(
-        cp.arange(Lx, dtype=cp.float32),
-        xcenters,
-        cp.arange(nxb, dtype=cp.float32),
-    )
+    # When one block exists per voxel along an axis (bz=1 / by=1 / bx=1),
+    # use the identity mapping so each voxel reads its own block's shift.
+    # Otherwise linearly interpolate between block centers so the per-voxel
+    # warp is C0-smooth across block boundaries.
+    if nzb == Lz:
+        z_idx = cp.arange(Lz, dtype=cp.float32)
+    else:
+        z_idx = cp.interp(
+            cp.arange(Lz, dtype=cp.float32),
+            zcenters,
+            cp.arange(nzb, dtype=cp.float32),
+        )
+    if nyb == Ly:
+        y_idx = cp.arange(Ly, dtype=cp.float32)
+    else:
+        y_idx = cp.interp(
+            cp.arange(Ly, dtype=cp.float32),
+            ycenters,
+            cp.arange(nyb, dtype=cp.float32),
+        )
+    if nxb == Lx:
+        x_idx = cp.arange(Lx, dtype=cp.float32)
+    else:
+        x_idx = cp.interp(
+            cp.arange(Lx, dtype=cp.float32),
+            xcenters,
+            cp.arange(nxb, dtype=cp.float32),
+        )
 
     zq, yq, xq = cp.meshgrid(z_idx, y_idx, x_idx, indexing="ij")
     return zq, yq, xq
@@ -576,18 +589,19 @@ def nonrigid_transform_data_3d_gpu(
         t0 = b * batch_size
         t1 = int(n.min((nt, (b + 1) * batch_size)))
 
+        block_coords = cp.stack([zq, yq, xq])
         for tid in range(t0, t1):
             zup = cuimage.map_coordinates(
-                zshifts[tid], [zq, yq, xq], order=order, mode="nearest"
+                zshifts[tid], block_coords, order=order, mode="nearest"
             )
             yup = cuimage.map_coordinates(
-                yshifts[tid], [zq, yq, xq], order=order, mode="nearest"
+                yshifts[tid], block_coords, order=order, mode="nearest"
             )
             xup = cuimage.map_coordinates(
-                xshifts[tid], [zq, yq, xq], order=order, mode="nearest"
+                xshifts[tid], block_coords, order=order, mode="nearest"
             )
 
-            coords = [zz + zup, yy + yup, xx + xup]
+            coords = cp.stack([zz + zup, yy + yup, xx + xup])
             mov_out[tid] = cuimage.map_coordinates(
                 mov_gpu[tid], coords, order=order, mode=mode, cval=0.0
             )
@@ -597,7 +611,8 @@ def nonrigid_transform_data_3d_gpu(
 
 
 def nonrigid_phasecorr_reference_3D(
-    refImg0, maskSlope, smooth_sigma, zblock, yblock, xblock, sigz=None
+    refImg0, maskSlope, smooth_sigma, zblock, yblock, xblock, sigz=None,
+    voxel_size_um=None,
 ):
     """
     Computes taper masks and FFT'ed references for 3D nonrigid phase correlation.
@@ -614,6 +629,12 @@ def nonrigid_phasecorr_reference_3D(
         Block boundary arrays
     sigz : float, optional
         Spatial taper width for z (defaults to maskSlope)
+    voxel_size_um : tuple, optional
+        (z, y, x) voxel size in microns. If provided, the per-block taper's
+        z-sigma is scaled by `voxel_size_um[1] / voxel_size_um[0]` so the
+        physical taper width matches between xy and z. With no voxel-size
+        info available, falls back to the legacy isotropic-in-voxels behaviour
+        (`block_sigz = 2 * smooth_sigma`).
 
     Returns
     -------
@@ -632,11 +653,20 @@ def nonrigid_phasecorr_reference_3D(
     if sigz is None:
         sigz = maskSlope
 
+    # Per-block taper: xy sigma in voxels, z sigma scaled by the voxel
+    # aspect ratio so the physical taper width matches across axes.
+    block_sig_xy = 2 * smooth_sigma
+    if voxel_size_um is not None:
+        vz, vy, vx = float(voxel_size_um[0]), float(voxel_size_um[1]), float(voxel_size_um[2])
+        block_sigz = block_sig_xy * (0.5 * (vy + vx) / vz)
+    else:
+        block_sigz = block_sig_xy
+
     gaussian_filter = gaussian_fft3D(smooth_sigma, bz, by, bx)
 
     maskMul = ref.spatial_taper3D(maskSlope, sigz, *refImg0.shape)
     maskMul1 = n.empty((nb, bz, by, bx), "float32")
-    maskMul1[:] = ref.spatial_taper3D(2 * smooth_sigma, 2 * smooth_sigma, bz, by, bx)
+    maskMul1[:] = ref.spatial_taper3D(block_sig_xy, block_sigz, bz, by, bx)
     maskOffset1 = n.empty((nb, bz, by, bx), "float32")
     cfRefImg1 = n.empty((nb, bz, by, bx), "complex64")
     refImg1 = n.empty((nb, bz, by, bx), "float32")
@@ -714,6 +744,7 @@ def get_nonrigid_phasecorr_and_masks_3d(ref_image, reference_params):
         zblock=zblock,
         yblock=yblock,
         xblock=xblock,
+        voxel_size_um=reference_params.get("voxel_size_um", None),
     )
 
     return (

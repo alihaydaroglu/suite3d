@@ -1015,6 +1015,7 @@ def register_dataset_gpu_3d(
     nonrigid = params.get("nonrigid", False)
     job_reg_data_dir = dirs["registered_fused_data"]
     reference_params['smooth_sigma_nr'] = params.get('smooth_sigma_nr', 1.15)
+    reference_params['voxel_size_um'] = params.get('voxel_size_um', None)
 
     # choose the top 2% of pix in each plane to run
     # quality metrics on
@@ -1269,22 +1270,22 @@ def register_dataset_gpu_3d(
             )
 
             tic_nonrigid_apply = time.time()
-            # mov_shifted = reg_3d.nonrigid_transform_data_3d_gpu(
-            #     mov_shifted,
-            #     zshifts_nr,
-            #     yshifts_nr,
-            #     xshifts_nr,
-            #     zblocks,
-            #     yblocks,
-            #     xblocks,
-            #     batch_size=gpu_reg_batchsize,
-            #     log_cb=log_cb,
-            # )
-            # log_cb(
-            #     "Applied 3D nonrigid correction in %.2f sec"
-            #     % (time.time() - tic_nonrigid_apply),
-            #     3,
-            # )
+            mov_shifted = reg_3d.nonrigid_transform_data_3d_gpu(
+                mov_shifted,
+                zshifts_nr,
+                yshifts_nr,
+                xshifts_nr,
+                zblocks,
+                yblocks,
+                xblocks,
+                batch_size=gpu_reg_batchsize,
+                log_cb=log_cb,
+            )
+            log_cb(
+                "Applied 3D nonrigid correction in %.2f sec"
+                % (time.time() - tic_nonrigid_apply),
+                3,
+            )
 
         # NOTE changed this so gets int_shifts + sub_pixel shifts etc
         all_offsets = {}
