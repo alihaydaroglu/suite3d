@@ -2219,9 +2219,37 @@ def nonrigid_3d_gpu(
         npad = n.asarray(npad)
         if npad.size != 3:
             raise ValueError("npad must be a scalar or a 3-tuple")
+
+    # unwrap_fft_3d requires (max_shift + npad) + 1 <= block_size per axis.
+    # If not, the centered-window slicing silently runs off the end of the
+    # block and broadcast-errors at assignment. Clamp here with a loud
+    # warning; shrink npad (parabolic-fit margin) before max_shift.
+    block_size = n.array([
+        zblocks[0][1] - zblocks[0][0],
+        yblocks[0][1] - yblocks[0][0],
+        xblocks[0][1] - xblocks[0][0],
+    ])
+    nr = max_shift + npad
+    if (nr + 1 > block_size).any():
+        max_nr = block_size - 1
+        nr_clamped = n.minimum(nr, max_nr)
+        npad_new = n.minimum(npad, n.maximum(nr_clamped - max_shift, 0))
+        max_shift_new = n.minimum(max_shift, nr_clamped - npad_new)
+        bad = n.where(nr + 1 > block_size)[0].tolist()
+        log_cb(
+            "WARNING: nonrigid phase-corr window exceeds block_size_3d on "
+            "axis(es) %s. Clamping max_shift_nr %s -> %s, nr_npad %s -> %s. "
+            "Increase block_size_3d to recover dynamic range."
+            % (bad, max_shift.tolist(), max_shift_new.tolist(),
+               npad.tolist(), npad_new.tolist()),
+            0,
+        )
+        max_shift = max_shift_new
+        npad = npad_new
+
     nr = max_shift + npad
     ncc = nr * 2 + 1
-    
+
     log_cb("Nonrigid 3D registration on GPU:", 3)
     log_cb(" Movie size: %s" % (str(mov_cpu.shape)), 4)
     log_cb(" Number of blocks: %d" % (nb), 4)

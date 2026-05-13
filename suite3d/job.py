@@ -104,6 +104,7 @@ class Job:
             self.params["tifs"] = tifs
             self.tifs = tifs
             self.preregister_tifs()
+            self._check_nonrigid_block_window()
             self.save_params()
 
         else:
@@ -154,6 +155,41 @@ class Job:
             self.params["frame_counts"] = frame_counts
             self.params["extra_frames"] = extra_frames
             self.params["previous_tif"] = previous_tif
+
+    def _check_nonrigid_block_window(self):
+        """Early warning if max_shift_nr + nr_npad won't fit in
+        block_size_3d. Runs at job creation so users see the issue before
+        the (slow) init + rigid passes. nonrigid_3d_gpu will auto-clamp
+        at runtime regardless, but the early warning gives users a chance
+        to widen block_size_3d up front."""
+        if not self.params.get("nonrigid", False):
+            return
+        if not self.params.get("3d_reg", False):
+            return
+
+        block_size = n.asarray(self.params["block_size_3d"])
+
+        max_shift = n.asarray(self.params["max_shift_nr"])
+        if max_shift.size == 1:
+            max_shift = n.array([int(max_shift)] * 3)
+        npad = n.asarray(self.params["nr_npad"])
+        if npad.size == 1:
+            npad = n.array([int(npad)] * 3)
+        nr = max_shift + npad
+
+        if (nr + 1 > block_size).any():
+            bad = n.where(nr + 1 > block_size)[0].tolist()
+            self.log(
+                "WARNING: nonrigid phase-corr window "
+                "(max_shift_nr + nr_npad + 1) exceeds block_size_3d on "
+                f"axis(es) {bad}. max_shift_nr={max_shift.tolist()}, "
+                f"nr_npad={npad.tolist()}, block_size_3d="
+                f"{block_size.tolist()}. nonrigid_3d_gpu will auto-clamp "
+                "at register() time. To preserve dynamic range, increase "
+                "block_size_3d or reduce max_shift_nr / nr_npad on the "
+                "flagged axis.",
+                level=0,
+            )
 
     def copy_parent_job(self, parent_job, copy_dirs=(), symlink=False):
         """

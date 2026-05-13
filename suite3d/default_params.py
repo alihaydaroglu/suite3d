@@ -296,8 +296,14 @@ params = {
     "snr_thresh": 1.2,                  # SNR threshold for nonrigid (2D)
     "maxregshift": 0.15,                # max shift fraction (2D CPU only)
     "smooth_sigma_time": 0,             # temporal smoothing (2D CPU only)
-    "max_shift_nr": 3,
-    "nr_npad": 3,
+    # max_shift_nr and nr_npad are per-axis (z, y, x). Phase-corr window
+    # size on each axis is 2*(max_shift_nr + nr_npad) + 1, and the window
+    # must fit inside block_size_3d: (max_shift_nr + nr_npad) + 1 <= bz/by/bx.
+    # z defaults are small because block_size_3d's z is typically shallow
+    # (5 by default; can be 3-4 for LBM). nonrigid_3d_gpu will auto-clamp
+    # if these are too large, with a level-0 warning.
+    "max_shift_nr": (1, 5, 5),
+    "nr_npad":      (1, 3, 3),
     "nr_subpixel": 10,
     "nr_smooth_iters": 2,
     "save_nonrigid_phasecorrs": False,
