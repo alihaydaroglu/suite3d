@@ -276,8 +276,9 @@ def register_dataset_gpu_from_existing_shifts(
 
     # new parameters
     reference_params = summary["reference_params"]
-    rmins = reference_params.get("plane_mins", None)
-    rmaxs = reference_params.get("plane_maxs", None)
+    reference_info = summary["reference_info"]
+    rmins = reference_info.get("plane_mins", None)
+    rmaxs = reference_info.get("plane_maxs", None)
     yblocks, xblocks = reference_params["yblock"], reference_params["xblock"]
     nblocks = reference_params["nblocks"]
 
@@ -497,8 +498,9 @@ def register_dataset_gpu(
 
     # new parameters
     reference_params = summary["reference_params"]
-    rmins = reference_params.get("plane_mins", None)
-    rmaxs = reference_params.get("plane_maxs", None)
+    reference_info = summary["reference_info"]
+    rmins = reference_info.get("plane_mins", None)
+    rmaxs = reference_info.get("plane_maxs", None)
     snr_thresh = params.get("snr_thresh", 1.2)  # TODO add values to a default params dictionary
     NRsm = reference_params["NRsm"]
     yblocks, xblocks = reference_params["yblock"], reference_params["xblock"]
