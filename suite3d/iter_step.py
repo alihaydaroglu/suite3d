@@ -31,6 +31,12 @@ except ImportError:
 # of measurements behind these constants.
 _GPU_CUFFT_FACTOR = 6      # multiplier on (voxels * complex64) for rigid workspace
 _GPU_FIXED_OVERHEAD_GB = 2.0  # cuFFT plan cache + cupy reserved + misc
+# Nonrigid term is bs * nblocks * bz*by*bx * THIS bytes/elem.
+# Counts: complex64 fft_3d_mov tensor (8 bytes/elem) + same-shape float32
+# cp.abs scratch live during the in-place divide (4 bytes/elem). The
+# ifftn output also exists transiently but cuFFT typically writes into
+# a workspace that's accounted for in the fixed overhead.
+_GPU_NONRIGID_BYTES_PER_ELEM = 12
 
 
 def _estimate_max_gpu_batchsize(volume_shape, block_info, do_nonrigid,
@@ -71,7 +77,8 @@ def _estimate_max_gpu_batchsize(volume_shape, block_info, do_nonrigid,
 
     if do_nonrigid and block_info is not None:
         nblocks, bz, by, bx = block_info
-        per_frame_bytes += int(nblocks) * int(bz) * int(by) * int(bx) * 8
+        per_frame_bytes += (int(nblocks) * int(bz) * int(by) * int(bx)
+                            * _GPU_NONRIGID_BYTES_PER_ELEM)
 
     max_bs = max(1, int(available // per_frame_bytes))
     return max_bs, free_bytes / 1024**3

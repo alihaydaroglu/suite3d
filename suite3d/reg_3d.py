@@ -1644,8 +1644,14 @@ def reg_3d_gpu_blocks(mov_blocks, refs_nr_f):
     """
     refs_nr_f = cp.asarray(refs_nr_f)
     fft_3d_mov = cufft.fftn(mov_blocks, axes=(2, 3, 4))
-    fft_3d_mov = fft_3d_mov / (1e-5 + cp.abs(fft_3d_mov))
-    fft_3d_mov = fft_3d_mov * refs_nr_f[cp.newaxis, :, :, :, :]
+    # In-place divide: previously `fft_3d_mov = fft_3d_mov / ...` allocated a
+    # new same-size complex64 tensor, doubling the nonrigid FFT footprint.
+    # On FACED-shaped block grids that's ~5 GB at bs=11 — the difference
+    # between "fits in 20 GB" and "OOM". The cp.abs() scratch is still
+    # allocated (~half the footprint, float32), but it's freed immediately
+    # after the divide.
+    fft_3d_mov /= (1e-5 + cp.abs(fft_3d_mov))
+    fft_3d_mov *= refs_nr_f[cp.newaxis, :, :, :, :]
     phase_corr = cp.abs(cufft.ifftn(fft_3d_mov, axes=(2, 3, 4)))
     return phase_corr
 
