@@ -329,9 +329,19 @@ def register_dataset_gpu_from_existing_shifts(
 
     # new parameters
     reference_params = summary["reference_params"]
-    reference_info = summary["reference_info"]
-    rmins = reference_info.get("plane_mins", None)
-    rmaxs = reference_info.get("plane_maxs", None)
+    # 3D init pass (compute_reference_and_masks_3d) writes plane_mins /
+    # plane_maxs to summary["reference_info"]; 2D init pass
+    # (compute_reference_and_masks) writes them to reference_params and
+    # may not populate reference_info at all. Read from reference_info
+    # if present, fall back to reference_params — handles both new code
+    # paths and loaded 2D summaries from earlier versions.
+    reference_info = summary.get("reference_info", {})
+    rmins = reference_info.get("plane_mins")
+    if rmins is None:
+        rmins = reference_params.get("plane_mins")
+    rmaxs = reference_info.get("plane_maxs")
+    if rmaxs is None:
+        rmaxs = reference_params.get("plane_maxs")
     yblocks, xblocks = reference_params["yblock"], reference_params["xblock"]
     nblocks = reference_params["nblocks"]
 
@@ -551,9 +561,19 @@ def register_dataset_gpu(
 
     # new parameters
     reference_params = summary["reference_params"]
-    reference_info = summary["reference_info"]
-    rmins = reference_info.get("plane_mins", None)
-    rmaxs = reference_info.get("plane_maxs", None)
+    # 3D init pass (compute_reference_and_masks_3d) writes plane_mins /
+    # plane_maxs to summary["reference_info"]; 2D init pass
+    # (compute_reference_and_masks) writes them to reference_params and
+    # may not populate reference_info at all. Read from reference_info
+    # if present, fall back to reference_params — handles both new code
+    # paths and loaded 2D summaries from earlier versions.
+    reference_info = summary.get("reference_info", {})
+    rmins = reference_info.get("plane_mins")
+    if rmins is None:
+        rmins = reference_params.get("plane_mins")
+    rmaxs = reference_info.get("plane_maxs")
+    if rmaxs is None:
+        rmaxs = reference_params.get("plane_maxs")
     snr_thresh = params.get("snr_thresh", 1.2)  # TODO add values to a default params dictionary
     NRsm = reference_params["NRsm"]
     yblocks, xblocks = reference_params["yblock"], reference_params["xblock"]
@@ -911,9 +931,19 @@ def register_dataset_s2p(
     elif save_dtype_str == "float16":
         save_dtype = n.float16
     reference_params = summary["reference_params"]
-    reference_info = summary["reference_info"]
-    rmins = reference_info.get("plane_mins", None)
-    rmaxs = reference_info.get("plane_maxs", None)
+    # 3D init pass (compute_reference_and_masks_3d) writes plane_mins /
+    # plane_maxs to summary["reference_info"]; 2D init pass
+    # (compute_reference_and_masks) writes them to reference_params and
+    # may not populate reference_info at all. Read from reference_info
+    # if present, fall back to reference_params — handles both new code
+    # paths and loaded 2D summaries from earlier versions.
+    reference_info = summary.get("reference_info", {})
+    rmins = reference_info.get("plane_mins")
+    if rmins is None:
+        rmins = reference_params.get("plane_mins")
+    rmaxs = reference_info.get("plane_maxs")
+    if rmaxs is None:
+        rmaxs = reference_params.get("plane_maxs")
     if all_ops is None:
         all_ops = []
         for i in range(ref_img_3d.shape[0]):
@@ -1063,9 +1093,19 @@ def register_dataset_gpu_3d(
 
     # new parameters
     reference_params = summary["reference_params"]
-    reference_info = summary["reference_info"]
-    rmins = reference_info.get("plane_mins", None)
-    rmaxs = reference_info.get("plane_maxs", None)
+    # 3D init pass (compute_reference_and_masks_3d) writes plane_mins /
+    # plane_maxs to summary["reference_info"]; 2D init pass
+    # (compute_reference_and_masks) writes them to reference_params and
+    # may not populate reference_info at all. Read from reference_info
+    # if present, fall back to reference_params — handles both new code
+    # paths and loaded 2D summaries from earlier versions.
+    reference_info = summary.get("reference_info", {})
+    rmins = reference_info.get("plane_mins")
+    if rmins is None:
+        rmins = reference_params.get("plane_mins")
+    rmaxs = reference_info.get("plane_maxs")
+    if rmaxs is None:
+        rmaxs = reference_params.get("plane_maxs")
     snr_thresh = params.get("snr_thresh", 1.2)
     pc_size = params.get("pc_size", (2, 20, 20))
     frate_hz = params.get("fs", 4)
