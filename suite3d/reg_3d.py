@@ -575,22 +575,32 @@ def nonrigid_transform_data_3d_gpu(
         indexing="ij",
     )
 
-    mov_gpu = cp.asarray(mov_cpu, dtype=cp.float32)
-    mov_gpu = mov_gpu.swapaxes(0, 1)
-
+    # Constant-size GPU tensors (small): per-frame shifts and the block-grid
+    # interpolation coordinates. Movie data itself is chunked over time so a
+    # FACED-scale tif batch (270 frames * 40 z * 500 * 800 * 4 bytes ~= 17 GB)
+    # never lives on the GPU all at once.
     zshifts = cp.asarray(zshifts, dtype=cp.float32)
     yshifts = cp.asarray(yshifts, dtype=cp.float32)
     xshifts = cp.asarray(xshifts, dtype=cp.float32)
+    block_coords = cp.stack([zq, yq, xq])
 
-    mov_out = cp.zeros_like(mov_gpu)
+    # Pre-allocate the corrected movie on CPU; GPU only holds one time chunk
+    # at a time (input + output, ~2 * batch_size * volume).
+    mov_out_cpu = n.empty_like(mov_cpu)
 
+    mempool = cp.get_default_memory_pool()
     total_batches = int(n.ceil(nt / batch_size))
     for b in range(total_batches):
         t0 = b * batch_size
         t1 = int(n.min((nt, (b + 1) * batch_size)))
 
-        block_coords = cp.stack([zq, yq, xq])
-        for tid in range(t0, t1):
+        # Upload only this time chunk: (nz, t1-t0, ny, nx) -> (t1-t0, nz, ny, nx)
+        mov_chunk = cp.asarray(mov_cpu[:, t0:t1], dtype=cp.float32)
+        mov_chunk = mov_chunk.swapaxes(0, 1)
+        out_chunk = cp.zeros_like(mov_chunk)
+
+        for tid_local in range(t1 - t0):
+            tid = t0 + tid_local
             zup = cuimage.map_coordinates(
                 zshifts[tid], block_coords, order=order, mode="nearest"
             )
@@ -602,12 +612,17 @@ def nonrigid_transform_data_3d_gpu(
             )
 
             coords = cp.stack([zz + zup, yy + yup, xx + xup])
-            mov_out[tid] = cuimage.map_coordinates(
-                mov_gpu[tid], coords, order=order, mode=mode, cval=0.0
+            out_chunk[tid_local] = cuimage.map_coordinates(
+                mov_chunk[tid_local], coords, order=order, mode=mode, cval=0.0
             )
 
-    mov_out = mov_out.swapaxes(0, 1)
-    return mov_out.get()
+        # Download back into the CPU buffer (swap to nz-first to match input)
+        mov_out_cpu[:, t0:t1] = out_chunk.swapaxes(0, 1).get()
+
+        del mov_chunk, out_chunk
+        mempool.free_all_blocks()
+
+    return mov_out_cpu
 
 
 def nonrigid_phasecorr_reference_3D(
