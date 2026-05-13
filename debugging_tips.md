@@ -153,3 +153,88 @@ entry point; implementation in
 [tiff_utils.py:split_oversized_tiff](suite3d/io/tiff_utils.py).
 Preregister warning at
 [job.py:_warn_if_oversized_tifs](suite3d/job.py).
+
+---
+
+## GPU OOM during 3D registration
+
+**Symptoms**
+
+- `cupy.cuda.memory.OutOfMemoryError` during `register()` on the 3D-GPU
+  path. The error names a specific allocation that failed and the
+  amount already held.
+- Two distinct failure sites depending on the cause:
+  - **Rigid step:** OOM inside [`reg_3d_gpu`](suite3d/reg_3d.py) on the
+    full-volume FFT. Held memory ≈ `bs * voxels * ~50 bytes`. Hits
+    when batchsize is too large for the volume size.
+  - **Nonrigid step:** OOM inside [`reg_3d_gpu_blocks`](suite3d/reg_3d.py)
+    on a single contiguous `(bs, nblocks, bz, by, bx)` complex64
+    tensor. The failed alloc size equals
+    `bs * nblocks * bz * by * bx * 8` bytes exactly.
+- A level-0 warning at the start of `register_dataset_gpu_3d`:
+  *"gpu_reg_batchsize=N likely exceeds GPU memory budget ... Auto-
+  clamping to gpu_reg_batchsize=M."* — emitted by
+  [`_estimate_max_gpu_batchsize`](suite3d/iter_step.py).
+
+**Cause**
+
+Both rigid and nonrigid 3D registration scale memory linearly in
+`gpu_reg_batchsize`, but with different coefficients. The two terms:
+
+- **Rigid workspace** ≈ `bs * voxels * 8 bytes * cuFFT-factor` where
+  the cuFFT-factor is ~5-8× the complex64 volume size (forward FFT +
+  reference + intermediate buffers).
+- **Nonrigid block tensor** = `bs * nblocks * bz * by * bx * 8 bytes`,
+  a single contiguous alloc. For FACED-shaped volumes (40 z planes →
+  8 z-blocks, plus dense y/x decomposition with 33% overlap) the
+  block count is large enough that this term dominates.
+
+A single param `gpu_reg_batchsize` controls both steps. On a FACED
+volume with 20 GB of GPU memory, the rigid step is comfortable at
+bs=15-20 but the nonrigid block-tensor allocation forces the safe
+ceiling to bs=10.
+
+**Reference numbers** (NaJi-GCaMP6sVS-ED, 40 × 270 × 512 × 803,
+RTX A4500 with 20 GB):
+
+| Config | Result | Held at OOM | Failed alloc |
+|--------|--------|-------------|--------------|
+| bs=10, NR=off  | runs    | ~6.5 GB live | — |
+| bs=30, NR=on   | OOM rigid | 19.7 GB | 3.7 GB |
+| bs=20, NR=on   | OOM rigid | 19.0 GB | 2.5 GB |
+| bs=15, NR=on   | OOM NR  | 15.3 GB | 7.0 GB |
+| bs=10, NR=on   | runs    | — | — |
+
+**Fix**
+
+The pipeline auto-clamps by default: `_estimate_max_gpu_batchsize` is
+called at the top of `register_dataset_gpu_3d` (after the block grid
+is built if `nonrigid=True`) and clamps `gpu_reg_batchsize` down to fit
+the current GPU's free memory. The estimate is conservative — it
+applies a safety factor (default 0.8) and reserves 2 GB for cuFFT
+plan cache and miscellaneous cupy state.
+
+- **To disable auto-clamp:** set `auto_adjust_batchsize=False` in
+  params. Useful if you know your batchsize is fine and want to skip
+  the prediction (e.g. running on a different GPU than the one the
+  model was calibrated on).
+- **If you still OOM with auto-clamp on:** lower
+  `gpu_mem_safety_factor` (default 0.8). Try 0.6 first.
+- **Manual ceiling for FACED-sized volumes on 20 GB GPUs:**
+  `gpu_reg_batchsize=10` with `nonrigid=True` is the empirical ceiling.
+
+**Calibration caveat**
+
+The cuFFT workspace factor (~5-8×) is empirical and may not generalize
+across CUDA/cupy/cuFFT versions. The 2 GB fixed overhead absorbs the
+plan-cache allocation that happens lazily on the first batch. If first-
+batch OOMs are still common on a different GPU, raise
+`_GPU_FIXED_OVERHEAD_GB` in [iter_step.py](suite3d/iter_step.py).
+
+**Reference**
+
+Memo: [dev/coordination/rebuttal.md](../dev/coordination/rebuttal.md)
+"Nonrigid 3D GPU memory characterization — gpu_reg_batchsize ceiling
+on FACED/A4500" (from @datasets, 2026-05-13). Implementation:
+[`_estimate_max_gpu_batchsize`](suite3d/iter_step.py) and the call site
+inside `register_dataset_gpu_3d`.

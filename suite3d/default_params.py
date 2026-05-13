@@ -169,6 +169,8 @@ PARAM_SECTIONS = {
     "n_proc_detect":                "compute",
     "dtype":                        "compute",
     "save_dtype":                   "compute",
+    "auto_adjust_batchsize":        "compute",
+    "gpu_mem_safety_factor":        "compute",
 }
 
 
@@ -402,4 +404,12 @@ params = {
     "n_proc_detect": set_num_processors(16),
     "dtype": n.float32,
     "save_dtype": "float16",
+    # GPU memory auto-adjust (3D-GPU path only). At register() time, estimate
+    # peak VRAM needed for the current volume + nonrigid config and clamp
+    # gpu_reg_batchsize if it would OOM. Empirical model calibrated on a NaJi
+    # FACED run (RTX A4500, 20 GB). Set auto_adjust_batchsize=False to opt
+    # out. If you still OOM, lower gpu_mem_safety_factor (more conservative).
+    # See debugging_tips.md "GPU OOM during 3D registration".
+    "auto_adjust_batchsize": True,
+    "gpu_mem_safety_factor": 0.8,
 }

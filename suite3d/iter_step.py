@@ -24,6 +24,59 @@ except ImportError:
     import numpy as cp
 
 
+# Empirical GPU memory model for the 3D registration path. Calibrated on
+# the NaJi-GCaMP6sVS-ED FACED memo (RTX A4500, 20 GB) — see
+# dev/coordination/rebuttal.md "Nonrigid 3D GPU memory characterization"
+# and debugging_tips.md "GPU OOM during 3D registration" for the table
+# of measurements behind these constants.
+_GPU_CUFFT_FACTOR = 6      # multiplier on (voxels * complex64) for rigid workspace
+_GPU_FIXED_OVERHEAD_GB = 2.0  # cuFFT plan cache + cupy reserved + misc
+
+
+def _estimate_max_gpu_batchsize(volume_shape, block_info, do_nonrigid,
+                                 safety=0.8):
+    """Estimate the largest gpu_reg_batchsize that fits the current GPU.
+
+    Returns (max_bs, free_gb) or (None, None) if GPU memory can't be queried
+    (cupy not installed, no CUDA device, or first call fails).
+
+    Memory model (linear in batchsize bs):
+      rigid workspace   = bs * voxels  * 8 bytes * cufft_factor   (~5-8x volume)
+      nonrigid blocks   = bs * nblocks * bz*by*bx * 8 bytes       (complex64 tensor)
+      fixed overhead    = ~2 GB                                   (cuFFT plan + cupy)
+
+    Args:
+        volume_shape : (nz, ny, nx) of the registered volume.
+        block_info   : (nblocks, bz, by, bx) for the nonrigid block grid, or
+                       None if not running nonrigid.
+        do_nonrigid  : bool.
+        safety       : fraction of free GPU memory we'll spend (default 0.8).
+
+    Returns:
+        (max_bs, free_gb): integer max batchsize >= 1, and free memory in GB.
+        (None, None) if cupy/cuda isn't available.
+    """
+    try:
+        free_bytes, _total = cp.cuda.Device().mem_info
+    except Exception:
+        return None, None
+
+    available = free_bytes * safety - _GPU_FIXED_OVERHEAD_GB * 1024**3
+    if available <= 0:
+        return 1, free_bytes / 1024**3
+
+    nz, ny, nx = volume_shape
+    voxels = int(nz) * int(ny) * int(nx)
+    per_frame_bytes = voxels * 8 * _GPU_CUFFT_FACTOR   # rigid
+
+    if do_nonrigid and block_info is not None:
+        nblocks, bz, by, bx = block_info
+        per_frame_bytes += int(nblocks) * int(bz) * int(by) * int(bx) * 8
+
+    max_bs = max(1, int(available // per_frame_bytes))
+    return max_bs, free_bytes / 1024**3
+
+
 def init_batches(tifs, batch_size, max_tifs_to_analyze=None):
     if max_tifs_to_analyze is not None and max_tifs_to_analyze > 0:
         tifs = tifs[:max_tifs_to_analyze]
@@ -1104,6 +1157,38 @@ def register_dataset_gpu_3d(
     fix_fastZ = params.get("fix_fastZ", False)
     reg_norm_frames = params.get("reg_norm_frames", True)
     cavity_size = params.get("cavity_size", 15)
+
+    # Auto-adjust gpu_reg_batchsize against the current GPU's free memory.
+    # Predicts peak VRAM for rigid + (optional) nonrigid block-FFT workspace
+    # and clamps gpu_reg_batchsize down if needed. Skips silently if cupy
+    # isn't available. See debugging_tips.md "GPU OOM during 3D registration".
+    if params.get("auto_adjust_batchsize", True):
+        block_info = None
+        if nonrigid:
+            block_info = (
+                len(zblocks),
+                zblocks[0][1] - zblocks[0][0],
+                yblocks[0][1] - yblocks[0][0],
+                xblocks[0][1] - xblocks[0][0],
+            )
+        predicted_max, free_gb = _estimate_max_gpu_batchsize(
+            ref_img_3d.shape, block_info, nonrigid,
+            safety=params.get("gpu_mem_safety_factor", 0.8),
+        )
+        if predicted_max is not None and gpu_reg_batchsize > predicted_max:
+            log_cb(
+                "WARNING: gpu_reg_batchsize=%d likely exceeds GPU memory "
+                "budget for this volume + %s config on the current GPU "
+                "(%.1f GB free). Auto-clamping to gpu_reg_batchsize=%d. "
+                "To override, set auto_adjust_batchsize=False. To tune the "
+                "estimate, adjust gpu_mem_safety_factor (default 0.8; "
+                "lower = more conservative)."
+                % (gpu_reg_batchsize,
+                   "nonrigid" if nonrigid else "rigid-only",
+                   free_gb, predicted_max),
+                0,
+            )
+            gpu_reg_batchsize = predicted_max
     save_dtype_str = params.get("save_dtype", "float32")
     save_dtype = None
     if save_dtype_str == "float32":
