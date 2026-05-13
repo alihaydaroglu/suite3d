@@ -11,7 +11,7 @@ requires-python = ">=3.11, <3.13"
 keywords = ["Pipeline", "Numpy", "Microscopy", "ScanImage", "Suite2p", "Volumetric"]
 license = { text = "AGPL-3.0-or-later" }
 urls = { homepage = "https://github.com/alihaydaroglu/suite3d" }
-scripts = {suite3d = "suite3d.__main__:main"}
+scripts = {suite3d = "suite3d.__main__:main", "s3d-split-tiff" = "suite3d.io.tiff_utils:_split_tiff_cli"}
 dependencies = [
     "numpy",
     "scipy",

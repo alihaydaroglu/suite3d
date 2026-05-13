@@ -81,3 +81,75 @@ default `pc_size_z = 2`. PC peak heights at saturated frames had
 median 0.0148 vs 0.0370 unsat. Fix: re-register with `3d_reg=False`.
 Memo: [dev/coordination/rebuttal.md](../dev/coordination/rebuttal.md)
 "ATL020: disable z-axis registration".
+
+---
+
+## Oversized TIFFs → OOM during load
+
+**Symptoms**
+
+- Job crashes (or the process is killed by the OS) during the load
+  step of `run_init_pass()` or `register()`, before any registration
+  log lines appear.
+- `MemoryError` from inside
+  [`_load_scanimage_tifs`](suite3d/io/s3dio.py) at the
+  `tifffile.imread(tif_path)` call, or system OOM-killer fires.
+- `preregister_tifs` prints a level-0 warning at job creation:
+  *"Detected unusually large TIFF file(s). These may exhaust RAM
+  during the load step..."*. Default thresholds: > 1000 frames OR
+  > 10 GB per file.
+
+**Cause**
+
+The ScanImage 2P loader reads each tif into RAM in a single
+`tifffile.imread(path)` call (see [s3dio.py:169](suite3d/io/s3dio.py)).
+The pipeline's unit of work is one whole tif: it must fit in memory.
+A 20 000-frame × 30-plane × 512² × int16 tif is ≈ 600 GB; even a
+5000-frame tif at a large FOV easily exceeds 100 GB. LBM/FACED data
+go through different paths and aren't affected by this specific
+failure mode (their crashes look different).
+
+**Fix**
+
+Pre-split the offending tifs into volume-aligned chunks using the
+shipped CLI utility. The split is page-granular and streams through
+the source via `tifffile.memmap`, so it works on files larger than
+RAM:
+
+    s3d-split-tiff <tif_path> <output_dir> \
+        --frames-per-chunk 500 \
+        --n-ch-tif <planes_per_volume> \
+        --num-colors <num_colors>
+
+`--frames-per-chunk` is rounded down to a multiple of
+`n_ch_tif * num_colors` so each chunk holds whole volumes; only the
+final chunk may have a partial trailing volume, which the existing
+extra-frames spillover logic in s3dio handles transparently. Output
+files are named `<src_basename>_<NNNN>.tif`.
+
+Then point your `Job` at the split tifs instead of the original.
+Suite3D sees N normal small tifs and runs unchanged.
+
+**Cost**
+
+I/O-bound: read + write of the entire source. On NVMe RAID
+(`/mnt/md0`), a 600 GB source splits in ~5-15 min. On slower
+storage, longer. This is a one-time cost per problematic dataset;
+subsequent suite3d runs use the split files directly.
+
+**Why no in-pipeline fix**
+
+Avoiding the read+write would require refactoring suite3d's loader
+and `iter_step.py` batching to operate on sub-file segments rather
+than whole tifs (~500-700 LOC across 4-5 files, plus a regression
+test matrix). For an edge case affecting one experiment, the
+splitting utility's wall-clock cost is cheaper than the engineering
+cost.
+
+**Reference**
+
+CLI is registered in `pyproject.toml` as the `s3d-split-tiff`
+entry point; implementation in
+[tiff_utils.py:split_oversized_tiff](suite3d/io/tiff_utils.py).
+Preregister warning at
+[job.py:_warn_if_oversized_tifs](suite3d/job.py).

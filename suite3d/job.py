@@ -129,6 +129,7 @@ class Job:
             frame_counts = get_frame_counts(
                 self.tifs, safe_mode=self.params["tif_preregistration_safe_mode"]
             )
+            self._warn_if_oversized_tifs(frame_counts)
             extra_frames = {}
             previous_tif = {}
             current_dir = os.path.dirname(self.tifs[0])
@@ -190,6 +191,56 @@ class Job:
                 "flagged axis.",
                 level=0,
             )
+
+    # Threshold above which preregister warns the user that a tif is likely
+    # to OOM the loader (which calls tifffile.imread on the whole file).
+    # See debugging_tips.md "Oversized TIFFs" for context.
+    _OVERSIZED_TIF_FRAMES = 1000
+    _OVERSIZED_TIF_BYTES = 10 * 1024**3   # 10 GB
+
+    def _warn_if_oversized_tifs(self, frame_counts):
+        """Warn the user when any tif exceeds the OOM-risk thresholds and
+        point them at the s3d-split-tiff command. ScanImage 2P path only;
+        the caller already gates this on (not lbm and not faced)."""
+        oversized = []
+        for tif, n_frames in frame_counts.items():
+            try:
+                size_bytes = os.path.getsize(tif)
+            except OSError:
+                continue
+            if (n_frames > self._OVERSIZED_TIF_FRAMES
+                    or size_bytes > self._OVERSIZED_TIF_BYTES):
+                oversized.append((tif, n_frames, size_bytes))
+        if not oversized:
+            return
+
+        self.log(
+            "WARNING: Detected unusually large TIFF file(s). These may "
+            "exhaust RAM during the load step (the entire tif is read in "
+            "one shot by tifffile.imread).",
+            level=0,
+        )
+        for tif, n_frames, size_bytes in oversized:
+            self.log(
+                f"  {tif}: {n_frames} frames, "
+                f"{size_bytes / 1024**3:.1f} GB",
+                level=0,
+            )
+        self.log(
+            "Consider pre-splitting with the s3d-split-tiff CLI, e.g.:",
+            level=0,
+        )
+        self.log(
+            f"  s3d-split-tiff <tif> <output_dir> "
+            f"--frames-per-chunk 500 "
+            f"--n-ch-tif {self.params['n_ch_tif']} "
+            f"--num-colors {self.params.get('num_colors', 1)}",
+            level=0,
+        )
+        self.log(
+            "See suite3d/debugging_tips.md 'Oversized TIFFs' for details.",
+            level=0,
+        )
 
     def copy_parent_job(self, parent_job, copy_dirs=(), symlink=False):
         """
