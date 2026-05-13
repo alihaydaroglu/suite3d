@@ -1550,6 +1550,9 @@ def create_arg_parser():
                         help='UI type: "curation", "sweep", or omit to launch the job browser')
     parser.add_argument('--output_dir', type=Path, default=None,
                     help='Path to directory containing the Suite3D output.')
+    parser.add_argument('--lam_min', type=float, default=None, help='Min normalized lambda to display')
+    parser.add_argument('--lam_max', type=float, default=None, help='Max normalized lambda (alpha=1)')
+    parser.add_argument('--scale', type=float, nargs=3, default=None, help='Voxel scale z y x in microns')
     return parser
 
 
@@ -1607,6 +1610,14 @@ if __name__ == '__main__':
     arg_parser = create_arg_parser()
     parsed_args = arg_parser.parse_args(sys.argv[1:])
 
+    display_params = {}
+    if parsed_args.lam_min is not None:
+        display_params['lam_min'] = parsed_args.lam_min
+    if parsed_args.lam_max is not None:
+        display_params['lam_max'] = parsed_args.lam_max
+    if parsed_args.scale is not None:
+        display_params['scale'] = tuple(parsed_args.scale)
+
     if parsed_args.type is None:
         # No arguments — launch the job browser
         print("Launching Suite3D Viewer")
@@ -1622,9 +1633,9 @@ if __name__ == '__main__':
         print("Creating %s UI" % parsed_args.type)
 
         if parsed_args.type == 'curation':
-            ui = CurationUI(base_dir)
+            ui = CurationUI(base_dir, display_params=display_params)
         elif parsed_args.type == 'sweep':
-            ui = SweepUI(base_dir)
+            ui = SweepUI(base_dir, display_params=display_params)
         else:
             warn("Invalid argument")
             sys.exit(1)

@@ -557,3 +557,146 @@ def summarize_sweep_metrics(sweep_results, stat_key='stats', F_key='F',
         )
         all_metrics.append(metrics)
     return all_metrics
+
+
+def find_trace_duplicates(
+    stats,
+    F,
+    voxel_size_um,
+    dist_thresh_um=15.0,
+    corr_thresh=0.95,
+    batch_size=256,
+):
+    """
+    Find pairs of ROIs that are both spatially close AND have highly
+    correlated fluorescence traces, then return a mask indicating which
+    cells to keep (winners) vs remove (losers).
+
+    This avoids building a full n_roi x n_roi correlation matrix:
+    1. Compute pairwise distances from centroids (fast).
+    2. Keep only pairs within dist_thresh_um as candidates.
+    3. For each candidate pair, compute a single Pearson correlation of
+       their F traces (in a vectorized batch).
+    4. Flag pairs above corr_thresh as duplicates.
+    5. Use union-find to collapse chains of duplicates into groups, and
+       within each group keep the cell with the most pixels.
+
+    Args:
+        stats: list of n_roi dicts with at least 'med' (z,y,x voxel centroid)
+            and 'lam' (per-voxel weights, used to tie-break on npix).
+        F: (n_roi, nt) fluorescence traces.
+        voxel_size_um: (vz, vy, vx) voxel size in microns.
+        dist_thresh_um: max centroid distance (microns) to consider a pair.
+        corr_thresh: min Pearson correlation to merge a pair.
+        batch_size: number of candidate pairs to correlate at once.
+
+    Returns:
+        keep_mask: (n_roi,) boolean array, True for cells to keep.
+        merged_pairs: list of (winner_idx, loser_idx) tuples for logging.
+    """
+    n_roi = len(stats)
+    if n_roi < 2 or F is None:
+        return n.ones(n_roi, bool), []
+
+    # Centroids in microns
+    meds = n.array([s['med'] for s in stats], dtype=float)
+    vs = n.asarray(voxel_size_um, dtype=float)
+    meds_um = meds * vs[None, :]
+
+    # Step 1: candidate pairs by distance. Use KDTree if scipy is available,
+    # otherwise a chunked pairwise distance to avoid the full n x n matrix
+    # for large n_roi.
+    try:
+        from scipy.spatial import cKDTree
+        tree = cKDTree(meds_um)
+        pairs = tree.query_pairs(dist_thresh_um, output_type='ndarray')
+        if len(pairs) == 0:
+            return n.ones(n_roi, bool), []
+        i_idx, j_idx = pairs[:, 0], pairs[:, 1]
+    except ImportError:
+        i_list, j_list = [], []
+        chunk = 1024
+        for start in range(0, n_roi, chunk):
+            end = min(start + chunk, n_roi)
+            d = n.sqrt(
+                ((meds_um[start:end, None, :] - meds_um[None, :, :]) ** 2).sum(-1)
+            )
+            # only upper-triangular pairs j > i
+            ii = n.arange(start, end)[:, None]
+            jj = n.arange(n_roi)[None, :]
+            mask = (d <= dist_thresh_um) & (jj > ii)
+            li, lj = n.where(mask)
+            i_list.append(ii[li, 0])
+            j_list.append(jj[0, lj])
+        if not i_list:
+            return n.ones(n_roi, bool), []
+        i_idx = n.concatenate(i_list)
+        j_idx = n.concatenate(j_list)
+        if len(i_idx) == 0:
+            return n.ones(n_roi, bool), []
+
+    # Step 2: z-score traces once so pair correlation is a simple dot product
+    F = n.asarray(F, dtype=n.float32)
+    F_centered = F - F.mean(axis=1, keepdims=True)
+    F_norms = n.sqrt((F_centered ** 2).sum(axis=1))
+    # Guard against zero-variance traces (corr undefined)
+    valid = F_norms > 0
+
+    # Step 3: batch correlations for candidate pairs
+    n_pairs = len(i_idx)
+    corrs = n.zeros(n_pairs, dtype=n.float32)
+    for start in range(0, n_pairs, batch_size):
+        end = min(start + batch_size, n_pairs)
+        bi = i_idx[start:end]
+        bj = j_idx[start:end]
+        both_valid = valid[bi] & valid[bj]
+        num = (F_centered[bi] * F_centered[bj]).sum(axis=1)
+        denom = F_norms[bi] * F_norms[bj]
+        denom = n.where(denom > 0, denom, 1.0)
+        c = num / denom
+        c[~both_valid] = 0.0
+        corrs[start:end] = c
+
+    # Step 4: keep only duplicate pairs
+    dup_mask = corrs >= corr_thresh
+    dup_i = i_idx[dup_mask]
+    dup_j = j_idx[dup_mask]
+    if len(dup_i) == 0:
+        return n.ones(n_roi, bool), []
+
+    # Step 5: union-find to collapse chains; within each group keep the
+    # cell with the largest footprint (npix), tie-break by smaller index.
+    parent = n.arange(n_roi)
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for a, b in zip(dup_i, dup_j):
+        union(int(a), int(b))
+
+    npix = n.array([len(s['lam']) for s in stats])
+    keep_mask = n.ones(n_roi, bool)
+    merged_pairs = []
+    # group members by root
+    roots = n.array([find(i) for i in range(n_roi)])
+    unique_roots = n.unique(roots)
+    for r in unique_roots:
+        members = n.where(roots == r)[0]
+        if len(members) < 2:
+            continue
+        # winner = largest npix, tie-break = smallest idx
+        order = sorted(members, key=lambda i: (-npix[i], i))
+        winner = order[0]
+        for loser in order[1:]:
+            keep_mask[loser] = False
+            merged_pairs.append((int(winner), int(loser)))
+
+    return keep_mask, merged_pairs

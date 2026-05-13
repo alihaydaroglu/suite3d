@@ -159,6 +159,9 @@ PARAM_SECTIONS = {
     "dcnv_sig_baseline":            "extraction",
     "dcnv_prctile_baseline":        "extraction",
     "dcnv_batchsize":               "extraction",
+    "deduplicate":                  "extraction",
+    "deduplication_thresh_um":      "extraction",
+    "deduplication_thresh_corr":    "extraction",
 
     # --- compute: computational settings ---
     "n_proc":                       "compute",
@@ -327,9 +330,9 @@ params = {
     "npil_filt_xy_um": 100.0,           # neuropil filter xy extent (um)
     "npil_filt_z_um": 15.0,             # neuropil filter z extent (um)
     "cell_filt_type": "gaussian",       # cell detection filter type
-    "cell_filt_xy_um": 5,               # cell filter xy extent (um)
+    "cell_filt_xy_um": 1.5,              # cell filter xy extent (um)
     "cell_filt_z_um": 10,               # cell filter z extent (um)
-    "intensity_thresh": 0.1,            # activity threshold for corrmap
+    "intensity_thresh": 5,               # activity threshold for corrmap
     "standard_vmap": True,              # suite2p-inspired vmap algorithm
     "temporal_hpf": 200,                # temporal high-pass filter width
     "fix_vmap_edge_planes": False,      # fix edge plane scaling
@@ -345,13 +348,13 @@ params = {
     "patch_overlap_xy": (25, 25),       # patch overlap
     "activity_thresh": 5.0,             # minimum activity for segmentation
     "percentile": 95.0,                 # activity percentile threshold
-    "vox_snr_thresh": 1.0,              # voxel SNR threshold for ROI inclusion
+    "vox_snr_thresh": 0.05,             # voxel SNR threshold for ROI inclusion
     "multi_source": True,               # multi-source correction
     "n_power_iter": 3,                  # power iterations for footprints
     "use_power_iter_v1": True,          # use power iteration for v1
     "min_frames": 50,                   # minimum frames per patch
     "roi_ext_iterations": 20,            # ROI extension iterations
-    "roi_dilations_per_iter": 1,
+    "roi_dilations_per_iter": 2,
     "ext_subtract_iters": 0,            # exclusion iterations around cells
     "vox_snr_mp_correction": False,     # Marchenko-Pastur correction for voxel SNR during ROI extension
     "max_iter": 10000,                  # max ROIs per patch
@@ -380,6 +383,10 @@ params = {
     "dcnv_sig_baseline": 10,
     "dcnv_prctile_baseline": 8,
     "dcnv_batchsize": 3000,
+    # Post-extraction deduplication: merge nearby cells with highly correlated traces
+    "deduplicate": False,                # enable post-extraction deduplication
+    "deduplication_thresh_um": 15.0,     # max centroid distance (microns) to consider a pair
+    "deduplication_thresh_corr": 0.95,   # min trace correlation to merge a pair
 
     # =========================================================================
     # COMPUTE: computational settings (processors, dtypes, batch sizes)

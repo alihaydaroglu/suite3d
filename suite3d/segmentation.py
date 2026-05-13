@@ -10,7 +10,7 @@ import time
 
 
 def segment_rois(msub, vmap, n_proc_detect = 8, peak_thresh = 1.0, activity_thresh=None,
-                 vox_snr_thresh=1.0, roi_ext_iterations=10, roi_dilations_per_iter = 3, max_pix = 10000, min_pix = 4, use_power_iter_v1 = False,multi_source = True,
+                 vox_snr_thresh=0.05, roi_ext_iterations=20, roi_dilations_per_iter = 3, max_pix = 10000, min_pix = 4, use_power_iter_v1 = False,multi_source = True,
                  roi_power_iterations = 5, roi_min_active_frames = 50, roi_recompute_active_frames_interval=None, ext_subtract_iters=3,
                  vox_snr_mp_correction=False,
                  savepath =None, patch_idx = -1, offset = (0,0,0), max_iter = 1e6, log=default_log, **kwargs):
@@ -136,7 +136,7 @@ def add_segmented_rois(new_rois, stats, msub, vmap, log, ext_subtract_iters=3, r
 
 
 def segment_roi(msub, variances, vmap, roi_init, activity_thresh = 5,max_pix=10000,min_pix=4,use_power_iter_v1 = False,
-                roi_ext_iterations = 1, roi_dilations_per_iter = 3, n_power_iter = 3, min_frames = 50,vox_snr_thresh=1.0,
+                roi_ext_iterations = 20, roi_dilations_per_iter = 3, n_power_iter = 3, min_frames = 50,vox_snr_thresh=0.05,
                 multi_source=True,recompute_active_frames_interval=None, offset=(0,0,0),
                 debug = False, t_start = 0, roi_idx = -1, worker_idx = -1, patch_idx = -1,
                 vox_snr_mp_correction=False):

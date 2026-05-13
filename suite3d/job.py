@@ -1333,6 +1333,44 @@ class Job:
             F_roi = n.load(os.path.join(stats_dir, "F.npy"))
             F_neu = n.load(os.path.join(stats_dir, "Fneu.npy"))
 
+        # Post-extraction deduplication: merge nearby cells with highly
+        # correlated traces.  Disabled by default.
+        if self.params.get("deduplicate", False):
+            from suite3d.quality_metrics import find_trace_duplicates
+            dist_thresh = self.params.get("deduplication_thresh_um", 15.0)
+            corr_thresh = self.params.get("deduplication_thresh_corr", 0.95)
+            self.log(
+                "Deduplicating ROIs (dist<=%.1f um, corr>=%.3f)" %
+                (dist_thresh, corr_thresh), 0)
+            keep_mask, merged = find_trace_duplicates(
+                stats, F_roi,
+                voxel_size_um=self.params["voxel_size_um"],
+                dist_thresh_um=dist_thresh,
+                corr_thresh=corr_thresh,
+            )
+            n_removed = int((~keep_mask).sum())
+            self.log("Removed %d duplicate ROIs (kept %d/%d)" %
+                     (n_removed, int(keep_mask.sum()), len(keep_mask)), 1)
+            if n_removed > 0:
+                # Filter stats and traces
+                stats = [s for i, s in enumerate(stats) if keep_mask[i]]
+                F_roi = F_roi[keep_mask]
+                F_neu = F_neu[keep_mask]
+
+                # Update iscell_extracted: map from extracted-cell indices
+                # back to the full-iscell indexing before saving.
+                extracted_idxs = n.where(iscell)[0]
+                losers_in_extracted = n.where(~keep_mask)[0]
+                iscell[extracted_idxs[losers_in_extracted]] = False
+                utils.save_iscell(iscell_extracted_path, iscell)
+
+                # Re-save stats, traces, and a merge log.
+                n.save(os.path.join(save_dir, "stats.npy"), stats)
+                n.save(os.path.join(save_dir, "F.npy"), F_roi)
+                n.save(os.path.join(save_dir, "Fneu.npy"), F_neu)
+                n.save(os.path.join(save_dir, "dedup_merged_pairs.npy"),
+                       n.array(merged, dtype=int))
+
         self.log("Deconvolving")
         F_sub = F_roi - F_neu * self.params.get("npil_coeff", 0.7)
         dcnv_baseline = self.params.get("dcnv_baseline", "maximin")
