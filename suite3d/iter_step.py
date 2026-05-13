@@ -857,9 +857,10 @@ def register_dataset_s2p(
         save_dtype = n.float32
     elif save_dtype_str == "float16":
         save_dtype = n.float16
-    reference_params = summary["reference_params"]    
-    rmins = reference_params.get("plane_mins", None)
-    rmaxs = reference_params.get("plane_maxs", None)
+    reference_params = summary["reference_params"]
+    reference_info = summary["reference_info"]
+    rmins = reference_info.get("plane_mins", None)
+    rmaxs = reference_info.get("plane_maxs", None)
     if all_ops is None:
         all_ops = []
         for i in range(ref_img_3d.shape[0]):
@@ -1009,8 +1010,9 @@ def register_dataset_gpu_3d(
 
     # new parameters
     reference_params = summary["reference_params"]
-    rmins = reference_params.get("plane_mins", None)
-    rmaxs = reference_params.get("plane_maxs", None)
+    reference_info = summary["reference_info"]
+    rmins = reference_info.get("plane_mins", None)
+    rmaxs = reference_info.get("plane_maxs", None)
     snr_thresh = params.get("snr_thresh", 1.2)
     pc_size = params.get("pc_size", (2, 20, 20))
     frate_hz = params.get("fs", 4)
