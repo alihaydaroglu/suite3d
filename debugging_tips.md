@@ -238,3 +238,46 @@ Memo: [dev/coordination/rebuttal.md](../dev/coordination/rebuttal.md)
 on FACED/A4500" (from @datasets, 2026-05-13). Implementation:
 [`_estimate_max_gpu_batchsize`](suite3d/iter_step.py) and the call site
 inside `register_dataset_gpu_3d`.
+
+---
+
+## Correlation map looks empty or noisy → tune `intensity_thresh`
+
+**What it does**
+
+`intensity_thresh` is the per-voxel cutoff above which a voxel
+contributes to the correlation map. It's applied during `calculate_corr_map()`
+to gate which voxels enter the temporal correlation accumulator.
+
+**How to read the symptom**
+
+- **Corrmap too empty** (vmap mostly 0, only the brightest voxels
+  light up, segmentation finds very few cells): `intensity_thresh` is
+  too high — most real cells are being gated out before they ever
+  contribute. Common on dim modalities (axonal boutons, FACED) at the
+  default `intensity_thresh=5`.
+- **Corrmap too busy / noisy** (vmap has lots of background, vessels
+  and out-of-cell structure show up, segmentation finds a flood of
+  spurious ROIs): `intensity_thresh` is too low — noise voxels are
+  contributing.
+
+**Action**
+
+Sweep `intensity_thresh` for any new modality. Good first sweep:
+`{0.5, 1, 2.5, 5, 10}`. The right value scales with the F units of
+the data — bright soma data (e.g. V1, hippocampus) tolerates the
+default 5; bouton-scale or dim signals usually want 0.5–2.5.
+
+Quick iteration recipe: `resume` the job from corrmap onwards
+(re-running `calculate_corr_map` only takes ~1 min on a typical
+volume), regen a per-plane `mean image | corrmap | corrmap+ROIs`
+diagnostic, eyeball it. See
+[pub/fig-quality-datasets/resume_baruchin_corrmap.py](../pub/fig-quality-datasets/resume_baruchin_corrmap.py)
+and `make_baruchin_diagnostic_html.py` for a worked example on
+axonal boutons (default 5 → empty; 2.5 → reasonable).
+
+**Reference**
+
+Default lives in [suite3d/default_params.py](suite3d/default_params.py)
+under the CORRMAP block. Used in
+[`calculate_corr_map`](suite3d/job.py).
