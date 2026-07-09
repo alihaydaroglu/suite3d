@@ -1,0 +1,24 @@
+# CaImAn CPU image for the paper's speed benchmark.
+#
+# Build from the REPOSITORY ROOT (the directory holding pyproject.toml):
+#   docker build -f benchmarking/paper/Dockerfile.caiman -t s3d-bench:caiman .
+FROM condaforge/miniforge3:24.7.1-2
+
+ENV PYTHONUNBUFFERED=1 \
+    MAMBA_NO_BANNER=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    CAIMAN_DATA=/scratch/caiman_data
+
+RUN mamba install -y -c conda-forge \
+        python=3.11 \
+        caiman=1.12.2 \
+        psutil \
+        numpy \
+        scipy \
+        tifffile \
+    && mamba clean --all --yes
+
+WORKDIR /work
+COPY benchmarking/paper/ /work/
+
+ENTRYPOINT ["python", "/work/run_caiman.py"]
