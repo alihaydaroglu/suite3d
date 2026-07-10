@@ -52,8 +52,13 @@ For `--viewer napari`, also `pip install 'suite3d[viz]'`.
 ## Running on AWS
 
 See [`aws/README.md`](aws/README.md) — instance choice, disk sizing, a
-`bootstrap.sh` provisioner, a Dockerfile, and the measured cost of demo 01
-(25.4 min on a `g4dn.2xlarge`).
+`bootstrap.sh` provisioner, a Dockerfile, and the measured cost of **demo 01**
+(9m33s / $0.12 on a `g4dn.2xlarge`).
+
+Demo 01 is the only demo that has been run end to end on EC2. Demo 02 needs
+~114 GB of host RAM and has never completed there; demo 03 has never been tried.
+The AWS page documents demo 01 only, rather than recommending instances nobody
+has tested. Experimental notes for the others are on the `demo-dev` branch.
 
 ## Running
 
@@ -130,9 +135,10 @@ reference run used, and demo 02 wants ~128 GB of RAM as a result.
 
 If you have to fit a smaller machine, the escape hatches are on the command line,
 not in the parameters — `run_pipeline.py --n-init-files 2 --t-batch-size 400`
-fits 64 GB. Each prints a warning describing exactly what it changes about your
-results. That asymmetry is deliberate: you should have to ask for a different
-answer out loud.
+brings the two peaks to 58.2 and 41.5 GiB (measured here, each stage alone; we
+have not run that combination end to end on a 64 GB box). Each flag prints a
+warning describing exactly what it changes about your results. That asymmetry is
+deliberate: you should have to ask for a different answer out loud.
 
 Trace extraction loads `batchsize_frames` volumes of the float32 registered
 movie and duplicates them into shared memory. The demos size that batch to a
