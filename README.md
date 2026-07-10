@@ -27,11 +27,8 @@ uv pip install -e .
 # With napari visualization and jupyter
 uv pip install -e ".[viz,jupyter]"
 
-# Everything (viz, jupyter, webui, etc.)
+# Everything except GPU (viz, jupyter, etc.)
 uv pip install -e ".[all]"
-
-# Web UI only (for a monitoring-only machine)
-uv pip install -e ".[webui]"
 ```
 
 ### Option 2: `conda` (miniforge3 only)
@@ -100,24 +97,6 @@ Run them with:
 ```bash
 python demos/demo_standard_2p.py --data_dir /path/to/tifs --output_dir /path/to/output
 ```
-
-### Web UI (Job Monitoring)
-
-The web UI lets you monitor suite3d jobs (view initialization results, registration quality, correlation maps, and curate cells). It runs in a separate process and reads job files from disk.
-
-Install the webui dependencies:
-```bash
-pip install -e ".[webui]"
-```
-
-Launch the web UI:
-```bash
-panel serve serve_webui.py --show
-```
-
-## Docker
-
-There is a Dockerfile in this repo that successfully builds (`docker build - < Dockerfile`). Contributions to get this running with napari in a container are welcome.
 
 ## Sample Data
 Use [this](https://liveuclac-my.sharepoint.com/:f:/g/personal/ucqfhay_ucl_ac_uk/EuQX2PFw13xHhILvRux29AQB48tXCxBJQ7z6JfHee25pfw?e=HmBlAc) for the standard 2p imaging demo, recorded in mouse CA1, courtesy of Andrew Landau.

@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=61", "wheel", "versioneer[toml]==0.29"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "suite3d"
 description = "Fast, volumetric cell detection for multi-plane 2-photon imaging."
-version = "0.0.1"
+version = "1.0.0"
 readme = "README.md"
 requires-python = ">=3.11, <3.13"
 keywords = ["Pipeline", "Numpy", "Microscopy", "ScanImage", "Suite2p", "Volumetric"]
@@ -69,24 +69,12 @@ fpl = [
     "jupyter_rfb",
     "imgui-bundle",
 ]
-# Web UI for job monitoring (runs in a separate process)
-webui = [
-    "panel>=1.0",
-    "bokeh>=3.0",
-    "param",
-    "h5py",
-    "pandas",
-    "scikit-learn",
-    "umap-learn",
-    "torchvision",
-]
 # Everything except GPU
 all = [
     "suite3d[viz]",
     "suite3d[jupyter]",
     "suite3d[fpl]",
     "suite3d[mrc]",
-    "suite3d[webui]",
 ]
 
 [dependency-groups]
@@ -102,7 +90,7 @@ default-groups = "all"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["suite3d", "suite3d.*", "webui", "webui.*"]
+include = ["suite3d", "suite3d.*"]
 
 [tool.setuptools.package-data]
 # The HTML viewer's static assets are copied into the export dir at write time,

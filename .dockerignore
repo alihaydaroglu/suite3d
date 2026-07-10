@@ -14,7 +14,6 @@ dist/
 # Development material that has no business in a demo image.
 dev/
 benchmarking/
-debugging/
 
 # ...except the paper speed benchmark, which both Dockerfiles COPY into /work.
 # Must come after `benchmarking/`: the last matching pattern wins.
