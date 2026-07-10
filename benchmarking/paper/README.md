@@ -17,9 +17,10 @@ CSV row per phase (wall time, CPU%, peak resident memory) plus a `.npz` of the
 | `Dockerfile.suite3d` | GPU image (CUDA 12.2, cupy 13.x, suite3d) |
 | `Dockerfile.caiman` | CPU image (caiman 1.12.2) |
 
-> ⚠ **Read [§7 Gotchas](#7-gotchas) before you start.** Two of them (storage for
-> `scratch/`, and the offline-CNMF memory ceiling) will silently give you wrong
-> numbers or an OOM kill if you skip them.
+> ⚠ **Read [§7 Gotchas](#7-gotchas) before you start.** Three of them — where
+> `scratch/` lives (§7.3), the offline-CNMF memory ceiling (§7.4), and the fact
+> that OnACID motion-corrects a second time inside its *detection* phase (§7.8) —
+> will silently give you a wrong number or an OOM kill if you skip them.
 
 ## 0. Get the code
 
@@ -244,20 +245,30 @@ Things that will bite you, roughly in the order you hit them.
 
    The published `K = 200` runs did not hit this, which is why their CSVs *do*
    carry a `total` row.
-8. **CaImAn is silent for the first ~10 min** (subset 2) while it rewrites the
+8. **OnACID motion-corrects a second time, inside `detection_online`.**
+   `run_caiman_onacid.py` does not set `online.motion_correct`, and CaImAn's
+   default is `True`. `fit_online()` therefore re-registers a memmap that
+   `run_caiman_register.py` has already registered: a full `MotionCorrect` on the
+   `init_batch` frames, then a per-frame 3D rigid `register_translation_3d` on
+   every streamed frame. You can see it on disk as
+   `tmp_mov_mot_corr_rig__..._frames_200.mmap`. **The `detection_online` wall time
+   is therefore not clean detection** — it includes a redundant registration pass.
+   Set `motion_correct: False` in the OnACID params if you want detection alone.
+
+9. **CaImAn is silent for the first ~10 min** (subset 2) while it rewrites the
    TIFFs to single-channel 3D stacks under `scratch/preprocessed_tifs/`. It is
    not hung. This is cached across runs.
-9. **`--n-cores` help text says "locked to 16"**; it defaults to 16, but the
+10. **`--n-cores` help text says "locked to 16"**; it defaults to 16, but the
    instances above have 8 vCPU and every command here passes `--n-cores 8`.
-10. **`--instance` defaults to `local`** and only labels the CSV column. Forget
+11. **`--instance` defaults to `local`** and only labels the CSV column. Forget
     it and your rows are mislabelled.
-11. **Frame rate.** `run_suite3d.py` sets `fs` from
+12. **Frame rate.** `run_suite3d.py` sets `fs` from
     `suite3d.io.get_vol_rate()`, which reads ScanImage's
     `SI.hRoiManager.scanFrameRate` — the *plane* rate (~30 Hz), not the volume
     rate (~4.3 Hz for 9 planes). CaImAn is given `fr = 4` from `config.py`. This
     does not affect wall time (it only feeds deconvolution), but the two tools
     are not told the same frame rate.
-12. **The suite3d image is ~15 GB.** `Dockerfile.suite3d` tries to install
+13. **The suite3d image is ~15 GB.** `Dockerfile.suite3d` tries to install
     `psutil torch` from the PyTorch CPU index; `psutil` is not on that index, so
     the whole command fails and the `|| pip install psutil torch` fallback pulls
     the full CUDA torch from PyPI. (`pip install -e` has already pulled torch
