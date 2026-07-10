@@ -268,6 +268,18 @@ Sweep `intensity_thresh` for any new modality. Good first sweep:
 the data — bright soma data (e.g. V1, hippocampus) tolerates the
 default 5; bouton-scale or dim signals usually want 0.5–2.5.
 
+**Knob for "I want more cells":** lowering `intensity_thresh` is a
+reliable way to get more ROIs — it gates fewer voxels out of the
+correlation accumulator, so more seeds survive and segmentation finds
+more cells. The trade-off is that it also lets more **noise** into the
+corrmap (dimmer background, vessels, out-of-cell structure light up),
+so some of the extra ROIs may be spurious. If you turn it down for
+recall, eyeball the corrmap and the resulting ROI map for junk. Worked
+example: TC040 seg-param grid — dropping `intensity_thresh` 5→1 (with
+everything else fixed) roughly **doubled** the surviving ROI count
+(~640 → ~1600 at npix≥20). See the publicator seg-param grid ledger
+(`dev/coordination/scratchboards/publicator/main.md` §10a).
+
 Quick iteration recipe: `resume` the job from corrmap onwards
 (re-running `calculate_corr_map` only takes ~1 min on a typical
 volume), regen a per-plane `mean image | corrmap | corrmap+ROIs`
@@ -281,3 +293,48 @@ axonal boutons (default 5 → empty; 2.5 → reasonable).
 Default lives in [suite3d/default_params.py](suite3d/default_params.py)
 under the CORRMAP block. Used in
 [`calculate_corr_map`](suite3d/job.py).
+
+## Segmentation shatters cells into tiny ROIs → check `intensity_thresh` first
+
+If a run produces a flood of teeny ROIs (median ~9–11 px, most ROIs
+≤15 px) where you expect proper cell-sized ROIs (~100–220 px), the
+first thing to check is **`intensity_thresh`**, not the spatial filter.
+
+`intensity_thresh` is applied in `detection3d.py::get_vmap3d` as
+`Vt += mov[t]**2 * (mov[t] > intensity_thresh)`, where `mov` is the
+**sd-normalized, neuropil-subtracted, cell-filtered** movie. So it is
+effectively "how many noise-σ a binned frame must exceed to contribute
+to the correlation map". Set it too low and the corrmap fills with
+noise; the greedy extractor then seeds on noise peaks and carves crumbs.
+
+Worked example — TC030, all runs at `peak_thresh=0.03`, `segmentation_timebin=2`:
+
+| run | `intensity_thresh` | `segmentation_spatial_filt` | `vox_snr_thresh` | `roi_dilations_per_iter` | nROI | median px |
+|---|---|---|---|---|---|---|
+| `scratch_params_2kf`   | 5 | 2 | 0.05 | 1 | 563  | **220** |
+| `caiman-comparison`    | 5 | 1 | 0.05 | 2 | 666  | 64 |
+| `scratch-params-dup`   | 5 | 1 | 0.10 | 1 | 1018 | 11 |
+| `seg_it1_sf2_snr0.05`  | **1** | 2 | 0.05 | 1 | 3780 | **9** |
+| `seg_it1`              | **1** | 1 | 0.10 | 1 | 7835 | 9 |
+
+Rows 1 and 4 differ in **exactly one** parameter, `intensity_thresh`, and
+median ROI size collapses 220 px → 9 px. That is the only controlled
+comparison in this set. Raising `segmentation_spatial_filt` from 1 to 2
+does **not** rescue an under-gated corrmap (row 4 is sf=2 and still 9 px);
+it roughly halves the ROI count (7835 → 3780) but not the fragmentation.
+
+The other rows are **confounded** — rows 1 vs 3 change `sf`, `vox_snr_thresh`
+*and* `roi_dilations_per_iter` together, so they cannot be used to attribute
+the effect to `sf` alone. (An earlier version of this note did exactly that
+and was wrong.)
+
+There is no portable value: `intensity_thresh` tracks each modality's
+per-voxel SNR. Bright multi-plane 2P wants ~5. LBM wants ~1 — at 5, 87% of
+its corrmap voxels floor out and segmentation finds implausible 20-plane
+z-columns. High-zoom axonal boutons sit around 1.5. Tune it per dataset,
+and say so in the methods.
+
+It is **not** a frame-count problem — the same params over thousands of
+frames behave the same as over hundreds, provided
+`n_frames / detection_timebin` leaves enough correlation timebins
+(≳100; 400 frames / timebin 6 ≈ 66 bins is too few and degenerates).
