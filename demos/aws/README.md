@@ -19,14 +19,13 @@ speed benchmark ran on.
 |---|---|---|
 | **01 v1 (TC030)** | `g4dn.2xlarge` | **yes** — see §5 |
 | **03 hippocampus** | `g4dn.2xlarge` | no; smaller and shallower than demo 01, so it fits comfortably |
-| **02 lbm (SS004)** | **≥128 GB RAM** (`g5.8xlarge`, `g6e.4xlarge`) | **RAM measured locally: 113.5 GiB peak.** Does **not** fit a 32 GB or 64 GB box — see §5. |
+| **02 lbm (SS004)** | unknown — start large, size down | no. See §5. |
 
-> ⚠ **Demo 02 needs ~114 GiB of RAM.** Measured end to end on one box
-> (39m45s wall, 40,609 ROIs). A `g4dn.2xlarge`/`g5.2xlarge` (32 GB) or a
-> `g5.4xlarge` (64 GB) will be OOM-killed during trace extraction, which is the
-> peak — not during registration. Anything at or above 128 GB of host RAM works;
-> the GPU only needs ~8 GB of VRAM. Note `g5.8xlarge` is 32 vCPU, so the default
-> 8-vCPU G/VT quota will not cover it: request an increase first.
+> **We do not know how much RAM demo 02 needs.** It is a 22-plane volume against
+> demo 01's 7, so it is far heavier, and it has never been run on AWS. The
+> figures previously quoted here were measured through a code path the demos no
+> longer take. Until someone re-measures, start on a large-memory instance, watch
+> it, and size down from what you observe. The GPU is not the constraint.
 
 Two things that will trip you up:
 
@@ -142,21 +141,16 @@ Run under `tmux` or `nohup`. Demo 02 takes hours, and an SSH drop will kill it.
 ## 5. What it costs, and what we actually measured
 
 **Measured.** The Suite3D speed benchmark ran the *same recording as demo 01*
-(TC030) on a `g4dn.2xlarge`: **25.4 min wall, 22 GB peak RAM** for the full
-19-tif, 4034-volume dataset. Demo 01 ships 10 of those tifs, so expect
-comfortably less. At ~$0.75/hr that is well under a dollar of compute.
+(TC030) on a `g4dn.2xlarge`: **25.4 min wall** for the full 19-tif, 4034-volume
+dataset, and it fit. Demo 01 ships 10 of those tifs, so expect comfortably less.
+At ~$0.75/hr that is well under a dollar of compute.
 
-Note how close 22 GB peak sits to the instance's 32 GB. Suite3D fits; it is not
-swimming in headroom.
-
-**Demo 02 (LBM), measured locally, never on AWS.** 39m45s wall, **113.5 GiB peak
-RAM**, 40,609 ROIs, 42 GB registered movie, ~8 GB VRAM. The peak is in *trace
-extraction*, not registration, so a box that survives registration can still be
-OOM-killed at the very end. Pick ≥128 GB of host RAM. Do not try to tune around
-an OOM here — the demo-01 numbers do not transfer.
+**Demo 02 (LBM), run locally, never on AWS.** 39m45s wall, 40,609 ROIs, 42 GB
+registered movie, ~8 GB VRAM. We are not quoting a memory figure: see §1. It is
+a 22-plane volume and it is the heavy one; that is all we can say honestly.
 
 **Not measured.** Demo 03 on AWS: smaller and shallower than demo 01, should be
-easier (locally it is 5m24s / 8.1 GiB).
+easier (locally, 5m24s).
 
 Rough on-demand pricing, `us-east-1`, *check current rates*:
 
@@ -188,9 +182,9 @@ raw data. See §2. This is the most common way these runs fail.
 
 **napari errors over SSH** — use `--viewer none`.
 
-**OOM at the very end of demo 02**, after registration and segmentation both
-succeeded — that is trace extraction hitting its ~114 GiB peak. Get a bigger box
-(§1); there is nothing to tune.
+**Host-RAM OOM anywhere in demo 02.** Get a bigger box (§1). We have not
+characterised where its peak is, so do not assume it is the stage you happened
+to die in.
 
 **`NameError: name 'psutil' is not defined`** during registration, in a container
 or a bare venv — you have a build of suite3d from before `psutil` was declared a

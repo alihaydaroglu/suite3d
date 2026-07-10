@@ -53,7 +53,7 @@ For `--viewer napari`, also `pip install 'suite3d[viz]'`.
 
 See [`aws/README.md`](aws/README.md) — instance choice, disk sizing, a
 `bootstrap.sh` provisioner, a Dockerfile, and the measured cost of demo 01
-(25.4 min, 22 GB peak on a `g4dn.2xlarge`).
+(25.4 min on a `g4dn.2xlarge`).
 
 ## Running
 
@@ -88,20 +88,19 @@ Registration always reads whole tifs.
 
 ## Cost
 
-Plan for RAM and disk, not just time. Measured end to end on one box (RTX A4500,
-8 cores, raw data on a local disk). Registration is usually bound by how fast you
-can read the raw tifs — the same demo over a network mount took several times
-longer.
+Plan for disk and time. Measured end to end on one box (RTX A4500, 8 cores, raw
+data on a local disk). Registration is usually bound by how fast you can read the
+raw tifs — the same demo over a network mount took several times longer.
 
-| demo | download | registered movie | peak RAM | wall time (GPU) |
-|---|---|---|---|---|
-| 01 V1 | 21.1 GB (10 tifs) | ~9 GB | 13.6 GiB | **4m51s** (reg 2m19s) |
-| 02 LBM | 56.2 GB (13 tifs) | ~42 GB | **113.5 GiB** | **39m45s** (reg 10m36s) |
-| 03 hippocampus | 21.1 GB (10 tifs) | ~9 GB | 8.1 GiB | **5m24s** (reg 2m12s) |
+| demo | download | registered movie | wall time (GPU) |
+|---|---|---|---|
+| 01 V1 | 21.1 GB (10 tifs) | ~9 GB | **4m51s** (reg 2m19s) |
+| 02 LBM | 56.2 GB (13 tifs) | ~42 GB | **39m45s** (reg 10m36s) |
+| 03 hippocampus | 21.1 GB (10 tifs) | ~9 GB | **5m24s** (reg 2m12s) |
 
-> ⚠ **Demo 02 peaks at ~114 GiB of RAM**, and it peaks during *trace extraction*,
-> not registration. It will not run on a 64 GB machine. Demos 01 and 03 fit
-> comfortably in 16 GB.
+Demo 02 is much heavier on memory than demos 01 and 03 — it is a 22-plane volume
+where they are 7 and 4. We do not quote a peak: the figures we had were measured
+through a code path the demos no longer take, and we have not re-measured.
 
 The results directory written by `export_results(..., make_viewer=True)` is
 ~360 MB for demo 01 and ~3.7 GB for demo 02.

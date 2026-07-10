@@ -175,17 +175,15 @@ def extract_batch(job, target_gb=4.0, override=None):
     **Snap to the registered movie's chunk size.** It is stored in fixed-size
     blocks on disk (100 volumes), so a batch that is not a whole multiple of a
     chunk still forces dask to read whole chunks — and a batch that straddles a
-    boundary reads *two*. Measured on demo 02 (22 planes), extraction alone:
-
-        batch 500 (5 chunks) : 56 GiB of batch  -> 113.5 GiB whole-run peak
-        batch  35 (straddles):  24.4 GiB peak, 9m40s   <- smaller batch, WORSE
-        batch 100 (1 chunk)  :  22.4 GiB peak, 6m36s   <- both cheaper and faster
+    boundary reads *two*. On demo 02 (22 planes), a 35-volume batch that straddled
+    boundaries was both slower and more memory-hungry than a 100-volume batch that
+    did not: a smaller batch is not automatically a cheaper one.
 
     So we pick the largest whole number of chunks that fits the budget, and
     never go below one chunk.
 
     Call this before `extract_and_deconvolve` — the walkthrough notebooks do too,
-    otherwise they inherit the 500 default and demo 02 needs a 128 GB machine.
+    otherwise they silently inherit the 500 default.
     """
     if override:
         return override
