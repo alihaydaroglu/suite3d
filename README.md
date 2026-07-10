@@ -3,102 +3,52 @@
 Suite3D is a volumetric cell detection algorithm, generally applicable to any type of multi-plane functional 2p imaging where you see cells on multiple planes.
 For an overview of the algorithms, [see our recent preprint](https://www.biorxiv.org/content/10.1101/2025.03.26.645628v1).
 
-You might run into few kinks - please reach out to Ali (ali.haydaroglu.20@ucl.ac.uk, or by creating issues on this repository) and I'll be happy to help you get up and running.
+**[suite3d.github.io](https://suite3d.github.io)** has runnable demos, 3D visualizations, and step-by-step tutorials.
+
+If you run into any kinks, please [open an issue](https://github.com/alihaydaroglu/suite3d/issues) and we'll be happy to help you get up and running.
 
 ## Installation
 
-``` bash
-git clone git@github.com:alihaydaroglu/suite3d.git
+Suite3D needs Python 3.11 or 3.12.
+
+```bash
+pip install git+https://github.com/alihaydaroglu/suite3d.git
+pip install 'cupy-cuda12x>=13.0,<14.0'    # GPU (registration); the CPU fallback is much slower
+pip install 'suite3d[viz]'                # optional: napari 3D viewer
+```
+
+Registration runs on the GPU and needs a system [CUDA](https://developer.nvidia.com/cuda-downloads) 12.x install; keep `cupy` on the 13.x line. If you are not sure which CUDA you have, `conda install -c conda-forge cupy` will [sort it out for you](https://docs.cupy.dev/en/stable/install.html#installing-cupy-from-conda-forge).
+
+To work on the source, clone and install it editable instead:
+
+```bash
+git clone https://github.com/alihaydaroglu/suite3d.git
 cd suite3d
-```
-
-### Option 1: `uv` (recommended)
-
-[`uv`](https://docs.astral.sh/uv/) is a fast Python package manager. Install it with `curl -LsSf https://astral.sh/uv/install.sh | sh`.
-
-```bash
-uv venv --python 3.11 .venv
-source .venv/bin/activate  # linux/macOS
-# .venv\Scripts\activate   # windows
-
-# Core compute only
-uv pip install -e .
-
-# With napari visualization and jupyter
-uv pip install -e ".[viz,jupyter]"
-
-# Everything except GPU (viz, jupyter, etc.)
-uv pip install -e ".[all]"
-```
-
-### Option 2: `conda` (miniforge3 only)
-
-``` bash
-conda create -n s3d -c conda-forge python=3.11
-conda activate s3d
 pip install -e ".[all]"
 ```
-
-Or use the provided environment file:
-```bash
-conda env create -f environment.yml
-conda activate s3d
-pip install -e ".[all]"
-```
-
-### Option 3: `pip`
-
-``` bash
-python -m venv .venv
-source .venv/bin/activate      # linux, macOS
-# .venv\Scripts\activate       # windows
-
-pip install -e ".[all]"  # include all optional dependencies
-```
-
-
-### GPU Dependencies
-
-To use the GPU, you need a system [`cuda`](https://developer.nvidia.com/cuda-downloads) installation.
-We recommend `12.x`.
-
-After downloading CUDA, use the corresponding pip install for cupy:
-
-| Supported CUDA Toolkits: v11.2 / v11.3 / v11.4 / v11.5 / v11.6 / v11.7 / v11.8 / v12.0 / v12.1 / v12.2 / v12.3 / v12.4 / v12.5 / v12.6 / v12.8
-
-```bash
-pip install cupy-cuda12x  # or 11x if you installed CUDA v11.2 - v11.8
-```
-
-If you are unsure what CUDA toolkit you have installed, you can install `cupy` through `conda` and it will [handle the CUDA requirements for you](https://docs.cupy.dev/en/v12.2.0/install.html#installing-cupy-from-conda-forge):
-```bash
-conda install -c conda-forge cupy
-```
-
-
-**Note on `conda` environments**
-We highly recommend switching from your current conda package manager to miniforge3 if you have not yet done so. If not on miniforge3, and the installation gets stuck around "Solving Environment", you should use libmamba ([explanation](https://conda.github.io/conda-libmamba-solver/libmamba-vs-classic/)), install it using the [instructions here](https://www.anaconda.com/blog/a-faster-conda-for-a-growing-community). Also, set the conda channel priority to be strict: `conda config --set channel_priority strict`. It's important that you don't forget the `-e` in the pip command, this allows the installation to be editable.
 
 ## Usage
 
-### Notebooks
+Four worked demos live in [`demos/`](demos/), each on a real dataset:
 
-Run a jupyter notebook in this environment, either by running `jupyter notebook` in the activated environment or running a jupyter server from a different conda env and selecting this environment for the kernel ([see here](https://medium.com/@nrk25693/how-to-add-your-conda-environment-to-your-jupyter-notebook-in-just-4-steps-abeab8b8d084)). Make sure you use the correct environment!
+| | demo | recording |
+|---|---|---|
+| **01** | [`01-v1-tc030/`](demos/01-v1-tc030/) | V1, standard 2P, 7 planes |
+| **02** | [`02-lbm-ss004/`](demos/02-lbm-ss004/) | LBM, 22 planes |
+| **03** | [`03-hippocampus/`](demos/03-hippocampus/) | CA1, standard 2P, 4 planes |
+| **04** | [`04-sweep/`](demos/04-sweep/) | parameter sweep, reuses demo 03 |
 
-Then, run the Demo notebook in `demos/`.
+Each demo runs two ways: a `run_pipeline.py` script that goes start to finish, or a `walkthrough.ipynb` notebook that steps through the pipeline one stage at a time. See [`demos/README.md`](demos/README.md) for the flags and data layout, or [suite3d.github.io](https://suite3d.github.io) to watch them run.
 
-### Scripts
-
-Standalone Python scripts for running the pipeline are provided in `demos/`:
-- `demos/demo_standard_2p.py` - Full pipeline for standard 2-photon data
-- `demos/demo_lbm.py` - Full pipeline for Light Beads Microscopy data
-
-Run them with:
 ```bash
-python demos/demo_standard_2p.py --data_dir /path/to/tifs --output_dir /path/to/output
+cd demos/01-v1-tc030
+python run_pipeline.py --data-root /path/to/data --out-dir ./results
 ```
 
 ## Sample Data
-Use [this](https://liveuclac-my.sharepoint.com/:f:/g/personal/ucqfhay_ucl_ac_uk/EuQX2PFw13xHhILvRux29AQB48tXCxBJQ7z6JfHee25pfw?e=HmBlAc) for the standard 2p imaging demo, recorded in mouse CA1, courtesy of Andrew Landau.
 
-Sample LBM data coming soon!
+The volumetric 2-photon datasets used to test Suite3D are on figshare:
+
+**https://rdr.ucl.ac.uk/articles/dataset/Volumetric_2-photon_imaging_datasets_used_to_test_Suite3D/32956220**
+
+Download and unpack it, then point each demo's `--data-root` at the folder.
