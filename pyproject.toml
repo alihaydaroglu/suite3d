@@ -31,6 +31,9 @@ dependencies = [
     "click",
     "scikit-image",
     "dask-image",
+    # Required at runtime, not optional: Job.log(log_mem_usage=True) is called
+    # from the registration inner loop (iter_step.register_dataset_gpu_3d).
+    "psutil",
 ]
 
 [project.optional-dependencies]
@@ -100,6 +103,11 @@ default-groups = "all"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["suite3d", "suite3d.*", "webui", "webui.*"]
+
+[tool.setuptools.package-data]
+# The HTML viewer's static assets are copied into the export dir at write time,
+# so they must ship with the wheel.
+"suite3d.viewer" = ["assets/*.css", "assets/*.js"]
 
 [tool.setuptools.exclude-package-data]
 "*" = ["data/*", "demos/*"]

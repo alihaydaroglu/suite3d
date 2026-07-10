@@ -11,8 +11,16 @@ from warnings import warn
 
 try:
     import napari
-    import pyqtgraph as pg
+
+    # Import PyQt5 BEFORE pyqtgraph. pyqtgraph picks a Qt binding at import
+    # time and prefers one that is already in sys.modules; with both PyQt5 and
+    # PySide6 installed it otherwise picks PySide6, and vispy (via napari) then
+    # refuses to load its PyQt5 backend:
+    #     RuntimeError: Refusing to import PyQt5 because PySide6.QtCore is
+    #     already imported
+    # which kills SweepUI.create_ui() and demos/04-sweep/open_sweep_napari.py.
     from PyQt5 import QtGui, QtCore, QtWidgets
+    import pyqtgraph as pg
     from PyQt5.QtCore import QSize
     from PyQt5.QtWidgets import QGraphicsProxyWidget, QSlider, QPushButton, QVBoxLayout, QLabel, QLineEdit, QShortcut, QCheckBox, QComboBox, QSizePolicy
     from PyQt5.QtGui import QKeySequence

@@ -151,6 +151,7 @@ PARAM_SECTIONS = {
     "detect_overlap_lam_thresh":    "segmentation",
 
     # --- extraction: neuropil subtraction, trace extraction, deconvolution ---
+    "batchsize_frames":             "extraction",
     "npil_coeff":                   "extraction",
     "npil_to_roi_npix_ratio":       "extraction",
     "min_npil_npix":                "extraction",
@@ -291,7 +292,7 @@ params = {
     "block_size_3d": (5, 128, 128),     # nonrigid 3D block (z, y, x)
     "pc_size": n.asarray((2, 40, 40)),  # phase correlation window
     # Nonrigid registration
-    "nonrigid": False,
+    "nonrigid": True,                   # block-wise correction on top of the rigid shift
     "apply_z_shift": True,              # apply the rigid z component during shift application; set False to keep 3D measurement but skip z apply (e.g. few-z-plane recordings where z phase-corr saturates)
     "smooth_sigma_nr": 1.15,
     "smooth_sigma": 1.15,
@@ -340,7 +341,7 @@ params = {
     "cell_filt_type": "gaussian",       # cell detection filter type
     "cell_filt_xy_um": 1.5,              # cell filter xy extent (um)
     "cell_filt_z_um": 10,               # cell filter z extent (um)
-    "intensity_thresh": 5,               # activity threshold for corrmap
+    "intensity_thresh": 3,               # activity threshold for corrmap (noise-sigma gate; scale to per-voxel SNR: ~5 bright 2P, ~1 LBM/boutons)
     "standard_vmap": True,              # suite2p-inspired vmap algorithm
     "temporal_hpf": 200,                # temporal high-pass filter width
     "fix_vmap_edge_planes": False,      # fix edge plane scaling
@@ -356,14 +357,19 @@ params = {
     "patch_overlap_xy": (25, 25),       # patch overlap
     "activity_thresh": 5.0,             # minimum activity for segmentation
     "percentile": 95.0,                 # activity percentile threshold
-    "vox_snr_thresh": 0.05,             # voxel SNR threshold for ROI inclusion
-    "multi_source": True,               # multi-source correction
+    "vox_snr_thresh": 0.10,             # voxel SNR threshold for ROI inclusion
+    # Multi-source SVD extender. Helps on dense recordings, where overlapping
+    # signals from neighbouring neurons would otherwise contaminate the v1
+    # spatial source (see segmentation.py). Off by default: on simpler data the
+    # single-source extender is the appropriate choice, and having it on
+    # surprises users. Opt in for dense fields.
+    "multi_source": False,              # multi-source correction
     "n_power_iter": 3,                  # power iterations for footprints
     "use_power_iter_v1": True,          # use power iteration for v1
     "min_frames": 50,                   # minimum frames per patch
     "roi_ext_iterations": 20,            # ROI extension iterations
     "roi_dilations_per_iter": 2,
-    "ext_subtract_iters": 0,            # exclusion iterations around cells
+    "ext_subtract_iters": 2,            # exclusion iterations around cells (curbs re-seeding inside a bright cell's own footprint)
     "vox_snr_mp_correction": False,     # Marchenko-Pastur correction for voxel SNR during ROI extension
     "max_iter": 10000,                  # max ROIs per patch
     "segmentation_timebin": 1,          # time binning for segmentation
@@ -382,6 +388,12 @@ params = {
     # =========================================================================
     # EXTRACTION: neuropil subtraction, trace extraction, deconvolution
     # =========================================================================
+    # Volumes of the registered movie held in RAM at once during trace
+    # extraction. Sets extraction's peak memory; batches are independent, so
+    # lowering it changes memory and nothing else. Best set to a whole multiple
+    # of the movie's on-disk chunk size (100): a batch that straddles a chunk
+    # boundary makes dask read two chunks, costing more memory AND more time.
+    "batchsize_frames": 500,
     "npil_coeff": 0.7,                  # neuropil subtraction coefficient
     "npil_to_roi_npix_ratio": None,
     "min_npil_npix": 100,               # minimum neuropil pixels
@@ -392,7 +404,7 @@ params = {
     "dcnv_prctile_baseline": 8,
     "dcnv_batchsize": 3000,
     # Post-extraction deduplication: merge nearby cells with highly correlated traces
-    "deduplicate": False,                # enable post-extraction deduplication
+    "deduplicate": True,                 # enable post-extraction deduplication
     "deduplication_thresh_um": 15.0,     # max centroid distance (microns) to consider a pair
     "deduplication_thresh_corr": 0.95,   # min trace correlation to merge a pair
 

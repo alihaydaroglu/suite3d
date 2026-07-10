@@ -1,0 +1,83 @@
+:root {
+  --bg: #101216;
+  --panel: #181b21;
+  --line: #2a2f38;
+  --fg: #e6e8ec;
+  --dim: #9aa2ae;
+  --accent: #4c9ffe;
+  --f: #63d8a4;
+  --fneu: #8b93a1;
+  --spks: #f2a65a;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+#app { display: grid; grid-template-columns: 260px 1fr; grid-template-rows: 1fr auto;
+       height: 100%; }
+#side { grid-row: 1 / 3; background: var(--panel); border-right: 1px solid var(--line);
+        overflow-y: auto; padding: 14px 14px 24px; }
+#stage { position: relative; overflow: hidden; background: #000; }
+#tracebar { border-top: 1px solid var(--line); background: var(--panel); height: 0;
+            transition: height .12s ease; overflow: hidden; }
+#tracebar.open { height: 232px; }
+
+h1 { font-size: 14px; margin: 0 0 2px; letter-spacing: .01em; }
+.sub { color: var(--dim); font-size: 11px; margin-bottom: 14px; word-break: break-all; }
+h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+     color: var(--dim); margin: 18px 0 8px; font-weight: 600; }
+
+/* the two stacked layers: background <img>, ROI overlay <canvas>.
+   Never readback the img -- file:// taints the canvas and getImageData throws. */
+#layers { position: absolute; transform-origin: 0 0; }
+#bg { display: block; image-rendering: pixelated; }
+/* #mov sits on top of #bg and under #ov. It keeps its own natural size only in the
+   file on disk -- snippets may be spatially downsampled, so it is stretched back
+   onto the ROI grid here. #bg stays in flow: it is what gives #layers its size. */
+#mov { position: absolute; left: 0; top: 0; image-rendering: pixelated; }
+#mov[hidden] { display: none; }
+#ov { position: absolute; left: 0; top: 0; image-rendering: pixelated; }
+
+.row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.row label { flex: 0 0 74px; color: var(--dim); font-size: 11px; }
+.row output { flex: 0 0 62px; text-align: right; font-variant-numeric: tabular-nums;
+              font-size: 11px; color: var(--fg); }
+input[type=range] { flex: 1; accent-color: var(--accent); }
+select, button {
+  background: #21252d; color: var(--fg); border: 1px solid var(--line);
+  border-radius: 5px; padding: 5px 8px; font: inherit; font-size: 12px; cursor: pointer;
+}
+button:hover, select:hover { border-color: #3b424e; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; font-weight: 600; }
+button:disabled { opacity: .45; cursor: default; }
+.btnrow { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+
+/* dual-thumb range over the stat's own distribution */
+.filt { margin: 10px 0 2px; }
+.fhdr { display: flex; justify-content: space-between; align-items: baseline;
+        font-size: 11px; color: var(--dim); margin-bottom: 1px; }
+.fhdr i { font-style: normal; opacity: .55; font-size: 9px; text-transform: uppercase;
+          letter-spacing: .06em; }
+.fhdr .fval { color: var(--fg); font-variant-numeric: tabular-nums; }
+.fcv { display: block; width: 100%; cursor: ew-resize; touch-action: none; }
+
+#counts { font-variant-numeric: tabular-nums; margin-top: 8px; }
+#counts b { color: var(--accent); }
+.hint { color: var(--dim); font-size: 11px; margin-top: 6px; }
+.warn { color: #f2a65a; font-size: 11px; margin-top: 6px; }
+
+#roihdr { display: flex; align-items: center; gap: 12px; padding: 6px 12px;
+          border-bottom: 1px solid var(--line); font-size: 12px; }
+#roihdr .sw { width: 11px; height: 11px; border-radius: 3px; }
+#roihdr .k { color: var(--dim); }
+#roihdr .v { font-variant-numeric: tabular-nums; }
+#roihdr .grow { flex: 1; }
+#traces { display: block; width: 100%; }
+#tracemsg { padding: 20px; color: var(--dim); }
+
+#hud { position: absolute; right: 10px; top: 10px; background: rgba(16,18,22,.82);
+       border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px;
+       font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+kbd { background: #21252d; border: 1px solid var(--line); border-bottom-width: 2px;
+      border-radius: 3px; padding: 0 4px; font-size: 10px; }

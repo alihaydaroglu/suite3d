@@ -24,6 +24,7 @@ except ImportError:
 try:
     import psutil
 except ImportError:
+    psutil = None
     print("No psutil")
 
 from suite3d import dcnv
@@ -294,7 +295,7 @@ class Job:
             self.toc(string, level=level + 2)
             return
 
-        if log_mem_usage:
+        if log_mem_usage and psutil is not None:
 
             vm = psutil.virtual_memory()
             sm = psutil.swap_memory()
@@ -735,6 +736,16 @@ class Job:
         if mov is None:
             mov = self.get_registered_movie("registered_fused_data", "fused")
 
+        # Clear stale per-batch outputs from any previous corrmap run. The
+        # number of batches is nt/t_batch_size, so re-running with a smaller
+        # t_batch_size writes fewer -- or differently sized -- files than are
+        # already there. get_subtracted_movie() globs mov_sub*.npy and
+        # concatenates whatever it finds, so leftovers from an earlier run
+        # silently produce a mov_sub of the wrong length, and segmentation then
+        # runs on a movie that never existed. Fail loudly here instead.
+        if save:
+            self._clear_corrmap_outputs(corr_map_dir, mov_sub_dir)
+
         self.save_params(copy_dir=corr_map_dir)
         self.corrmap = corrmap.calculate_corrmap(
             mov=mov,
@@ -748,6 +759,26 @@ class Job:
         )
 
         return self.corrmap
+
+    def _clear_corrmap_outputs(self, corr_map_dir, mov_sub_dir):
+        """Delete batch****/ and mov_sub****.npy left by an earlier corrmap run."""
+        stale_movs = sorted(
+            f for f in os.listdir(mov_sub_dir)
+            if f.startswith("mov_sub") and f.endswith(".npy")
+        )
+        stale_batches = sorted(
+            d for d in os.listdir(corr_map_dir)
+            if d.startswith("batch") and os.path.isdir(os.path.join(corr_map_dir, d))
+        )
+        if stale_movs or stale_batches:
+            self.log(
+                "Clearing %d stale mov_sub file(s) and %d stale batch dir(s) from a "
+                "previous corrmap run" % (len(stale_movs), len(stale_batches)), 2
+            )
+        for f in stale_movs:
+            os.remove(os.path.join(mov_sub_dir, f))
+        for d in stale_batches:
+            shutil.rmtree(os.path.join(corr_map_dir, d))
 
     def load_corr_map_results(self, parent_dir_name=None):
         files = ["max_img.npy", "mean_img.npy", "vmap.npy"]
@@ -993,6 +1024,7 @@ class Job:
         patches_to_segment=None,
         ts=None,
         vmap=None,
+        z_block=None,
     ):
         """
         Start from the correlation map in parent_dir and segment into ROIs
@@ -1044,10 +1076,15 @@ class Job:
         patch_size_xy = self.params["patch_size_xy"]
         patch_overlap_xy = self.params["patch_overlap_xy"]
         nt, nz, ny, nx = mov_sub.shape
-        patches, grid_shape = svu.make_blocks((nz, ny, nx), (nz,) + patch_size_xy, (0,) + patch_overlap_xy)
+        # z_block controls the z-extent of each segmentation patch. Default
+        # (None -> nz) segments the full volume together = 3D detection. Set
+        # z_block=1 to segment each plane independently (ROIs cannot extend or
+        # seed across z) = 2D / Suite2p-style detection.
+        zb = nz if z_block is None else int(z_block)
+        patches, grid_shape = svu.make_blocks((nz, ny, nx), (zb,) + patch_size_xy, (0,) + patch_overlap_xy)
         patches_vmap, __ = svu.make_blocks(
             (nz, ny, nx),
-            (nz,) + patch_size_xy,
+            (zb,) + patch_size_xy,
             (0,) + patch_overlap_xy,
             nonoverlapping_mask=True,
         )
@@ -1247,6 +1284,7 @@ class Job:
         export_frame_counts=True,
         additional_info=None,
         output_dir_label="",
+        make_viewer=False,
     ):
         """
         Save the relevant outputs of suite3d in a specified directory for further processing.
@@ -1257,6 +1295,11 @@ class Job:
             result_dir_name (str, optional): name of the directory where results are currently saved. Defaults to 'rois'.
             results_to_export (list, optional): list of files to export. Defaults to the important ones.
             export_frame_counts (bool, optional): Whether to export the number of frames in each file. Defaults to True.
+            make_viewer (bool, optional): Also write the portable HTML ROI viewer
+                into the export dir. See `Job.make_html_viewer`. Defaults to False.
+
+        Returns:
+            str: the export directory that was written.
         """
         full_export_path = os.path.join(export_path, "s3d-results-%s" % self.job_id + output_dir_label)
         os.makedirs(full_export_path, exist_ok=True)
@@ -1309,11 +1352,68 @@ class Job:
             self.save_file(data=data, filename=result, path=full_export_path)
             self.log("Saved %s to %s" % (result, full_export_path), 2)
 
+        if make_viewer:
+            self.make_html_viewer(export_path=full_export_path,
+                                  result_dir_name=result_dir_name)
+
+        return full_export_path
+
+    def make_html_viewer(self, export_path=None, result_dir_name="rois",
+                         traces="auto", trace_dtype="int16", chunk_rois=256,
+                         fs_vol=None, movie_snippet=None):
+        """Write a portable, offline HTML browser for this job's ROIs.
+
+        Produces `<export_path>/viewer.html` plus a `viewer/` data directory. The
+        whole directory can be copied to another machine and opened by
+        double-clicking the html -- no server, no Python, no internet. Filter
+        sliders and manual curation derive `iscell`, which can be downloaded as a
+        real `iscell.npy` and applied back with `Job.import_curation`.
+
+        Args:
+            export_path (str, optional): where to write. Defaults to the job's
+                export dir, `<job_dir>/s3d-results-<job_id>`.
+            result_dir_name (str, optional): ROI dir to read. Defaults to "rois".
+            traces (str|bool, optional): "auto" writes trace chunks iff F.npy
+                exists. Clicking an ROI then shows F, Fneu and spks.
+            trace_dtype (str, optional): "int16" (per-ROI affine quantisation,
+                half the size, visually lossless) or "float32".
+            chunk_rois (int, optional): ROIs per lazily-loaded trace chunk.
+            fs_vol (float, optional): volume rate in Hz for the trace time axis.
+                Defaults to `params["fs"]`, which is NOT always the volume rate --
+                a warning is emitted if it looks like the per-plane rate.
+            movie_snippet: also ship a browsable snippet of the motion-corrected
+                movie and the detection movie (`mov_sub`). `True` for defaults,
+                an int for that many frames, or a dict of overrides (see
+                `viewer.movies.DEFAULT_SPEC`: n_frames, start, movies,
+                downsample, fmt, quality, max_pixels, pct). Never writes a full
+                movie -- frames are capped by `max_pixels` and spatially
+                downsampled if needed, so the export dir stays copyable.
+
+        Returns:
+            str: path to viewer.html
+        """
+        from .viewer import make_html_viewer as _mk
+
+        return _mk(self, export_path=export_path, result_dir_name=result_dir_name,
+                   traces=traces, trace_dtype=trace_dtype, chunk_rois=chunk_rois,
+                   fs_vol=fs_vol, movie_snippet=movie_snippet)
+
+    def import_curation(self, path, result_dir_name="rois", write=True):
+        """Apply a `curation.json` downloaded from the HTML viewer.
+
+        Recomputes `iscell` from the saved filter thresholds + manual overrides
+        using the same predicate the browser used, and (by default) writes
+        `iscell.npy` into the ROI dir.
+        """
+        from .viewer import import_curation as _imp
+
+        return _imp(self, path, result_dir_name=result_dir_name, write=write)
+
     def extract_and_deconvolve(
         self,
         patch_idx=None,
         mov=None,
-        batchsize_frames=500,
+        batchsize_frames=None,
         stats=None,
         offset=None,
         n_frames=None,
@@ -1328,6 +1428,12 @@ class Job:
         compute_overmerge=False,
         overmerge_max_pix=50,
     ):
+        # Volumes held in RAM at once. This sets extraction's peak memory: the
+        # registered movie is float32 in memory, and create_shmem_from_arr()
+        # copies each batch, so a batch costs ~2 * nz * batch * ny * nx * 4 B.
+        # An explicit argument wins; otherwise take it from params.
+        if batchsize_frames is None:
+            batchsize_frames = self.params.get("batchsize_frames", 500)
         self.save_params()
         if stats_dir is None and patch_idx is not None:
             stats_dir = self.get_patch_dir(patch_idx, parent_dir_name=parent_dir_name)
