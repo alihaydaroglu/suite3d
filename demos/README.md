@@ -109,18 +109,23 @@ The results directory written by `export_results(..., make_viewer=True)` is
 Demo 04 re-uses demo 03's job. Its corrmap sweep is cheap (9 correlation maps,
 no re-registration); its segmentation sweep is not.
 
-Expect roughly 845 ROIs on demo 01, 1,347 on demo 03, and ~40,000 on demo 02.
-These are sanity checks, not regression targets: the exact count shifts a few
-percent with hardware and with the shipped defaults (demo 01 gave 885 here, and
-878 on an AWS T4).
+Expect roughly 885 ROIs on demo 01, 1,350 on demo 03, and ~40,000 on demo 02.
+Treat these as sanity checks, not regression targets.
 
-**"Roughly" is meant literally: Suite3D's detection is not deterministic.** ROIs
-are extended from a random start vector (`power_iteration`'s `f0`) drawn from an
-unseeded RNG, so two runs on identical data with identical parameters produce
-slightly different ROI sets. Re-running demo 01 against the parameters of its own
-published reference run gives 885 ROIs where that run gave 845 — a 4.7%
-difference, with 90% of the reference ROIs matched within 5 voxels. Treat these
-counts as sanity checks, not regression targets.
+**On one machine the count is reproducible; across machines it drifts.** Demo 01
+gives 885 ROIs on every re-run here, and 878 on an AWS T4 — a 0.8% difference
+that comes from GPU and BLAS arithmetic, not from randomness in the algorithm.
+Detection extends each ROI by power iteration, and although the residual source
+does start from an unseeded random vector, power iteration converges to the same
+dominant component regardless of where it starts. If you need bit-identical
+counts across hardware, you cannot have them; if you re-run on the same box and
+the count moves, something else changed.
+
+Do not compare against the 845 ROIs quoted by demo 01's own published reference
+run. That run's `params.npy` was overwritten after the fact, so its recorded
+parameters are not the ones it used, and it segmented a `(7, 514, 514)` volume
+where the demo segments `(7, 515, 514)`. The two numbers are not measuring the
+same thing.
 
 Demo 02's detection and segmentation parameters are pinned to those that produced
 the published 43,652-ROI segmentation of that recording. Its registration is not:

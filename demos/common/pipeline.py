@@ -166,19 +166,35 @@ def extract_batch(job, args):
     Suite3D's default of 500 is fine for a 7-plane cortical FOV (~2 GiB) and
     catastrophic for a 22-plane LBM volume (28 GiB per batch, ~56 GiB with the
     copy). Batches are independent — `F[:, start:end]` depends only on its own
-    batch — so shrinking this changes peak RAM and nothing else.
+    batch — so changing this moves peak RAM and nothing else. Verified on demo
+    02: `Fneu`/`spks` come out bit-identical, `F` to 7e-9 (float32 summation
+    order).
 
-    Default: pick the largest batch under `--extract-batch-gb` (4 GiB).
+    **Snap to the registered movie's chunk size.** It is stored in fixed-size
+    blocks on disk (100 volumes), so a batch that is not a whole multiple of a
+    chunk still forces dask to read whole chunks — and a batch that straddles a
+    boundary reads *two*. Measured on demo 02 (22 planes), extraction alone:
+
+        batch 500 (5 chunks) : 56 GiB of batch  -> 113.5 GiB whole-run peak
+        batch  35 (straddles):  24.4 GiB peak, 9m40s   <- smaller batch, WORSE
+        batch 100 (1 chunk)  :  22.4 GiB peak, 6m36s   <- both cheaper and faster
+
+    So we pick the largest whole number of chunks that fits the budget, and
+    never go below one chunk.
     """
     if args.extract_batch:
         return args.extract_batch
+
     mov = job.get_registered_movie()
     nz, nt, ny, nx = mov.shape
-    per_frame = nz * ny * nx * mov.dtype.itemsize * 2  # x2 for the shmem copy
-    batch = int(args.extract_batch_gb * (1024 ** 3) / per_frame)
-    batch = max(25, min(batch, nt))
-    log("extraction batch: %d volumes (~%.1f GiB incl. the shmem copy)"
-        % (batch, batch * per_frame / 1024 ** 3))
+    chunk = mov.chunks[1][0]                    # volumes per on-disk block
+    per_frame = nz * ny * nx * mov.dtype.itemsize * 2   # x2 for the shmem copy
+
+    n_chunks = int(args.extract_batch_gb * (1024 ** 3) / (per_frame * chunk))
+    batch = min(max(1, n_chunks) * chunk, nt)
+    log("extraction batch: %d volumes = %d x %d-volume chunk (~%.1f GiB incl. "
+        "the shmem copy)" % (batch, batch // chunk, chunk,
+                             batch * per_frame / 1024 ** 3))
     return batch
 
 
