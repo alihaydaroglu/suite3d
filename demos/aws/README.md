@@ -117,8 +117,16 @@ Then run:
 ```bash
 source ~/suite3d/.venv/bin/activate
 cd ~/suite3d/demos/01-v1-tc030
-python run_pipeline.py --data-root /data --out-dir /data/results --viewer none
+python run_pipeline.py --data-root /data --out-dir /opt/dlami/nvme/results --viewer none
 ```
+
+> ⚠ **Put `--out-dir` on the instance-store NVMe, not on the EBS root.**
+> Registration is I/O-bound, not GPU-bound: writing the job directory to a
+> default `gp3` root volume roughly **doubles** it (@benchmark_tester measured
+> 2125 s vs 410 s on the same instance for the same data; CPU-seconds are
+> identical either way, the EBS run just stalls at ~12 % CPU). The NVMe at
+> `/opt/dlami/nvme` is faster and free — but it is **wiped when the instance
+> stops**, so copy results off before you stop it (§2).
 
 **Use `--viewer none` on the instance.** `--viewer napari` needs a display and
 will fail over SSH. Copy the exported results directory back to your laptop and

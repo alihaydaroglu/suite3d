@@ -8,6 +8,7 @@ run_pipeline.py` works from anywhere without installing the demos.
 from .datasets import DATASETS, get_params, check_volume_rate
 from .pipeline import (
     build_parser,
+    extract_batch,
     find_tifs,
     load_or_create_job,
     log,
@@ -19,6 +20,6 @@ from .pipeline import (
 
 __all__ = [
     "DATASETS", "get_params", "check_volume_rate",
-    "build_parser", "find_tifs", "load_or_create_job", "log", "main",
+    "build_parser", "extract_batch", "find_tifs", "load_or_create_job", "log", "main",
     "n_rois", "open_viewer", "run_stages",
 ]

@@ -150,12 +150,14 @@ def run_stages(job, args):
     if not args.skip_extract:
         log("=== 5/5 neuropil masks + trace extraction + deconvolution ===")
         job.compute_npil_masks()
-        job.extract_and_deconvolve(batchsize_frames=extract_batch(job, args))
+        job.extract_and_deconvolve(
+            batchsize_frames=extract_batch(job, args.extract_batch_gb,
+                                           args.extract_batch))
 
     return job
 
 
-def extract_batch(job, args):
+def extract_batch(job, target_gb=4.0, override=None):
     """How many volumes to pull into RAM at once during trace extraction.
 
     This is what sets the pipeline's peak memory. Extraction loads
@@ -181,16 +183,19 @@ def extract_batch(job, args):
 
     So we pick the largest whole number of chunks that fits the budget, and
     never go below one chunk.
+
+    Call this before `extract_and_deconvolve` — the walkthrough notebooks do too,
+    otherwise they inherit the 500 default and demo 02 needs a 128 GB machine.
     """
-    if args.extract_batch:
-        return args.extract_batch
+    if override:
+        return override
 
     mov = job.get_registered_movie()
     nz, nt, ny, nx = mov.shape
     chunk = mov.chunks[1][0]                    # volumes per on-disk block
     per_frame = nz * ny * nx * mov.dtype.itemsize * 2   # x2 for the shmem copy
 
-    n_chunks = int(args.extract_batch_gb * (1024 ** 3) / (per_frame * chunk))
+    n_chunks = int(target_gb * (1024 ** 3) / (per_frame * chunk))
     batch = min(max(1, n_chunks) * chunk, nt)
     log("extraction batch: %d volumes = %d x %d-volume chunk (~%.1f GiB incl. "
         "the shmem copy)" % (batch, batch // chunk, chunk,
