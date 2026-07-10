@@ -85,9 +85,19 @@ DATASETS = {
 
             # The init pass estimates the cavity crosstalk coefficient, and that
             # estimate is SUBTRACTED from the movie (subtract_crosstalk=True).
-            # It is noisy from a single tif: with the shipped default of 1 file
-            # it lands at 0.080, against the reference run's 0.160 -- the same
-            # per-plane profile, scaled ~2x down. The reference used 4.
+            # It is noisy from a single tif, and it is also what sets the init
+            # pass's peak memory -- every init tif is held in RAM at once.
+            # Measured on this recording (init pass alone, 22 planes):
+            #
+            #     n_init_files=1 -> 30.6 GiB peak, crosstalk 0.080
+            #     n_init_files=2 -> 58.2 GiB peak, crosstalk 0.125
+            #     n_init_files=4 -> 113.5 GiB peak, crosstalk 0.155  <- reference (0.160)
+            #
+            # This is a SCIENTIFIC parameter, not a memory dial: the coefficient
+            # is subtracted from the movie. The demo uses what the reference run
+            # used. If you cannot afford ~128 GB of RAM, lower it on the command
+            # line (`run_pipeline.py --n-init-files`), and know that you are
+            # under-estimating the crosstalk you subtract.
             "n_init_files": 4,
 
             # Registration. The published 43,652-ROI run used rigid-only

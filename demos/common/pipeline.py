@@ -86,6 +86,16 @@ def build_parser(name, description):
                         "This sets the pipeline's peak memory (default: auto)")
     p.add_argument("--extract-batch-gb", type=float, default=4.0,
                    help="target size of one extraction batch, GiB (default: %(default)s)")
+    p.add_argument("--t-batch-size", type=int, default=None,
+                   help="volumes processed at once by the correlation map. Lower it "
+                        "to fit a smaller machine -- but it CHANGES THE CORRELATION "
+                        "MAP, not just peak memory, so the ROI count will move. "
+                        "Leave unset to use the dataset's parameters.")
+    p.add_argument("--n-init-files", type=int, default=None,
+                   help="tifs read by the init pass, all held in RAM at once. Lower "
+                        "it to fit a smaller machine -- but on LBM it CHANGES THE "
+                        "CROSSTALK COEFFICIENT that is subtracted from the movie. "
+                        "Leave unset to use the dataset's parameters.")
     for s in STAGES:
         p.add_argument("--skip-%s" % s, action="store_true",
                        help="skip the %s stage (re-uses what is on disk)" % s)
@@ -121,6 +131,17 @@ def run_stages(job, args):
     """Run init -> register -> corrmap -> segment -> npil+extract."""
     if not args.skip_init:
         log("=== 1/5 initialization ===")
+        if args.n_init_files is not None:
+            # Deliberately not a dataset parameter. On LBM the init pass
+            # estimates the cavity crosstalk coefficient, which is then
+            # SUBTRACTED from the movie -- fewer tifs means a noisier, smaller
+            # estimate and a different movie, not merely a cheaper run.
+            log("WARNING: n_init_files %d -> %d. On LBM this changes the "
+                "estimated crosstalk coefficient that gets subtracted from the "
+                "movie (measured: 0.080 / 0.125 / 0.155 for 1 / 2 / 4 files, "
+                "against the reference run's 0.160)."
+                % (job.params["n_init_files"], args.n_init_files))
+            job.params["n_init_files"] = args.n_init_files
         job.run_init_pass()
 
     if not args.skip_register:
@@ -129,6 +150,18 @@ def run_stages(job, args):
 
     if not args.skip_corrmap:
         log("=== 3/5 correlation map ===")
+        if args.t_batch_size is not None:
+            # Deliberately not a dataset parameter: this is a per-machine escape
+            # hatch, and it does not preserve the correlation map (the temporal
+            # high-pass window is clamped to the batch, and the sd normalizer is
+            # accumulated across batches). Say so loudly.
+            log("WARNING: t_batch_size %d -> %d. This changes the correlation "
+                "map, not only peak memory, and detection amplifies it: on demo "
+                "02, 800 -> 400 halves peak RAM (85.5 -> 41.5 GiB) but moves the "
+                "ROI count from 40,608 to 48,587 (+19.6%%). Your results will "
+                "not match the demo's reference value."
+                % (job.params["t_batch_size"], args.t_batch_size))
+            job.params["t_batch_size"] = args.t_batch_size
         if args.n_frames is None:
             job.calculate_corr_map()
         else:

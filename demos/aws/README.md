@@ -19,13 +19,64 @@ speed benchmark ran on.
 |---|---|---|
 | **01 v1 (TC030)** | `g4dn.2xlarge` | **yes** — see §5 |
 | **03 hippocampus** | `g4dn.2xlarge` | no; smaller and shallower than demo 01, so it fits comfortably |
-| **02 lbm (SS004)** | unknown — start large, size down | no. See §5. |
+| **02 lbm (SS004)** | `g5.8xlarge` (128 GB) as shipped, or `g5.4xlarge` (64 GB) with `--n-init-files 2 --t-batch-size 400` | **no** — never completed on EC2; the RAM figures in §1 are local measurements, and both EC2 attempts were OOM-killed on a 64 GB box |
 
-> **We do not know how much RAM demo 02 needs.** It is a 22-plane volume against
-> demo 01's 7, so it is far heavier, and it has never been run on AWS. The
-> figures previously quoted here were measured through a code path the demos no
-> longer take. Until someone re-measures, start on a large-memory instance, watch
-> it, and size down from what you observe. The GPU is not the constraint.
+> **Demo 02 has two heavy stages, and neither is registration.** Each was
+> measured alone on this 22-plane recording:
+>
+> | stage | peak RAM | knob |
+> |---|---:|---|
+> | init, `n_init_files=1` | 30.6 GiB | `n_init_files` |
+> | init, `n_init_files=2` | 58.2 GiB | |
+> | init, **`n_init_files=4`** (shipped) | **113.5 GiB** | |
+> | corrmap, **`t_batch_size=800`** (shipped) | **85.5 GiB** | `t_batch_size` |
+> | corrmap, `t_batch_size=650` | 75.4 GiB | |
+> | corrmap, `t_batch_size=400` | 41.5 GiB | |
+> | corrmap, `t_batch_size=325` | 40.7 GiB | |
+>
+> **As shipped, the init pass is the ceiling at 113.5 GiB**, with the correlation
+> map close behind at 85.5 GiB. Demo 02 therefore wants a **128 GB** box —
+> `g5.8xlarge` (32 vCPU, 128 GB, A10G, ~$2.44/hr) — and even that has only ~14 GiB
+> of headroom. On a 64 GB `g5.4xlarge` it dies about two minutes in at *"Applying
+> plane alignment shifts"*; on a 32 GB box (`g4dn.2xlarge`, `g5.2xlarge`) it never
+> gets close.
+>
+> Both knobs count **volumes/files, not bytes**, and the registered movie is
+> float16 on disk but float32 in RAM.
+>
+> **To run demo 02 on a smaller box**, lower them on the command line:
+> `--n-init-files 2 --t-batch-size 400` brings the two peaks to 58.2 and 41.5 GiB,
+> which fits a 64 GB `g5.4xlarge` with under 4 GiB to spare. **Both flags change
+> the result** — see the two warnings below. Neither is a dataset parameter, which
+> is the point: you are trading science for hardware, and you should have to say so
+> on the command line.
+>
+> ⚠ **`--n-init-files` changes the crosstalk you subtract.** On LBM the init pass
+> *estimates the cavity crosstalk coefficient*, and `subtract_crosstalk=True` then
+> removes it from the movie. Fewer tifs, noisier and smaller estimate: 0.080 /
+> 0.125 / 0.155 for 1 / 2 / 4 files, against the reference run's 0.160. Lowering it
+> does not make the run cheaper; it makes it different.
+>
+> ⚠ **`--t-batch-size` is not a free memory knob — it changes the science.**
+> Lowering it shortens the temporal high-pass window (clamped to the batch),
+> changes the running standard-deviation normalizer, and discards up to
+> `detection_timebin - 1` volumes per batch. Measured on demo 02:
+>
+> | | `t_batch_size=800` | `t_batch_size=400` |
+> |---|---:|---:|
+> | corrmap peak RAM | 85.5 GiB | 41.5 GiB |
+> | volumes used | 216 | 214 |
+> | vmap correlation | — | 0.922 |
+> | **ROIs found** | **40,608** | **48,587 (+19.6%)** |
+>
+> A correlation map that looks 92% the same yields **twenty percent more ROIs** —
+> detection amplifies small changes in the map's fine structure. So a run with
+> `--t-batch-size` will not reproduce the demo's reference segmentation, and you
+> must not compare corrmaps or ROI counts across batch sizes. It is an escape
+> hatch for fitting a smaller machine, not a tuning parameter — which is why it is
+> a command-line flag and not one of the dataset's parameters.
+>
+> The GPU is never the constraint here: demo 02 uses ~8 GB of VRAM.
 
 Two things that will trip you up:
 
@@ -145,9 +196,38 @@ Run under `tmux` or `nohup`. Demo 02 takes hours, and an SSH drop will kill it.
 dataset, and it fit. Demo 01 ships 10 of those tifs, so expect comfortably less.
 At ~$0.75/hr that is well under a dollar of compute.
 
-**Demo 02 (LBM), run locally, never on AWS.** 39m45s wall, 40,609 ROIs, 42 GB
-registered movie, ~8 GB VRAM. We are not quoting a memory figure: see §1. It is
-a 22-plane volume and it is the heavy one; that is all we can say honestly.
+**Demo 02 (LBM) has never completed on EC2.** Everything below is measured
+**locally** (RTX A4500, 128 GB host): 40,606–40,610 ROIs, 42 GB registered movie,
+~8 GB VRAM, ~40 min wall. The only EC2 evidence is two OOM kills on a 64 GB
+`g5.4xlarge` — one in the init pass at *"Applying plane alignment shifts"*, one in
+the correlation map at *"Running batch 1 of 2"* — both consistent with the local
+numbers. Treat the instance recommendation in §1 as a prediction, not a
+measurement.
+
+Peak host RAM as shipped is set by the **init pass**: 113.5 GiB (§1), with the
+correlation map close behind at 85.5 GiB — which is why a 64 GB instance needs
+both `--n-init-files 2` and `--t-batch-size 400`. Three things allocate heavily,
+and they are easy to confuse:
+
+* the **init pass**, which holds every init tif at once → scales with
+  `n_init_files`; with the shipped settings this is the ceiling, 113.5 GiB.
+* the **correlation map**, which processes `t_batch_size` volumes at a time and
+  peaks at roughly twice one batch (movie plus its filtered copies); 85.5 GiB as
+  shipped, a close second. Lowering it via `--t-batch-size` also shrinks the
+  `mov_sub` chunks that segmentation later slices patches out of. But it changes
+  the result — see the warning in §1.
+* **trace extraction**, which loads `batchsize_frames` volumes of the *float32*
+  registered movie and then duplicates them into shared memory. Unlike
+  `t_batch_size`, this one *is* memory-only: extraction batches are independent,
+  and `Fneu`/`spks` come out bit-identical when you change it. The demos size the
+  batch to a whole multiple of the movie's on-disk chunk (100 volumes). A
+  *smaller* batch is not automatically better: one that straddles a chunk
+  boundary makes dask read two chunks (24.4 GiB / 9m40s) where a single aligned
+  chunk reads one (22.4 GiB / 6m36s) — cheaper *and* faster.
+
+**Segmentation is never the ceiling.** Its patches are sliced lazily out of a
+dask array: 48 patches of 0.40 GB each on demo 02. Shrinking `patch_size_xy` to
+save memory does nothing useful.
 
 **Not measured.** Demo 03 on AWS: smaller and shallower than demo 01, should be
 easier (locally, 5m24s).
@@ -159,6 +239,7 @@ Rough on-demand pricing, `us-east-1`, *check current rates*:
 | `g4dn.2xlarge` | 8 | 32 GB | T4, 16 GB | 0.75 |
 | `g5.2xlarge` | 8 | 32 GB | A10G, 24 GB | 1.21 |
 | `g5.4xlarge` | 16 | 64 GB | A10G, 24 GB | 1.62 |
+| `g5.8xlarge` | 32 | 128 GB | A10G, 24 GB | 2.44 |
 
 EBS `gp3` is about $0.08/GB-month, so a 300 GB volume left running is roughly
 $24/month whether or not the instance is on. **Delete the volume, not just the
@@ -172,19 +253,34 @@ the 13.x line (§3).
 **cupy imports but sees no GPU** — you are on a non-GPU instance, or the driver
 is missing. `nvidia-smi` first; `bootstrap.sh` checks this for you.
 
-**OOM during registration.** Suite3D auto-clamps `gpu_reg_batchsize` to fit
-VRAM (`auto_adjust_batchsize=True`). If you still OOM, lower
-`gpu_mem_safety_factor` (default `0.8`) before touching anything else. Host-RAM
-OOM is a different problem: get a bigger instance.
+**OOM a couple of minutes in, at "Applying plane alignment shifts".** That is the
+**init pass**, and it is the most common way demo 02 dies. It holds every init
+tif in RAM at once, so lower `n_init_files` (§1) or get a bigger box. Nothing
+about registration or extraction is involved yet.
+
+**OOM during registration.** If it is *GPU* memory, Suite3D auto-clamps
+`gpu_reg_batchsize` to fit VRAM (`auto_adjust_batchsize=True`); if you still OOM,
+lower `gpu_mem_safety_factor` (default `0.8`) before touching anything else.
+Host-RAM OOM is a different problem: get a bigger instance.
+
+**OOM during the correlation map**, at *"Running batch 1 of N"* or *"Binning with
+timebin of size ..."*. Lower `t_batch_size` (§1) — but read the warning there
+first: it changes the correlation map, so re-baseline your ROI count.
+
+**OOM at the very end, after segmentation succeeded.** That is trace extraction.
+Lower `--extract-batch-gb` (or set `--extract-batch` to one on-disk chunk, 100
+volumes). Do not pick an arbitrary small number: a batch that straddles a chunk
+boundary costs more memory *and* more time than one aligned chunk.
 
 **Out of disk, mid-registration.** The registered movie is written next to the
 raw data. See §2. This is the most common way these runs fail.
 
 **napari errors over SSH** — use `--viewer none`.
 
-**Host-RAM OOM anywhere in demo 02.** Get a bigger box (§1). We have not
-characterised where its peak is, so do not assume it is the stage you happened
-to die in.
+**Host-RAM OOM in demo 02.** The two candidates are the init pass (~2 min in,
+*"Applying plane alignment shifts"*) and the correlation map. Read the log line
+you died on and turn the matching knob in §1; the peak is not wherever you
+happen to be looking.
 
 **`NameError: name 'psutil' is not defined`** during registration, in a container
 or a bare venv — you have a build of suite3d from before `psutil` was declared a

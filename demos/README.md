@@ -98,9 +98,49 @@ raw tifs — the same demo over a network mount took several times longer.
 | 02 LBM | 56.2 GB (13 tifs) | ~42 GB | **39m45s** (reg 10m36s) |
 | 03 hippocampus | 21.1 GB (10 tifs) | ~9 GB | **5m24s** (reg 2m12s) |
 
-Demo 02 is much heavier on memory than demos 01 and 03 — it is a 22-plane volume
-where they are 7 and 4. We do not quote a peak: the figures we had were measured
-through a code path the demos no longer take, and we have not re-measured.
+Peak RAM: demo 01 ~14 GiB, demo 03 ~8 GiB, **demo 02 ~114 GiB**.
+
+Demo 02 is far heavier than the other two — a 22-plane volume where they are 7
+and 4. Each stage was measured on its own; the ceiling is the **init pass**, with
+the correlation map a close second:
+
+| stage of demo 02 | peak RSS | knob |
+|---|---:|---|
+| init, `n_init_files=1` | 30.6 GiB | `n_init_files` |
+| init, `n_init_files=2` | 58.2 GiB | |
+| **init, `n_init_files=4` (shipped)** | **113.5 GiB** | |
+| correlation map, `t_batch_size=800` (shipped) | 85.5 GiB | `t_batch_size` |
+| correlation map, `t_batch_size=400` | 41.5 GiB | |
+| segmentation | 0.40 GB per patch × 48 | `patch_size_xy` |
+| neuropil masks | 12.2 GiB | — |
+| trace extraction, 100-volume batch | 22.4 GiB | `batchsize_frames` |
+
+Every one of those knobs counts **volumes or files, not bytes**, and the
+registered movie is float16 on disk but float32 in memory — so a 22-plane volume
+is 8× the bytes of demo 01's 7-plane one at the same batch size.
+
+Segmentation is never the ceiling: its patches are sliced lazily out of a dask
+array, so shrinking `patch_size_xy` buys nothing.
+
+**`n_init_files` and `t_batch_size` are scientific parameters, not resource
+dials.** `n_init_files` sets how much data the crosstalk coefficient is estimated
+from — and that coefficient is *subtracted from the movie*. `t_batch_size`
+changes the correlation map (see below). The demos therefore pin both to what the
+reference run used, and demo 02 wants ~128 GB of RAM as a result.
+
+If you have to fit a smaller machine, the escape hatches are on the command line,
+not in the parameters — `run_pipeline.py --n-init-files 2 --t-batch-size 400`
+fits 64 GB. Each prints a warning describing exactly what it changes about your
+results. That asymmetry is deliberate: you should have to ask for a different
+answer out loud.
+
+Trace extraction loads `batchsize_frames` volumes of the float32 registered
+movie and duplicates them into shared memory. The demos size that batch to a
+whole multiple of the movie's on-disk chunk (100 volumes) — a batch that
+straddles a chunk boundary forces dask to read two chunks, costing both more
+memory and more time than one aligned chunk. Tune it with `--extract-batch-gb`
+if you are tight on RAM; batches are independent, so it moves memory and nothing
+else.
 
 The results directory written by `export_results(..., make_viewer=True)` is
 ~360 MB for demo 01 and ~3.7 GB for demo 02.
@@ -159,4 +199,22 @@ same if you write your own.
 **Do not set `extend_thresh` or `min_frames`.** Both are accepted and both do
 nothing: neither reaches the segmentation code. The wired equivalent of
 `extend_thresh` is `vox_snr_thresh`.
+
+**`t_batch_size` is a scientific parameter, not a resource dial.** It looks like
+one — lower it, use less memory — and `batchsize_frames` really is one. But
+`t_batch_size` changes the correlation map two ways. The temporal high-pass
+window is clamped to the batch (`temporal_hpf = min(nb, temporal_hpf)`, on the
+*time-binned* length), so on demo 02 the configured `temporal_hpf=200` is only
+ever reached if `t_batch_size >= 1200`. And the movie is normalized by a
+*running* standard deviation accumulated across batches, so each batch's
+normalizer depends on how the movie was cut up. And `binned_mean_ax1` truncates
+each batch to a whole number of time bins, silently discarding up to
+`detection_timebin - 1` volumes *per batch*. Measured on demo 02: 800 vs 200
+gives vmap correlation 0.881; even with `temporal_hpf` pinned so the clamp never
+fires, 650 vs 325 gives 0.924.
+
+Detection then amplifies it. Going from `t_batch_size=800` to `400` leaves the
+correlation map 92% correlated and the number of suprathreshold voxels within
+0.3% — and changes the ROI count from **40,608 to 48,587 (+19.6%)**. Pick a
+value, keep it fixed for the whole study, and re-baseline if you ever change it.
 </content>
