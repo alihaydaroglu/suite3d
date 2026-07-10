@@ -160,7 +160,9 @@ existing memmap. Expect the extra ~11 min (subset 2) / ~55 min (subset 10), and
 see the `samples_*.npz` overwrite warning in §7.
 
 Replace `--subset 2` with `--subset 10` for the longer run — **except for the
-offline CNMF arm**, which does not fit in 64 GiB at that length (§7).
+offline CNMF arm**, which is OOM-killed in 64 GiB at that length (§7.4). Reference
+wall times at `--subset 10`, 8 vCPU: Suite3D 635 s total (on NVMe); CaImAn
+NoRMCorre 3417 s; OnACID `detection_online` 2126 s.
 
 ## 5. Parameters
 
@@ -217,12 +219,13 @@ Things that will bite you, roughly in the order you hit them.
 3. **Storage.** Suite3D registration is I/O-bound; a default gp3 root volume
    makes it ~2–5× slower. See §2. **This is the single easiest way to publish a
    wrong number.**
-4. **Offline CNMF does not fit in 64 GiB at `--subset 10`.** `detection_fit`
-   peaks at 42.7 GB with `--subset 2` (T = 444 volumes); memory scales with T, and
-   at `--subset 10` (T = 2220) a single float32 copy of `Y` is already ~21 GiB.
-   At the full 19 files it was reported OOM-killed at every `K` from 50 to 1000
-   and at both 1 and 8 workers. Only the OnACID and Suite3D arms scale to the
-   long run on the instances above.
+4. **Offline CNMF does not fit in 64 GiB at `--subset 10`.** Verified: `CNMF.fit`
+   on the `--subset 10` memmap (`T = 2220`, one float32 copy of `Y` = 19.5 GiB) is
+   OOM-killed — `anon-rss 62.6 GB`, exit 137. For reference `detection_fit` peaks
+   at 42.7 GB with `--subset 2` (`T = 444`), and memory scales with T. At the full
+   19 files it was reported OOM-killed at every `K` from 50 to 1000 and at both 1
+   and 8 workers. Only the OnACID and Suite3D arms scale to the long run on the
+   instances above.
 5. **Outputs are root-owned.** The containers run as root, so `results/` and
    `scratch/` fill with root-owned files. `sudo chown -R $USER results scratch`
    before you try to clean up or copy them.
@@ -251,9 +254,14 @@ Things that will bite you, roughly in the order you hit them.
    `run_caiman_register.py` has already registered: a full `MotionCorrect` on the
    `init_batch` frames, then a per-frame 3D rigid `register_translation_3d` on
    every streamed frame. You can see it on disk as
-   `tmp_mov_mot_corr_rig__..._frames_200.mmap`. **The `detection_online` wall time
-   is therefore not clean detection** — it includes a redundant registration pass.
-   Set `motion_correct: False` in the OnACID params if you want detection alone.
+   `tmp_mov_mot_corr_rig__..._frames_200.mmap`.
+
+   **The `detection_online` wall time is therefore not clean detection.** Rerunning
+   subset 2 on the identical memmap with `motion_correct` toggled (`r6a.2xlarge`):
+   564.8 s → **439.8 s**, i.e. **22 % of the phase is redundant MC**. The benchmark
+   double-counts motion correction. Set `motion_correct: False` in the OnACID
+   params dict if you want detection alone — or drop the NoRMCorre pre-pass and let
+   OnACID do its own MC. Do not do both.
 
 9. **CaImAn is silent for the first ~10 min** (subset 2) while it rewrites the
    TIFFs to single-channel 3D stacks under `scratch/preprocessed_tifs/`. It is
