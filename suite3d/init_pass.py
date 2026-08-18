@@ -167,7 +167,12 @@ def run_init_pass(job, structural=False):
 
     if job.params.get("fuse_strips", True):
         xs = jobio.load_roi_start_pix()[1]
-        if job.params.get("fuse_shift_override", None) is not None:
+        if len(n.unique(xs)) < 2:
+            job.log("Skipping strip fusion: fewer than two strip borders found")
+            fuse_shift = 0
+            fuse_shifts = None
+            fuse_ccs = None
+        elif job.params.get("fuse_shift_override", None) is not None:
             fuse_shift = int(job.params["fuse_shift_override"])
             fuse_shifts = None
             fuse_ccs = None

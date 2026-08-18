@@ -153,6 +153,7 @@ PARAM_SECTIONS = {
     # --- extraction: neuropil subtraction, trace extraction, deconvolution ---
     "batchsize_frames":             "extraction",
     "npil_coeff":                   "extraction",
+    "neuropil_mask_method":         "extraction",
     "npil_to_roi_npix_ratio":       "extraction",
     "min_npil_npix":                "extraction",
     "dcnv_baseline":                "extraction",
@@ -395,6 +396,7 @@ params = {
     # boundary makes dask read two chunks, costing more memory AND more time.
     "batchsize_frames": 500,
     "npil_coeff": 0.7,                  # neuropil subtraction coefficient
+    "neuropil_mask_method": "rectangular",  # "rectangular" keeps legacy behavior; "expanding" grows from the cell mask
     "npil_to_roi_npix_ratio": None,
     "min_npil_npix": 100,               # minimum neuropil pixels
     # Deconvolution (OASIS via suite2p)

@@ -14,5 +14,6 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "alabaster"
 html_title = "Suite3D documentation"
-html_static_path: list[str] = []
+html_static_path = ["_static"]
+html_css_files = ["custom.css"]
 html_extra_path = [".nojekyll"]

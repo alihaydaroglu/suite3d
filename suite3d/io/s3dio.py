@@ -217,6 +217,16 @@ class s3dio:
                 # Only keep a full volume of frames
                 tif_file = tif_file[:-extra_frames_expected]
 
+            if tif_file.ndim == 4 and tif_file.shape[1] == params["n_ch_tif"]:
+                # Some ScanImage exports are already grouped as
+                # (volumes, planes, y, x). Suite3D uses
+                # (planes, volumes, y, x) internally.
+                tif_file = n.swapaxes(tif_file, 0, 1)
+                if params["planes"] is not None:
+                    tif_file = tif_file[params["planes"]]
+                mov_list.append(tif_file)
+                continue
+
             if tif_file.ndim != 3:
                 raise ValueError(
                     f"tiff file is not 3D, expecting (num_frames_not_volume!, y-pixels, x-pixels), but it has shape {tif_file.shape}"

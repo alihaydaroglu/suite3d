@@ -8,4 +8,4 @@ if errorlevel 1 (
     exit /b 1
 )
 
-python "%~dp0suite3d\viewer\info_viewer_gui.py" --no-default %*
+python "%~dp0suite3d\viewer\info_viewer_gui.py" %*
