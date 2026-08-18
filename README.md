@@ -5,7 +5,8 @@ For an overview of the algorithms, [see our recent preprint](https://www.biorxiv
 
 **[suite3d.github.io](https://suite3d.github.io)** has runnable demos, 3D visualizations, and step-by-step tutorials.
 
-[Suite3D Viewer documentation](docs/gui.rst)
+To learn how to visualize results, post-curate the output, and filter cells
+from non-cells, read [Suite3D Viewer documentation](https://faezehrabbani.github.io/suite3d/gui.html).
 
 If you run into any kinks, please [open an issue](https://github.com/alihaydaroglu/suite3d/issues) and we'll be happy to help you get up and running.
 
