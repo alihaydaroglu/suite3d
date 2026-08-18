@@ -5,6 +5,8 @@ For an overview of the algorithms, [see our recent preprint](https://www.biorxiv
 
 **[suite3d.github.io](https://suite3d.github.io)** has runnable demos, 3D visualizations, and step-by-step tutorials.
 
+The generated HTML documentation is available at [`docs/_build/html/index.html`](docs/_build/html/index.html).
+
 If you run into any kinks, please [open an issue](https://github.com/alihaydaroglu/suite3d/issues) and we'll be happy to help you get up and running.
 
 ## Installation
