@@ -23,12 +23,12 @@ The command asks for a few paths and names:
 * ``--all`` tells Suite3D to run the main analysis stages instead of only
   creating or loading a job.
 
-For example, if ``job-dir`` is ``C:\Users\faezeh\suite3d\runs`` and ``job-id``
+For example, if ``job-dir`` is ``C:\example\suite3d-runs`` and ``job-id``
 is ``test1``, Suite3D creates this output folder:
 
 .. code-block:: console
 
-   C:\Users\faezeh\suite3d\runs\s3d-test1
+   C:\example\suite3d-runs\s3d-test1
 
 1. Activate the Suite3D conda environment:
 
@@ -47,7 +47,7 @@ is ``test1``, Suite3D creates this output folder:
 
    .. code-block:: console
 
-      C:\Users\faezeh\suite3d\runs
+      C:\example\suite3d-runs
 
 4. When prompted for the job ID, enter the ``job-id`` name for this analysis.
    For example:
@@ -60,21 +60,21 @@ is ``test1``, Suite3D creates this output folder:
 
    .. code-block:: console
 
-      C:\Users\faezeh\suite3d\runs\s3d-test1
+      C:\example\suite3d-runs\s3d-test1
 
 5. When prompted for the raw ScanImage TIFF folder, enter the ``tif-dir``
    directory that contains the TIFF files. For example:
 
    .. code-block:: console
 
-      D:\imaging\mouse01\session01\tiffs
+      C:\example\raw-tiffs\session01
 
 6. Choose which stages to run. To run the full non-GUI pipeline directly without
    prompts, pass all values on the command line:
 
    .. code-block:: console
 
-      suite3d-pipeline --job-dir C:\Users\faezeh\suite3d\runs --job-id test1 --tif-dir D:\imaging\mouse01\session01\tiffs --all
+      suite3d-pipeline --job-dir C:\example\suite3d-runs --job-id test1 --tif-dir C:\example\raw-tiffs\session01 --all
 
    The ``--all`` option runs initialization, registration, correlation-map
    calculation, and ROI segmentation.

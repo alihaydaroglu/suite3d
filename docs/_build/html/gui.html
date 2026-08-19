@@ -54,9 +54,9 @@ want to analyze.</p></li>
 <li><p><code class="docutils literal notranslate"><span class="pre">--all</span></code> tells Suite3D to run the main analysis stages instead of only
 creating or loading a job.</p></li>
 </ul>
-<p>For example, if <code class="docutils literal notranslate"><span class="pre">job-dir</span></code> is <code class="docutils literal notranslate"><span class="pre">C:\Users\faezeh\suite3d\runs</span></code> and <code class="docutils literal notranslate"><span class="pre">job-id</span></code>
+<p>For example, if <code class="docutils literal notranslate"><span class="pre">job-dir</span></code> is <code class="docutils literal notranslate"><span class="pre">C:\example\suite3d-runs</span></code> and <code class="docutils literal notranslate"><span class="pre">job-id</span></code>
 is <code class="docutils literal notranslate"><span class="pre">test1</span></code>, Suite3D creates this output folder:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\Users\faezeh\suite3d\runs\s3d-test1</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\example\suite3d-runs\s3d-test1</span>
 </pre></div>
 </div>
 <ol class="arabic">
@@ -72,7 +72,7 @@ is <code class="docutils literal notranslate"><span class="pre">test1</span></co
 </li>
 <li><p>When prompted for the base job directory, enter the <code class="docutils literal notranslate"><span class="pre">job-dir</span></code> folder where
 Suite3D should save the output. For example:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\Users\faezeh\suite3d\runs</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\example\suite3d-runs</span>
 </pre></div>
 </div>
 </li>
@@ -82,19 +82,19 @@ For example:</p>
 </pre></div>
 </div>
 <p>Suite3D will save the run in:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\Users\faezeh\suite3d\runs\s3d-test1</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\example\suite3d-runs\s3d-test1</span>
 </pre></div>
 </div>
 </li>
 <li><p>When prompted for the raw ScanImage TIFF folder, enter the <code class="docutils literal notranslate"><span class="pre">tif-dir</span></code>
 directory that contains the TIFF files. For example:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">D:\imaging\mouse01\session01\tiffs</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\example\raw-tiffs\session01</span>
 </pre></div>
 </div>
 </li>
 <li><p>Choose which stages to run. To run the full non-GUI pipeline directly without
 prompts, pass all values on the command line:</p>
-<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">suite3d-pipeline --job-dir C:\Users\faezeh\suite3d\runs --job-id test1 --tif-dir D:\imaging\mouse01\session01\tiffs --all</span>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">suite3d-pipeline --job-dir C:\example\suite3d-runs --job-id test1 --tif-dir C:\example\raw-tiffs\session01 --all</span>
 </pre></div>
 </div>
 <p>The <code class="docutils literal notranslate"><span class="pre">--all</span></code> option runs initialization, registration, correlation-map
