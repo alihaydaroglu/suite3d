@@ -6,6 +6,79 @@ ROI outputs, plus a separate portable HTML viewer that can be exported from a
 finished job. The desktop GUI is implemented in
 ``suite3d/viewer/info_viewer_gui.py``.
 
+Running Suite3D Without the GUI
+-------------------------------
+
+To analyze data from the command line instead of opening the GUI, use
+``suite3d-pipeline``.
+
+The command asks for a few paths and names:
+
+* ``job-dir`` is the base output folder. This is where Suite3D stores analysis
+  runs. You can choose any folder where you want the results to be saved.
+* ``job-id`` is a short name for one analysis run. Suite3D adds ``s3d-`` before
+  this name to create the final run folder.
+* ``tif-dir`` is the folder that contains the raw ScanImage TIFF files that you
+  want to analyze.
+* ``--all`` tells Suite3D to run the main analysis stages instead of only
+  creating or loading a job.
+
+For example, if ``job-dir`` is ``C:\Users\faezeh\suite3d\runs`` and ``job-id``
+is ``test1``, Suite3D creates this output folder:
+
+.. code-block:: console
+
+   C:\Users\faezeh\suite3d\runs\s3d-test1
+
+1. Activate the Suite3D conda environment:
+
+   .. code-block:: console
+
+      conda activate s3d
+
+2. Start the command-line pipeline:
+
+   .. code-block:: console
+
+      suite3d-pipeline
+
+3. When prompted for the base job directory, enter the ``job-dir`` folder where
+   Suite3D should save the output. For example:
+
+   .. code-block:: console
+
+      C:\Users\faezeh\suite3d\runs
+
+4. When prompted for the job ID, enter the ``job-id`` name for this analysis.
+   For example:
+
+   .. code-block:: console
+
+      test1
+
+   Suite3D will save the run in:
+
+   .. code-block:: console
+
+      C:\Users\faezeh\suite3d\runs\s3d-test1
+
+5. When prompted for the raw ScanImage TIFF folder, enter the ``tif-dir``
+   directory that contains the TIFF files. For example:
+
+   .. code-block:: console
+
+      D:\imaging\mouse01\session01\tiffs
+
+6. Choose which stages to run. To run the full non-GUI pipeline directly without
+   prompts, pass all values on the command line:
+
+   .. code-block:: console
+
+      suite3d-pipeline --job-dir C:\Users\faezeh\suite3d\runs --job-id test1 --tif-dir D:\imaging\mouse01\session01\tiffs --all
+
+   The ``--all`` option runs initialization, registration, correlation-map
+   calculation, and ROI segmentation.
+
 Starting the GUI
 ----------------
 
