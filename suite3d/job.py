@@ -1193,7 +1193,14 @@ class Job:
         stats = n.load(os.path.join(stats_dir, "stats.npy"), allow_pickle=True)
         nz, ny, nx = info["vmap"].shape
         n.save(os.path.join(stats_dir, "stats_small.npy"), stats)
-        stats = ext.compute_npil_masks_mp(stats, (nz, ny, nx), n_proc=self.params["n_proc_corr"])
+        neuropil_mask_method = self.params.get("neuropil_mask_method", "rectangular")
+        self.log("Computing neuropil masks with %s method" % neuropil_mask_method, 2)
+        stats = ext.compute_npil_masks_mp(
+            stats,
+            (nz, ny, nx),
+            n_proc=self.params["n_proc_corr"],
+            npil_pars={"neuropil_mask_method": neuropil_mask_method},
+        )
         n.save(os.path.join(stats_dir, "stats.npy"), stats)
         return stats_dir
 

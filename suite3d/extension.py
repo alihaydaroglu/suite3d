@@ -739,6 +739,58 @@ def extend_helper(vv_roi, vv_ring, extend_v, nv, v_max_extension=None):
     return n.arange(v_absmin, v_absmax)
 
 
+def dilate_mask(mask, extend_by):
+    extend_by = tuple(max(0, int(v)) for v in extend_by)
+    size = tuple(2 * v + 1 for v in extend_by)
+    return maximum_filter(mask.astype(n.uint8), size=size) > 0
+
+
+def get_neuropil_mask_cell_expansion(
+    stat,
+    cell_pix,
+    min_neuropil_pixels=1000,
+    extend_by=(1, 3, 3),
+    z_max_extension=5,
+    max_np_ext_iters=5,
+    return_coords_only=False,
+    np_ring_iterations=2,
+):
+    zz_roi, yy_roi, xx_roi = stat["coords"]
+    nz, ny, nx = cell_pix.shape
+
+    zz_ring, yy_ring, xx_ring = extend_roi3d_iter(
+        zz_roi, yy_roi, xx_roi, cell_pix.shape, np_ring_iterations
+    )
+    ring_mask = n.zeros((nz, ny, nx), dtype=bool)
+    ring_mask[zz_ring, yy_ring, xx_ring] = True
+
+    grown_mask = ring_mask.copy()
+    z_allowed = n.zeros(nz, dtype=bool)
+    if z_max_extension is None:
+        z_min = 0
+        z_max = nz
+    else:
+        z_min = max(0, int(n.min(zz_roi)) - int(z_max_extension))
+        z_max = min(nz, int(n.max(zz_roi)) + int(z_max_extension) + 1)
+    z_allowed[z_min:z_max] = True
+
+    neuropil_mask = n.zeros((nz, ny, nx), dtype=bool)
+    iter_idx = 0
+    n_np_pix = 0
+    while n_np_pix < min_neuropil_pixels and iter_idx < max_np_ext_iters:
+        grown_mask = dilate_mask(grown_mask, extend_by)
+        grown_mask &= z_allowed[:, None, None]
+        neuropil_mask = grown_mask & ~ring_mask & ~cell_pix
+        n_np_pix = int(neuropil_mask.sum())
+        iter_idx += 1
+
+    if return_coords_only:
+        zz_np, yy_np, xx_np = n.nonzero(grown_mask)
+        return zz_np, yy_np, xx_np, zz_ring, yy_ring, xx_ring
+
+    return n.nonzero(neuropil_mask)
+
+
 def create_cell_pix(
     stats, shape, lam_percentile=70.0, percentile_filter_shape=(3, 25, 25)
 ):
@@ -768,7 +820,25 @@ def get_neuropil_mask(
     max_np_ext_iters=5,
     return_coords_only=False,
     np_ring_iterations=2,
+    neuropil_mask_method="rectangular",
 ):
+    method = str(neuropil_mask_method).lower()
+    if method in ("expanding", "cell_expansion", "cell-expansion", "dilate", "dilation"):
+        return get_neuropil_mask_cell_expansion(
+            stat,
+            cell_pix,
+            min_neuropil_pixels=min_neuropil_pixels,
+            extend_by=extend_by,
+            z_max_extension=z_max_extension,
+            max_np_ext_iters=max_np_ext_iters,
+            return_coords_only=return_coords_only,
+            np_ring_iterations=np_ring_iterations,
+        )
+    if method not in ("rectangular", "rectangle", "default"):
+        raise ValueError(
+            "Unknown neuropil_mask_method %r. Use 'rectangular' or 'expanding'."
+            % neuropil_mask_method
+        )
 
     zz_roi, yy_roi, xx_roi = stat["coords"]
     zz_ring, yy_ring, xx_ring = extend_roi3d_iter(

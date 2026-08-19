@@ -1,0 +1,92 @@
+:root {
+  --page-bg: #efe3d6;
+  --panel-bg: #efe3d6;
+  --text-main: #1e293b;
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --border: #d3bca8;
+  --code-bg: #f5eadf;
+}
+
+body {
+  background: var(--page-bg);
+  color: var(--text-main);
+}
+
+div.body {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+a {
+  color: var(--accent);
+}
+
+a:hover {
+  color: var(--accent-strong);
+}
+
+div.sphinxsidebar a,
+div.sphinxsidebar h3,
+div.sphinxsidebar h4,
+div.sphinxsidebar p,
+div.sphinxsidebar li {
+  color: var(--text-main);
+}
+
+div.sphinxsidebar {
+  background: var(--panel-bg);
+  border-right: 1px solid var(--border);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--text-main);
+}
+
+h1 {
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 12px;
+  margin-bottom: 20px;
+}
+
+h2 {
+  margin-top: 30px;
+  padding-top: 8px;
+}
+
+p,
+li {
+  color: var(--text-main);
+}
+
+code,
+div.highlight {
+  background: var(--code-bg);
+}
+
+div.highlight,
+pre {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+div.admonition,
+blockquote {
+  background: #f3e7db;
+  border-left: 4px solid var(--accent);
+}
+
+table.docutils {
+  border-color: var(--border);
+}
+
+table.docutils th {
+  background: #e8d7c7;
+}
