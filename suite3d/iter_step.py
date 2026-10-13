@@ -24,6 +24,82 @@ except ImportError:
     import numpy as cp
 
 
+def _batch_tifs_text(tifs):
+    try:
+        return ", ".join(str(tif) for tif in tifs)
+    except TypeError:
+        return str(tifs)
+
+
+def _start_io_thread(jobio, tifs, batch_idx, loaded_movs, load_errors, log_cb, structural=False):
+    loaded_movs[0] = None
+    load_errors[0] = None
+
+    def io_thread_loader():
+        tic_thread = time.time()
+        try:
+            log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
+            log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
+            loaded_mov = jobio.load_data(tifs, structural=structural)
+            loaded_movs[0] = loaded_mov
+            log_cb(
+                "[Thread] Thread for batch %d ready to join after %2.2f sec \n"
+                % (batch_idx, time.time() - tic_thread),
+                5,
+            )
+            log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
+        except Exception:
+            tb = traceback.format_exc()
+            load_errors[0] = (batch_idx, _batch_tifs_text(tifs), tb)
+            loaded_movs[0] = None
+            log_cb(
+                "[Thread] Error loading batch %d from %s:\n%s"
+                % (batch_idx, _batch_tifs_text(tifs), tb),
+                0,
+            )
+
+    io_thread = threading.Thread(target=io_thread_loader)
+    io_thread.start()
+    return io_thread
+
+
+def _take_loaded_movie(jobio, tifs, batch_idx, loaded_movs, load_errors, log_cb, structural=False):
+    if load_errors[0] is not None:
+        err_batch_idx, err_tifs, err_tb = load_errors[0]
+        log_cb(
+            "Retrying batch %d synchronously after IO-thread load failed." % err_batch_idx,
+            0,
+        )
+        try:
+            loaded_mov = jobio.load_data(tifs, structural=structural)
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to load batch %d from %s.\nOriginal IO-thread traceback:\n%s"
+                % (err_batch_idx, err_tifs, err_tb)
+            ) from exc
+    else:
+        loaded_mov = loaded_movs[0]
+
+    loaded_movs[0] = None
+    load_errors[0] = None
+
+    if not hasattr(loaded_mov, "shape") or getattr(loaded_mov, "ndim", 0) != 4:
+        raise RuntimeError(
+            "Loaded batch %d from %s has invalid shape %s; expected "
+            "(planes, frames, y, x)."
+            % (batch_idx, _batch_tifs_text(tifs), getattr(loaded_mov, "shape", None))
+        )
+    return loaded_mov
+
+
+def _free_gpu_memory_pool():
+    try:
+        cp.get_default_memory_pool().free_all_blocks()
+        cp.get_default_pinned_memory_pool().free_all_blocks()
+    except Exception:
+        pass
+
+
 # Empirical GPU memory model for the 3D registration path. Calibrated on
 # the NaJi-GCaMP6sVS-ED FACED memo (RTX A4500, 20 GB) — see
 # dev/coordination/rebuttal.md "Nonrigid 3D GPU memory characterization"
@@ -397,24 +473,13 @@ def register_dataset_gpu_from_existing_shifts(
     if enforce_positivity:
         log_cb("Enforcing positivity", 1)
 
-    loaded_movs = [n.zeros(1)]
-
-    def io_thread_loader(tifs, batch_idx):
-        tic_thread = time.time()
-        log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
-        log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_mov = jobio.load_data(tifs, structural=structural)
-        loaded_movs[0] = loaded_mov
-        log_cb(
-            "[Thread] Thread for batch %d ready to join after %2.2f sec \n"
-            % (batch_idx, time.time() - tic_thread),
-            5,
-        )
-        log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
+    loaded_movs = [None]
+    load_errors = [None]
 
     log_cb("Launching IO thread")
-    io_thread = threading.Thread(target=io_thread_loader, args=(batches[0], 0))
-    io_thread.start()
+    io_thread = _start_io_thread(
+        jobio, batches[0], 0, loaded_movs, load_errors, log_cb, structural=structural
+    )
 
     file_idx = 0
     for batch_idx in range(n_batches):
@@ -429,18 +494,24 @@ def register_dataset_gpu_from_existing_shifts(
         log_cb("Batch %d IO thread joined" % (batch_idx))
         log_cb("Memory after IO thread join", level=3, log_mem_usage=True)
 
-        mov_cpu = loaded_movs[0].copy()
-        log_cb("Memory after movie copied from thread", level=3, log_mem_usage=True)
-        loaded_movs[0] = n.zeros(1)
+        mov_cpu = _take_loaded_movie(
+            jobio, batches[batch_idx], batch_idx, loaded_movs, load_errors, log_cb, structural=structural
+        )
+        log_cb("Memory after movie moved from thread", level=3, log_mem_usage=True)
         gc.collect()
         log_cb("Memory after thread memory cleared", level=3, log_mem_usage=True)
 
         if batch_idx + 1 < n_batches:
             log_cb("Launching IO thread for next batch")
-            io_thread = threading.Thread(
-                target=io_thread_loader, args=(batches[batch_idx + 1], batch_idx + 1)
+            io_thread = _start_io_thread(
+                jobio,
+                batches[batch_idx + 1],
+                batch_idx + 1,
+                loaded_movs,
+                load_errors,
+                log_cb,
+                structural=structural,
             )
-            io_thread.start()
             log_cb("After IO thread launch:", level=3, log_mem_usage=True)
         nt = mov_cpu.shape[1]
         mov_shifted = []
@@ -658,24 +729,11 @@ def register_dataset_gpu(
     if enforce_positivity:
         log_cb("Enforcing positivity", 1)
 
-    loaded_movs = [n.zeros(1)]
-
-    def io_thread_loader(tifs, batch_idx):
-        tic_thread = time.time()
-        log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
-        log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_mov = jobio.load_data(tifs)
-        loaded_movs[0] = loaded_mov
-        log_cb(
-            "[Thread] Thread for batch %d ready to join after %2.2f sec \n"
-            % (batch_idx, time.time() - tic_thread),
-            5,
-        )
-        log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
+    loaded_movs = [None]
+    load_errors = [None]
 
     log_cb("Launching IO thread")
-    io_thread = threading.Thread(target=io_thread_loader, args=(batches[0], 0))
-    io_thread.start()
+    io_thread = _start_io_thread(jobio, batches[0], 0, loaded_movs, load_errors, log_cb)
 
     file_idx = 0
     for batch_idx in range(n_batches):
@@ -686,18 +744,16 @@ def register_dataset_gpu(
         log_cb("Batch %d IO thread joined" % (batch_idx))
         log_cb("Memory after IO thread join", level=3, log_mem_usage=True)
 
-        mov_cpu = loaded_movs[0].copy()
-        log_cb("Memory after movie copied from thread", level=3, log_mem_usage=True)
-        loaded_movs[0] = n.zeros(1)
+        mov_cpu = _take_loaded_movie(jobio, batches[batch_idx], batch_idx, loaded_movs, load_errors, log_cb)
+        log_cb("Memory after movie moved from thread", level=3, log_mem_usage=True)
         gc.collect()
         log_cb("Memory after thread memory cleared", level=3, log_mem_usage=True)
 
         if batch_idx + 1 < n_batches:
             log_cb("Launching IO thread for next batch")
-            io_thread = threading.Thread(
-                target=io_thread_loader, args=(batches[batch_idx + 1], batch_idx + 1)
+            io_thread = _start_io_thread(
+                jobio, batches[batch_idx + 1], batch_idx + 1, loaded_movs, load_errors, log_cb
             )
-            io_thread.start()
             log_cb("After IO thread launch:", level=3, log_mem_usage=True)
         nt = mov_cpu.shape[1]
         ymaxs_rr = []
@@ -988,26 +1044,18 @@ def register_dataset_s2p(
         job_iter_dir, job_reg_data_dir, n_batches, makedirs=False, filename="offsets"
     )
 
-    loaded_movs = [0]
-
-    def io_thread_loader(tifs, batch_idx):
-        log_cb("   [Thread] Loading batch %d \n" % batch_idx, 5)
-        log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_mov = jobio.load_data(tifs)
-        # loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif,fix_fastZ=fix_fastZ,
-        #                                         convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb,
-        #                                         lbm=params.get('lbm', True), num_colors=params.get('num_colors', None),
-        #                                         functional_color_channel=params.get('functional_color_channel', None))
-        log_cb("   [Thread] Loaded batch %d \n" % batch_idx, 5)
-        log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_movs[0] = loaded_mov
-        log_cb("   [Thread] Thread for batch %d ready to join \n" % batch_idx, 5)
+    loaded_movs = [None]
+    load_errors = [None]
 
     log_cb("Launching IO thread")
-    io_thread = threading.Thread(
-        target=io_thread_loader, args=(batches[start_batch_idx], start_batch_idx)
+    io_thread = _start_io_thread(
+        jobio,
+        batches[start_batch_idx],
+        start_batch_idx,
+        loaded_movs,
+        load_errors,
+        log_cb,
     )
-    io_thread.start()
 
     file_idx = 0
     for batch_idx in range(start_batch_idx, n_batches):
@@ -1019,6 +1067,9 @@ def register_dataset_s2p(
             io_thread.join()
             log_cb("Batch %d IO thread joined" % (batch_idx))
             log_cb("After IO thread join", level=3, log_mem_usage=True)
+            loaded_movs[0] = _take_loaded_movie(
+                jobio, batches[batch_idx], batch_idx, loaded_movs, load_errors, log_cb
+            )
             if enforce_positivity:
                 # print(loaded_movs[0].shape)
                 # print(min_pix_vals.shape)
@@ -1036,10 +1087,14 @@ def register_dataset_s2p(
             log_cb("After Sharr creation:", level=3, log_mem_usage=True)
             if batch_idx + 1 < n_batches:
                 log_cb("Launching IO thread for next batch")
-                io_thread = threading.Thread(
-                    target=io_thread_loader, args=(batches[batch_idx + 1], batch_idx + 1)
+                io_thread = _start_io_thread(
+                    jobio,
+                    batches[batch_idx + 1],
+                    batch_idx + 1,
+                    loaded_movs,
+                    load_errors,
+                    log_cb,
                 )
-                io_thread.start()
                 log_cb("After IO thread launch:", level=3, log_mem_usage=True)
             log_cb("Registering Batch %d" % batch_idx, 1)
 
@@ -1276,28 +1331,11 @@ def register_dataset_gpu_3d(
     if enforce_positivity:
         log_cb("Enforcing positivity", 1)
 
-    loaded_movs = [n.zeros(1)]
-
-    def io_thread_loader(tifs, batch_idx):
-        tic_thread = time.time()
-        log_cb("[Thread] Loading batch %d \n" % batch_idx, 5)
-        log_cb("   [Thread] Before load %d \n" % batch_idx, 5, log_mem_usage=True)
-        loaded_mov = jobio.load_data(tifs)
-        # loaded_mov = lbmio.load_and_stitch_tifs(tifs, planes, filt = notch_filt, concat=True,n_ch=n_ch_tif, fix_fastZ=fix_fastZ,
-        #                                         convert_plane_ids_to_channel_ids=convert_plane_ids_to_channel_ids, log_cb=log_cb)
-        loaded_movs[0] = loaded_mov
-        log_cb(
-            "[Thread] Thread for batch %d ready to join after %2.2f sec \n"
-            % (batch_idx, time.time() - tic_thread),
-            5,
-        )
-        log_cb("   [Thread] After load %d \n" % batch_idx, 5, log_mem_usage=True)
-        # log_cb("loaded mov: ")
-        # log_cb(str(loaded_mov.shape))
+    loaded_movs = [None]
+    load_errors = [None]
 
     log_cb("Launching IO thread")
-    io_thread = threading.Thread(target=io_thread_loader, args=(batches[0], 0))
-    io_thread.start()
+    io_thread = _start_io_thread(jobio, batches[0], 0, loaded_movs, load_errors, log_cb)
 
     file_idx = 0
     for batch_idx in range(n_batches):
@@ -1308,18 +1346,16 @@ def register_dataset_gpu_3d(
         log_cb("Batch %d IO thread joined" % (batch_idx))
         log_cb("Memory after IO thread join", level=3, log_mem_usage=True)
 
-        mov_cpu = loaded_movs[0].copy()
-        log_cb("Memory after movie copied from thread", level=3, log_mem_usage=True)
-        loaded_movs[0] = n.zeros(1)
+        mov_cpu = _take_loaded_movie(jobio, batches[batch_idx], batch_idx, loaded_movs, load_errors, log_cb)
+        log_cb("Memory after movie moved from thread", level=3, log_mem_usage=True)
         gc.collect()
         log_cb("Memory after thread memory cleared", level=3, log_mem_usage=True)
 
         if batch_idx + 1 < n_batches:
             log_cb("Launching IO thread for next batch")
-            io_thread = threading.Thread(
-                target=io_thread_loader, args=(batches[batch_idx + 1], batch_idx + 1)
+            io_thread = _start_io_thread(
+                jobio, batches[batch_idx + 1], batch_idx + 1, loaded_movs, load_errors, log_cb
             )
-            io_thread.start()
             log_cb("After IO thread launch:", level=3, log_mem_usage=True)
         nt = mov_cpu.shape[1]
         # Change to new kept info
@@ -1479,6 +1515,23 @@ def register_dataset_gpu_3d(
         n.save(offset_path, all_offsets)
 
         log_cb("After full batch saving:", level=3, log_mem_usage=True)
+        mov_cpu = None
+        mov_shifted = None
+        mov_save = None
+        all_offsets = None
+        phase_corr_shifted = None
+        int_shift = None
+        pc_peak_loc = None
+        sub_pixel_shifts = None
+        if nonrigid:
+            zshifts_nr = None
+            yshifts_nr = None
+            xshifts_nr = None
+            snrs_nr = None
+            nonrigid_phase_corrs = None
+        _free_gpu_memory_pool()
+        gc.collect()
+        log_cb("After 3D batch cleanup:", level=3, log_mem_usage=True)
 
     _log_rigid_saturation_diagnostic(job_reg_data_dir, pc_size, log_cb,
                                      apply_z_shift=apply_z_shift)

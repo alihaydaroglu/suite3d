@@ -3,6 +3,7 @@ import numpy as n
 import time
 from ..developer import todo, deprecated_inputs
 from .lbmio import (
+    arrange_lbm_planes_for_analysis,
     load_and_stitch_full_tif_mp,
     convert_lbm_plane_to_channel,
     get_roi_start_pix,
@@ -228,6 +229,14 @@ class s3dio:
                 continue
 
             if tif_file.ndim != 3:
+                if tif_file.ndim == 4 and params.get("num_colors", 1) == 1:
+                    raise ValueError(
+                        "tiff file is 4D and appears to include an extra "
+                        f"channel/color axis with shape {tif_file.shape}. "
+                        "Set num_colors to the number of recorded channels "
+                        "and choose functional_color_channel; only that "
+                        "channel will be analyzed."
+                    )
                 raise ValueError(
                     f"tiff file is not 3D, expecting (num_frames_not_volume!, y-pixels, x-pixels), but it has shape {tif_file.shape}"
                 )
@@ -291,6 +300,16 @@ class s3dio:
             print("Structural detection not implemented for LBM data!")
             return None
 
+        params = params.copy()
+        planes = params["planes"]
+        params["planes"] = arrange_lbm_planes_for_analysis(
+            planes,
+            two_cavity=(
+                len(planes) > params.get("cavity_size", 15)
+                if planes is not None
+                else None
+            ),
+        )
         n_ch_tif = params.get("n_ch_tif", 30)
         if n_ch_tif == 30 and params.get("convert_plane_ids_to_channel_ids", True):
             channels = convert_lbm_plane_to_channel(params["planes"])

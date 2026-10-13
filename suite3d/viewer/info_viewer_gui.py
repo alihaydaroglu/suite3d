@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import csv
+import datetime
+import gc
 import json
 import re
 import sys
@@ -11,6 +14,7 @@ import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -26,6 +30,7 @@ from PyQt5.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QScrollArea,
     QShortcut,
     QToolTip,
@@ -41,12 +46,27 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backend_bases import MouseButton
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import FuncFormatter, MaxNLocator
+
+from suite3d.io.lbmio import (
+    arrange_lbm_planes_for_analysis,
+    infer_lbm_cavity_size_from_planes,
+    lbm_plane_metadata,
+)
+from suite3d.viewer.raw_tiff import (
+    RawTiffMovie,
+    apply_xy_shifts_to_planes,
+    estimate_plane_xy_shifts,
+    percentile_images_by_plane,
+)
 
 
 DISPLAY_KEYS = ("max_img", "mean_img", "vmap", "vmap_raw")
 RECORDING_DISPLAY_KEY = "registered movie"
+RAW_TIFF_DISPLAY_KEY = "raw TIFF"
+RAW_TIFF_REGISTERED_P99_DISPLAY_KEY = "raw TIFF registered p99"
 BLACK_DISPLAY_KEY = "Black"
+NONRIGID_DISPLAY_KEY = "nonrigid shift map"
 TRACE_FILES = {
     "F": "F.npy",
     "Fneu": "Fneu.npy",
@@ -60,6 +80,9 @@ PANEL_BG = "#5a5a5a"
 PLOT_BG = "#6a6a6a"
 TEXT_FG = "#f2f2f2"
 GRID_FG = "#d8d8d8"
+RAW_SPOT_SEARCH_RADIUS_UM = 25.0
+RAW_SPOT_DETECTION_SNR = 5.0
+RAW_SPOT_CENTROID_RADIUS_PX = 2
 
 
 class Suite3DAnalysisWorker(QThread):
@@ -69,50 +92,68 @@ class Suite3DAnalysisWorker(QThread):
 
     def __init__(
         self,
-        tif_dir: Path,
+        tif_paths: list[Path],
         output_dir: Path,
         job_id: str,
         params: dict,
         overwrite: bool,
         test_batch_only: bool,
+        stop_after_registration: bool = False,
+        resume_after_registration: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
-        self.tif_dir = tif_dir
+        self.tif_paths = [Path(tif_path) for tif_path in tif_paths]
         self.output_dir = output_dir
         self.job_id = job_id
         self.params = params
         self.overwrite = overwrite
         self.test_batch_only = test_batch_only
+        self.stop_after_registration = stop_after_registration
+        self.resume_after_registration = resume_after_registration
 
     def run(self) -> None:
         try:
-            from suite3d import io
             from suite3d.job import Job
 
             self.progress_changed.emit(2, "Finding TIFF files")
-            tifs = io.get_tif_paths(self.tif_dir)
+            tifs = [str(tif_path) for tif_path in self.tif_paths]
             if not tifs:
-                raise RuntimeError(f"No TIFF files found in {self.tif_dir}")
-            tifs = [str(Path(tif)) for tif in tifs]
+                raise RuntimeError("No TIFF files were selected for analysis.")
+            self.log_message.emit(f"Found {len(tifs)} TIFF file(s) for analysis.")
             if self.test_batch_only:
                 tifs = tifs[:1]
                 self.log_message.emit("Test batch: using only the first TIFF file.")
 
             self.output_dir.mkdir(parents=True, exist_ok=True)
-            self.progress_changed.emit(5, "Creating Suite3D job")
-            job = Job(
-                self.output_dir,
-                self.job_id,
-                params=self.params,
-                tifs=tifs,
-                overwrite=self.overwrite,
-                verbosity=10,
-            )
+            if self.resume_after_registration:
+                self.progress_changed.emit(5, "Loading Suite3D job")
+                job = Job(
+                    self.output_dir,
+                    self.job_id,
+                    params=self.params,
+                    tifs=tifs,
+                    overwrite=False,
+                    create=False,
+                    verbosity=10,
+                )
+                job.params.update(self.params)
+                job.tifs = tifs
+            else:
+                self.progress_changed.emit(5, "Creating Suite3D job")
+                job = Job(
+                    self.output_dir,
+                    self.job_id,
+                    params=self.params,
+                    tifs=tifs,
+                    overwrite=self.overwrite,
+                    verbosity=10,
+                )
             original_log = job.log
 
             def gui_log(message="", level=1, logfile=True, log_mem_usage=False, tic=False, toc=False, **kwargs):
-                self.log_message.emit(str(message))
+                if level <= job.verbosity:
+                    self.log_message.emit(str(message))
                 return original_log(
                     message,
                     level=level,
@@ -125,19 +166,36 @@ class Suite3DAnalysisWorker(QThread):
 
             job.log = gui_log
 
-            stages = [
-                ("Initialization", 10, 22, job.run_init_pass),
-                ("Registration", 22, 45, job.register),
-                ("Correlation map", 45, 65, self.run_corrmap_stage(job)),
-                ("ROI segmentation", 65, 78, job.segment_rois),
-                ("Neuropil masks", 78, 87, job.compute_npil_masks),
-                ("Trace extraction/deconvolution", 87, 98, self.run_extraction_stage(job)),
-            ]
+            if self.resume_after_registration:
+                stages = [
+                    ("Correlation map", 45, 65, self.run_corrmap_stage(job)),
+                    ("ROI segmentation", 65, 78, job.segment_rois),
+                    ("Neuropil masks", 78, 87, job.compute_npil_masks),
+                    ("Trace extraction/deconvolution", 87, 98, self.run_extraction_stage(job)),
+                ]
+            else:
+                stages = [
+                    ("Initialization", 10, 22, job.run_init_pass),
+                    ("Registration", 22, 45, job.register),
+                ]
+                if not self.stop_after_registration:
+                    stages.extend(
+                        [
+                            ("Correlation map", 45, 65, self.run_corrmap_stage(job)),
+                            ("ROI segmentation", 65, 78, job.segment_rois),
+                            ("Neuropil masks", 78, 87, job.compute_npil_masks),
+                            ("Trace extraction/deconvolution", 87, 98, self.run_extraction_stage(job)),
+                        ]
+                    )
             for stage_name, start_pct, end_pct, stage_func in stages:
                 self.progress_changed.emit(start_pct, stage_name)
                 self.log_message.emit(f"Starting {stage_name}")
                 stage_func()
                 self.progress_changed.emit(end_pct, f"Finished {stage_name}")
+
+            if self.stop_after_registration and not self.resume_after_registration:
+                self.finished_with_status.emit(True, "Registration review ready", str(Path(job.dirs["job_dir"])))
+                return
 
             rois_info = Path(job.dirs.get("rois", "")) / "info.npy"
             self.progress_changed.emit(100, "Analysis complete")
@@ -161,6 +219,71 @@ class Suite3DAnalysisWorker(QThread):
             job.extract_and_deconvolve(n_frames=n_frames)
 
         return _run
+
+
+class RawTiffPlaneRegistrationWorker(QThread):
+    progress_changed = pyqtSignal(str)
+    finished_with_result = pyqtSignal(bool, str, object)
+
+    def __init__(
+        self,
+        tif_path: Path,
+        reference_plane: int | None = None,
+        upsample_factor: int = 10,
+        max_shift_px: int = 100,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.tif_path = Path(tif_path)
+        self.reference_plane = reference_plane
+        self.upsample_factor = int(upsample_factor)
+        self.max_shift_px = int(max_shift_px)
+
+    def run(self) -> None:
+        movie = None
+        try:
+            movie = RawTiffMovie(self.tif_path, cache_size=2)
+            nz, nt, _ny, _nx = movie.shape
+            labels = [movie.plane_label(plane) for plane in range(int(nz))]
+
+            def progress(plane: int, frame_count: int) -> None:
+                if frame_count == 1 or frame_count == int(nt) or frame_count % 25 == 0:
+                    self.progress_changed.emit(
+                        f"99th percentile projection: plane {plane + 1}/{int(nz)}, "
+                        f"frame {frame_count}/{int(nt)}"
+                    )
+
+            p99_images = percentile_images_by_plane(
+                movie,
+                percentile=99.0,
+                progress_callback=progress,
+            )
+            self.progress_changed.emit("Estimating cross-correlation shifts")
+            shifts, errors, reference_plane = estimate_plane_xy_shifts(
+                p99_images,
+                reference_plane=self.reference_plane,
+                upsample_factor=self.upsample_factor,
+                max_shift_px=self.max_shift_px,
+            )
+            registered_p99_images = apply_xy_shifts_to_planes(p99_images, shifts)
+            self.finished_with_result.emit(
+                True,
+                "Plane registration complete",
+                {
+                    "p99_images": p99_images,
+                    "registered_p99_images": registered_p99_images,
+                    "shifts": shifts,
+                    "errors": errors,
+                    "reference_plane": int(reference_plane),
+                    "labels": labels,
+                    "path": self.tif_path,
+                },
+            )
+        except Exception as exc:
+            self.finished_with_result.emit(False, f"{type(exc).__name__}: {exc}", None)
+        finally:
+            if movie is not None:
+                movie.close()
 
 
 class Roi3DWindow(QDialog):
@@ -658,7 +781,9 @@ class Roi3DWindow(QDialog):
         try:
             x_span = max(float(x.max() - x.min()), 1.0)
             y_span = max(float(y.max() - y.min()), 1.0)
-            z_span = max(float(z.max() - z.min()), min(x_span, y_span) * 0.65, 1.0)
+            xy_span = max(x_span, y_span, 1.0)
+            z_span = max(float(z.max() - z.min()), 1.0)
+            z_span = min(z_span, xy_span * 0.45)
             ax.set_box_aspect(
                 (
                     x_span,
@@ -690,6 +815,8 @@ class InfoViewer(QMainWindow):
         self.roi_colorbar_label: str | None = None
         self.roi_colorbar_cmap_name = "coolwarm"
         self.roi_colorbar_center_zero = False
+        self.display_orientation = "XY"
+        self.voxel_size_um: tuple[float, float, float] | None = None
         self.roi_metrics: dict[str, np.ndarray] = {}
         self.curation_controls: dict[str, dict[str, object]] = {}
         self.curation_metric_checkboxes: dict[str, QCheckBox] = {}
@@ -705,6 +832,9 @@ class InfoViewer(QMainWindow):
         self.image_axes: list[object] = []
         self.image_axes_panels: dict[object, bool] = {}
         self.image_axes_roles: dict[object, str] = {}
+        self.image_axes_planes: dict[object, int | None] = {}
+        self.multi_plane_selected_planes: set[int] = set()
+        self.current_plane_tiles: dict[int, tuple[int, int, int, int]] = {}
         self.selected_roi_idx: int | None = None
         self.selected_panel_accepted = True
         self.selected_mask_kind = "roi"
@@ -728,6 +858,16 @@ class InfoViewer(QMainWindow):
         self.recording_frame_starts: np.ndarray | None = None
         self.recording_shape: tuple[int, int, int] | None = None
         self.recording_chunk_cache: tuple[int, np.ndarray] | None = None
+        self.raw_tiff_movie: RawTiffMovie | None = None
+        self.raw_tiff_path: Path | None = None
+        self.raw_spot_points_px: dict[int, tuple[float, float]] = {}
+        self.raw_spot_frame: int | None = None
+        self.raw_plane_registration_worker: RawTiffPlaneRegistrationWorker | None = None
+        self.raw_plane_registration_result: dict[str, object] | None = None
+        self.raw_plane_ids: list[int] | None = None
+        self.cavity_labels: list[str] | None = None
+        self.nonrigid_shift_map: np.ndarray | None = None
+        self.analysis_review_job_dir: Path | None = None
         self.plane_timer: QTimer | None = None
         self.frame_timer: QTimer | None = None
         self.analysis_worker: Suite3DAnalysisWorker | None = None
@@ -803,12 +943,18 @@ class InfoViewer(QMainWindow):
         self.open_button.clicked.connect(self.open_directory_dialog)
         self.open_file_button = QPushButton("Open info.npy")
         self.open_file_button.clicked.connect(self.open_file_dialog)
+        self.open_raw_tiff_file_button = QPushButton("Open raw TIFF file")
+        self.open_raw_tiff_file_button.clicked.connect(self.open_raw_tiff_file_dialog)
+        self.open_raw_tiff_button = QPushButton("Open raw TIFF folder")
+        self.open_raw_tiff_button.clicked.connect(self.open_raw_tiff_dialog)
         self.analyze_data_button = QPushButton("Analyze data")
         self.analyze_data_button.clicked.connect(self.show_analysis_dialog)
         self.file_label = QLabel("No file loaded")
         self.file_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         file_row.addWidget(self.open_button)
         file_row.addWidget(self.open_file_button)
+        file_row.addWidget(self.open_raw_tiff_file_button)
+        file_row.addWidget(self.open_raw_tiff_button)
         file_row.addWidget(self.analyze_data_button)
         file_row.addWidget(self.file_label, stretch=1)
         root.addLayout(file_row)
@@ -831,6 +977,12 @@ class InfoViewer(QMainWindow):
         self.projection_label = QLabel("Projection")
         controls_layout.addWidget(self.projection_label, 0, 3)
         controls_layout.addWidget(self.projection_combo, 0, 4)
+
+        self.orientation_combo = QComboBox()
+        self.orientation_combo.addItems(["XY", "XZ"])
+        self.orientation_combo.currentTextChanged.connect(self.on_orientation_changed)
+        controls_layout.addWidget(QLabel("View"), 0, 5)
+        controls_layout.addWidget(self.orientation_combo, 0, 6)
 
         self.roi_color_combo = QComboBox()
         self.roi_color_combo.addItems(
@@ -875,6 +1027,13 @@ class InfoViewer(QMainWindow):
         controls_layout.addWidget(self.plane_label, 2, 0)
         controls_layout.addWidget(self.plane_play_button, 2, 1)
         controls_layout.addWidget(self.plane_slider, 2, 2, 1, 5)
+        self.multi_plane_checkbox = QCheckBox("Show selected planes")
+        self.multi_plane_checkbox.stateChanged.connect(self.on_multi_plane_toggled)
+        self.multi_plane_button = QPushButton("Select planes")
+        self.multi_plane_button.clicked.connect(self.open_plane_selection_dialog)
+        self.multi_plane_button.setEnabled(False)
+        controls_layout.addWidget(self.multi_plane_checkbox, 2, 7)
+        controls_layout.addWidget(self.multi_plane_button, 2, 8)
 
         self.frame_slider = QSlider(Qt.Horizontal)
         self.frame_slider.setMinimum(0)
@@ -886,9 +1045,17 @@ class InfoViewer(QMainWindow):
         self.frame_play_button.clicked.connect(self.toggle_frame_play)
         self.frame_play_button.setEnabled(False)
         self.frame_label = QLabel("Frame: -")
+        self.frame_spinbox = QSpinBox()
+        self.frame_spinbox.setMinimum(0)
+        self.frame_spinbox.setMaximum(0)
+        self.frame_spinbox.setKeyboardTracking(False)
+        self.frame_spinbox.setEnabled(False)
+        self.frame_spinbox.setToolTip("Jump to frame index")
+        self.frame_spinbox.valueChanged.connect(self.on_frame_spinbox_changed)
         controls_layout.addWidget(self.frame_label, 3, 0)
         controls_layout.addWidget(self.frame_play_button, 3, 1)
-        controls_layout.addWidget(self.frame_slider, 3, 2, 1, 5)
+        controls_layout.addWidget(self.frame_spinbox, 3, 2)
+        controls_layout.addWidget(self.frame_slider, 3, 3, 1, 6)
 
         self.zoom_selected_button = QPushButton("Zoom selected ROI")
         self.zoom_selected_button.clicked.connect(self.zoom_to_selected_roi)
@@ -901,6 +1068,22 @@ class InfoViewer(QMainWindow):
         self.show_3d_button = QPushButton("Show selected ROI in 3D")
         self.show_3d_button.clicked.connect(self.show_selected_roi_3d)
         controls_layout.addWidget(self.show_3d_button, 4, 2)
+
+        self.pick_raw_spot_button = QPushButton("Pick spot")
+        self.pick_raw_spot_button.setCheckable(True)
+        self.pick_raw_spot_button.toggled.connect(self.on_pick_raw_spot_toggled)
+        self.pick_raw_spot_button.setEnabled(False)
+        controls_layout.addWidget(self.pick_raw_spot_button, 4, 3)
+
+        self.plot_raw_spot_button = QPushButton("Plot x/y displacement")
+        self.plot_raw_spot_button.clicked.connect(self.plot_raw_spot_displacement)
+        self.plot_raw_spot_button.setEnabled(False)
+        controls_layout.addWidget(self.plot_raw_spot_button, 4, 4)
+
+        self.register_raw_planes_button = QPushButton("Register planes (XCorr)")
+        self.register_raw_planes_button.clicked.connect(self.start_raw_plane_registration)
+        self.register_raw_planes_button.setEnabled(False)
+        controls_layout.addWidget(self.register_raw_planes_button, 4, 5)
 
         root.addWidget(controls)
 
@@ -915,9 +1098,9 @@ class InfoViewer(QMainWindow):
         self.canvas.mpl_connect("scroll_event", self.on_scroll_zoom)
 
         image_row = QHBoxLayout()
-        image_row.addWidget(self.canvas, stretch=5)
+        image_row.addWidget(self.canvas, stretch=7)
         self.curation_group = self.build_curation_panel()
-        image_row.addWidget(self.curation_group, stretch=2)
+        image_row.addWidget(self.curation_group, stretch=1)
         root.addLayout(image_row, stretch=5)
 
         self.status_label = QLabel("")
@@ -973,6 +1156,14 @@ class InfoViewer(QMainWindow):
         self.prev_roi_shortcut.activated.connect(lambda: self.navigate_selected_roi(-1))
         self.next_roi_shortcut = QShortcut(QKeySequence(Qt.Key_Right), self)
         self.next_roi_shortcut.activated.connect(lambda: self.navigate_selected_roi(1))
+        self.prev_plane_shortcut = QShortcut(QKeySequence(Qt.Key_Down), self)
+        self.prev_plane_shortcut.activated.connect(lambda: self.step_plane(-1))
+        self.next_plane_shortcut = QShortcut(QKeySequence(Qt.Key_Up), self)
+        self.next_plane_shortcut.activated.connect(lambda: self.step_plane(1))
+        self.xz_view_shortcut = QShortcut(QKeySequence("Shift+Z"), self)
+        self.xz_view_shortcut.activated.connect(lambda: self.set_orientation_mode("XZ"))
+        self.xy_view_shortcut = QShortcut(QKeySequence("Shift+Y"), self)
+        self.xy_view_shortcut.activated.connect(lambda: self.set_orientation_mode("XY"))
 
         self.analysis_dialog: QDialog | None = None
 
@@ -996,20 +1187,33 @@ class InfoViewer(QMainWindow):
         paths_layout = QGridLayout(paths_group)
 
         self.analysis_tif_dir_edit = QLineEdit()
-        self.analysis_tif_dir_edit.setPlaceholderText("Directory containing raw 2P TIFF files")
-        tif_browse = QPushButton("Browse")
-        tif_browse.clicked.connect(self.browse_analysis_tif_dir)
-        paths_layout.addWidget(QLabel("2P TIFF directory"), 0, 0)
+        self.analysis_tif_dir_edit.setPlaceholderText("TIFF files/folders; separate multiple paths with ;")
+        self.analysis_tif_dir_edit.editingFinished.connect(self.refresh_analysis_metadata)
+        tif_file_browse = QPushButton("Add files")
+        tif_file_browse.clicked.connect(self.browse_analysis_tif_files)
+        tif_folder_browse = QPushButton("Add folder")
+        tif_folder_browse.clicked.connect(self.browse_analysis_tif_dir)
+        paths_layout.addWidget(QLabel("2P TIFF inputs"), 0, 0)
         paths_layout.addWidget(self.analysis_tif_dir_edit, 0, 1)
-        paths_layout.addWidget(tif_browse, 0, 2)
+        paths_layout.addWidget(tif_file_browse, 0, 2)
+        paths_layout.addWidget(tif_folder_browse, 0, 3)
+
+        self.analysis_look_one_level_down_checkbox = QCheckBox("Look one level down")
+        self.analysis_look_one_level_down_checkbox.setToolTip(
+            "Also use TIFF files in direct child folders of each selected folder, matching Suite2p's look_one_level_down behavior."
+        )
+        self.analysis_look_one_level_down_checkbox.stateChanged.connect(self.refresh_analysis_metadata)
+        self.analysis_tif_count_label = QLabel("TIFFs: choose input")
+        paths_layout.addWidget(self.analysis_look_one_level_down_checkbox, 1, 1)
+        paths_layout.addWidget(self.analysis_tif_count_label, 1, 2, 1, 2)
 
         self.analysis_output_dir_edit = QLineEdit()
         self.analysis_output_dir_edit.setPlaceholderText("Directory where the Suite3D job folder will be saved")
         output_browse = QPushButton("Browse")
         output_browse.clicked.connect(self.browse_analysis_output_dir)
-        paths_layout.addWidget(QLabel("Saving directory"), 1, 0)
-        paths_layout.addWidget(self.analysis_output_dir_edit, 1, 1)
-        paths_layout.addWidget(output_browse, 1, 2)
+        paths_layout.addWidget(QLabel("Saving directory"), 2, 0)
+        paths_layout.addWidget(self.analysis_output_dir_edit, 2, 1)
+        paths_layout.addWidget(output_browse, 2, 2, 1, 2)
 
         layout.addWidget(paths_group)
 
@@ -1020,6 +1224,11 @@ class InfoViewer(QMainWindow):
             "Uses the first TIFF, runs one correlation-map batch, and limits extraction to t_batch_size frames."
         )
         options_layout.addWidget(self.analysis_test_batch_checkbox, 0, 0)
+        self.analysis_review_registration_checkbox = QCheckBox("Review after registration")
+        self.analysis_review_registration_checkbox.setToolTip(
+            "Pause after image registration, load the registered movie in the viewer, then continue or rerun."
+        )
+        options_layout.addWidget(self.analysis_review_registration_checkbox, 0, 1)
         layout.addWidget(options_group)
 
         params_group = QGroupBox("Suite3D parameter overrides")
@@ -1051,7 +1260,9 @@ class InfoViewer(QMainWindow):
         params_layout.addWidget(self.analysis_xy_voxel_label, 1, 2, 1, 4)
 
         self.analysis_planes_edit = QLineEdit("")
-        self.analysis_planes_edit.setPlaceholderText("Blank = all planes; example: 0, 1, 2")
+        self.analysis_planes_edit.setPlaceholderText(
+            "Blank = auto; LBM z order is 0,2,4,... then 1,3,5,..."
+        )
         params_layout.addWidget(QLabel("planes"), 2, 0)
         params_layout.addWidget(self.analysis_planes_edit, 2, 1, 1, 5)
 
@@ -1061,20 +1272,55 @@ class InfoViewer(QMainWindow):
         params_layout.addWidget(QLabel("n_ch_tif"), 3, 0)
         params_layout.addWidget(self.analysis_n_ch_tif_spin, 3, 1)
 
-        self.analysis_lbm_checkbox = QCheckBox("lbm")
-        self.analysis_lbm_checkbox.setChecked(True)
+        self.analysis_num_colors_spin = QSpinBox()
+        self.analysis_num_colors_spin.setRange(1, 20)
+        self.analysis_num_colors_spin.setValue(1)
+        self.analysis_num_colors_spin.valueChanged.connect(self.update_functional_channel_range)
+        params_layout.addWidget(QLabel("num_colors"), 3, 2)
+        params_layout.addWidget(self.analysis_num_colors_spin, 3, 3)
+        self.analysis_functional_channel_spin = QSpinBox()
+        self.analysis_functional_channel_spin.setRange(0, 0)
+        self.analysis_functional_channel_spin.setValue(0)
+        params_layout.addWidget(QLabel("functional channel"), 3, 4)
+        params_layout.addWidget(self.analysis_functional_channel_spin, 3, 5)
+
+        self.analysis_lbm_radio = QRadioButton("LBM")
+        self.analysis_2p_radio = QRadioButton("2P")
+        self.analysis_lbm_radio.setChecked(True)
+        self.analysis_lbm_radio.toggled.connect(self.on_analysis_mode_changed)
+        self.analysis_2p_radio.toggled.connect(self.on_analysis_mode_changed)
+        self.analysis_mode_group = QButtonGroup(self)
+        self.analysis_mode_group.addButton(self.analysis_lbm_radio)
+        self.analysis_mode_group.addButton(self.analysis_2p_radio)
+        self.analysis_cavity_count_label = QLabel("cavities")
+        self.analysis_cavity_count_combo = QComboBox()
+        self.analysis_cavity_count_combo.addItem("Select...", None)
+        self.analysis_cavity_count_combo.addItem("1", 1)
+        self.analysis_cavity_count_combo.addItem("2", 2)
+        self.analysis_cavity_count_combo.setToolTip(
+            "Required. For two cavities, Suite3D uses cavity A first "
+            "(even raw channels 0,2,4,...) followed by cavity B "
+            "(odd raw channels 1,3,5,...)."
+        )
         self.analysis_3d_reg_checkbox = QCheckBox("3d_reg")
         self.analysis_3d_reg_checkbox.setChecked(True)
         self.analysis_gpu_reg_checkbox = QCheckBox("gpu_reg")
         self.analysis_gpu_reg_checkbox.setChecked(True)
-        params_layout.addWidget(self.analysis_lbm_checkbox, 3, 2)
-        params_layout.addWidget(self.analysis_3d_reg_checkbox, 3, 3)
-        params_layout.addWidget(self.analysis_gpu_reg_checkbox, 3, 4)
+        self.analysis_nonrigid_checkbox = QCheckBox("nonrigid")
+        self.analysis_nonrigid_checkbox.setChecked(True)
+        params_layout.addWidget(QLabel("mode"), 4, 0)
+        params_layout.addWidget(self.analysis_lbm_radio, 4, 1)
+        params_layout.addWidget(self.analysis_2p_radio, 4, 2)
+        params_layout.addWidget(self.analysis_cavity_count_label, 4, 3)
+        params_layout.addWidget(self.analysis_cavity_count_combo, 4, 4)
+        params_layout.addWidget(self.analysis_3d_reg_checkbox, 5, 0)
+        params_layout.addWidget(self.analysis_gpu_reg_checkbox, 5, 1)
+        params_layout.addWidget(self.analysis_nonrigid_checkbox, 5, 2)
 
         self.analysis_neuropil_mask_method_combo = QComboBox()
         self.analysis_neuropil_mask_method_combo.addItems(["rectangular", "expanding"])
-        params_layout.addWidget(QLabel("neuropil_mask_method"), 4, 0)
-        params_layout.addWidget(self.analysis_neuropil_mask_method_combo, 4, 1, 1, 5)
+        params_layout.addWidget(QLabel("neuropil_mask_method"), 6, 0)
+        params_layout.addWidget(self.analysis_neuropil_mask_method_combo, 6, 1, 1, 5)
 
         layout.addWidget(params_group)
 
@@ -1094,44 +1340,248 @@ class InfoViewer(QMainWindow):
 
         run_row = QHBoxLayout()
         run_row.addStretch(1)
+        self.analysis_continue_button = QPushButton("Accept registration and continue")
+        self.analysis_continue_button.clicked.connect(self.continue_analysis_after_registration)
+        self.analysis_continue_button.setEnabled(False)
+        run_row.addWidget(self.analysis_continue_button)
+        self.analysis_rerun_registration_button = QPushButton("Rerun registration")
+        self.analysis_rerun_registration_button.clicked.connect(self.rerun_registration_review)
+        self.analysis_rerun_registration_button.setEnabled(False)
+        run_row.addWidget(self.analysis_rerun_registration_button)
         self.analysis_run_button = QPushButton("Run analysis")
         self.analysis_run_button.clicked.connect(self.start_analysis)
         run_row.addWidget(self.analysis_run_button)
         layout.addLayout(run_row)
+        self.update_analysis_mode_controls()
         dialog.resize(900, 720)
         return dialog
 
     def browse_analysis_tif_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "Select 2P TIFF directory")
         if directory:
-            self.analysis_tif_dir_edit.setText(directory)
+            self.append_analysis_input_paths([directory])
+            self.refresh_analysis_metadata()
+
+    def browse_analysis_tif_files(self) -> None:
+        filenames, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select 2P TIFF files",
+            "",
+            "TIFF files (*.tif *.tiff);;All files (*.*)",
+        )
+        if filenames:
+            self.append_analysis_input_paths(filenames)
+            self.refresh_analysis_metadata()
+
+    def append_analysis_input_paths(self, paths: list[str]) -> None:
+        current_paths = [
+            part.strip()
+            for part in self.analysis_tif_dir_edit.text().split(";")
+            if part.strip()
+        ]
+        for path in paths:
+            if path not in current_paths:
+                current_paths.append(path)
+        self.analysis_tif_dir_edit.setText("; ".join(current_paths))
 
     def browse_analysis_output_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "Select saving directory")
         if directory:
             self.analysis_output_dir_edit.setText(directory)
 
-    def first_analysis_tif(self, tif_dir: Path) -> Path:
+    def analysis_input_paths(self) -> list[Path]:
+        text = self.analysis_tif_dir_edit.text().strip()
+        if not text:
+            return []
+        paths = []
+        for part in text.split(";"):
+            part = part.strip().strip('"')
+            if part:
+                paths.append(Path(part).expanduser())
+        return paths
+
+    def analysis_look_one_level_down(self) -> bool:
+        checkbox = getattr(self, "analysis_look_one_level_down_checkbox", None)
+        return bool(checkbox is not None and checkbox.isChecked())
+
+    def analysis_tif_paths(self, validate: bool = False) -> list[Path]:
         from suite3d import io
 
-        tifs = io.get_tif_paths(tif_dir)
-        if not tifs:
-            raise ValueError(f"No TIFF files found in {tif_dir}.")
+        input_paths = self.analysis_input_paths()
+        if validate and not input_paths:
+            raise ValueError("Choose one or more TIFF files or folders.")
+        invalid_paths = [path for path in input_paths if not path.exists()]
+        if validate and invalid_paths:
+            invalid_text = "; ".join(str(path) for path in invalid_paths[:3])
+            if len(invalid_paths) > 3:
+                invalid_text += f"; and {len(invalid_paths) - 3} more"
+            raise ValueError(f"These TIFF inputs do not exist: {invalid_text}")
+
+        tifs = io.get_tif_paths(
+            input_paths,
+            look_one_level_down=self.analysis_look_one_level_down(),
+            natsort=True,
+        )
+        if validate and not tifs:
+            raise ValueError("No TIFF files found in the selected inputs.")
+        return [Path(tif) for tif in tifs]
+
+    def update_analysis_tif_count_label(self, tif_paths: list[Path]) -> None:
+        if not hasattr(self, "analysis_tif_count_label"):
+            return
+        if tif_paths:
+            self.analysis_tif_count_label.setText(f"TIFFs: {len(tif_paths)}")
+        elif self.analysis_input_paths():
+            self.analysis_tif_count_label.setText("TIFFs: none found")
+        else:
+            self.analysis_tif_count_label.setText("TIFFs: choose input")
+
+    def first_analysis_tif(self) -> Path:
+        tifs = self.analysis_tif_paths(validate=True)
         return Path(tifs[0])
 
-    def load_first_analysis_tif_metadata(self, tif_dir: Path) -> tuple[str, dict, Path]:
+    def load_first_analysis_tif_metadata(self) -> tuple[str, dict, Path]:
         import tifffile
 
-        tif_path = self.first_analysis_tif(tif_dir)
+        tif_path = self.first_analysis_tif()
         with tifffile.TiffFile(tif_path) as tif:
             page = tif.pages[0]
             software = page.tags["Software"].value
             artist = json.loads(page.tags["Artist"].value)
         return str(software), artist, tif_path
 
-    def infer_analysis_fs(self, tif_dir: Path) -> float:
+    def load_first_analysis_tif_series_info(self) -> tuple[tuple[int, ...], str]:
+        import tifffile
+
+        tif_path = self.first_analysis_tif()
+        with tifffile.TiffFile(tif_path) as tif:
+            series = tif.series[0]
+            shape = tuple(int(v) for v in series.shape)
+            axes = str(getattr(series, "axes", ""))
+        return shape, axes
+
+    @staticmethod
+    def scanimage_items(value) -> list:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
+
+    def update_functional_channel_range(self, _value: int | None = None) -> None:
+        n_colors = max(1, int(self.analysis_num_colors_spin.value()))
+        current = int(self.analysis_functional_channel_spin.value())
+        self.analysis_functional_channel_spin.setRange(0, n_colors - 1)
+        self.analysis_functional_channel_spin.setValue(min(current, n_colors - 1))
+
+    def on_analysis_mode_changed(self, _checked: bool = False) -> None:
+        self.update_analysis_mode_controls()
+        if self.analysis_input_paths():
+            self.refresh_analysis_metadata()
+
+    def update_analysis_mode_controls(self) -> None:
+        if not hasattr(self, "analysis_lbm_radio"):
+            return
+        lbm = self.analysis_lbm_radio.isChecked()
+        self.analysis_cavity_count_label.setVisible(lbm)
+        self.analysis_cavity_count_combo.setVisible(lbm)
+        self.analysis_cavity_count_combo.setEnabled(lbm)
+        if not lbm:
+            self.analysis_cavity_count_combo.setCurrentIndex(0)
+
+    @staticmethod
+    def is_two_cavity_lbm_channel_count(n_ch_tif: int) -> bool:
+        return n_ch_tif > 15 and n_ch_tif % 2 == 0
+
+    def analysis_cavity_count(self, lbm: bool) -> int:
+        if not lbm:
+            return 1
+        value = self.analysis_cavity_count_combo.currentData()
+        if value is None:
+            raise ValueError("Enter the number of cavities before running analysis.")
+        cavity_count = int(value)
+        if cavity_count not in (1, 2):
+            raise ValueError("Number of cavities must be 1 or 2.")
+        return cavity_count
+
+    def default_analysis_planes(
+        self,
+        n_ch_tif: int,
+        lbm: bool,
+        cavity_count: int,
+    ) -> list[int]:
+        planes = list(range(n_ch_tif))
+        if not lbm or cavity_count != 2:
+            return planes
+        return arrange_lbm_planes_for_analysis(planes, two_cavity=True)
+
+    @staticmethod
+    def is_even_then_odd_plane_order(planes: list[int]) -> bool:
+        if len(planes) <= 1 or len(planes) % 2 != 0:
+            return False
+        half = len(planes) // 2
+        return all(plane % 2 == 0 for plane in planes[:half]) and all(
+            plane % 2 == 1 for plane in planes[half:]
+        )
+
+    def infer_lbm_cavity_size(
+        self,
+        planes: list[int],
+        lbm: bool,
+        cavity_count: int,
+    ) -> int:
+        if lbm:
+            return infer_lbm_cavity_size_from_planes(
+                planes,
+                two_cavity=cavity_count == 2,
+            )
+        return 15
+
+    def refresh_analysis_metadata(self) -> None:
+        if not self.analysis_input_paths():
+            return
+        tif_paths = self.analysis_tif_paths()
+        self.update_analysis_tif_count_label(tif_paths)
+        if not tif_paths:
+            return
+        n_ch_tif = self.infer_analysis_n_ch_tif()
+        if n_ch_tif is not None and self.analysis_n_ch_tif_spin.value() == 1:
+            self.analysis_n_ch_tif_spin.setValue(n_ch_tif)
+        n_colors = self.infer_analysis_num_colors()
+        if n_colors > self.analysis_num_colors_spin.maximum():
+            self.analysis_num_colors_spin.setMaximum(n_colors)
+        self.analysis_num_colors_spin.setValue(n_colors)
+        self.update_functional_channel_range()
+        self.analysis_functional_channel_spin.setValue(0)
+        self.infer_analysis_fs()
         try:
-            software, _artist, _tif_path = self.load_first_analysis_tif_metadata(tif_dir)
+            self.infer_analysis_xy_voxel_size_um()
+        except ValueError:
+            pass
+        z_step_um = self.infer_analysis_z_step_um()
+        if z_step_um is not None:
+            self.analysis_voxel_z_spin.setValue(z_step_um)
+
+    def infer_analysis_num_colors(self) -> int:
+        try:
+            if self.analysis_lbm_radio.isChecked():
+                return 1
+            shape, axes = self.load_first_analysis_tif_series_info()
+            if "C" in axes:
+                n_colors = shape[axes.index("C")]
+            elif len(shape) == 4:
+                n_colors = shape[1]
+            else:
+                n_colors = 1
+            if n_colors < 1:
+                n_colors = 1
+            return int(n_colors)
+        except Exception:
+            return 1
+
+    def infer_analysis_fs(self) -> float:
+        try:
+            software, _artist, _tif_path = self.load_first_analysis_tif_metadata()
             fs = self.scanimage_number_from_software(software, "SI.hRoiManager.scanVolumeRate")
             if fs is None:
                 fs = self.scanimage_number_from_software(software, "SI.hRoiManager.scanFrameRate")
@@ -1144,9 +1594,40 @@ class InfoViewer(QMainWindow):
             self.analysis_fs_label.setText(f"fs: using fallback {fallback:.5g} Hz")
             return fallback
 
-    def infer_analysis_xy_voxel_size_um(self, tif_dir: Path) -> tuple[float, float]:
+    def infer_analysis_n_ch_tif(self) -> int | None:
         try:
-            software, artist, _tif_path = self.load_first_analysis_tif_metadata(tif_dir)
+            software, _artist, _tif_path = self.load_first_analysis_tif_metadata()
+            n_ch_tif = self.scanimage_number_from_software(software, "SI.hStackManager.numFramesPerVolume")
+            if n_ch_tif is None:
+                frame_rate = self.scanimage_number_from_software(software, "SI.hRoiManager.scanFrameRate")
+                volume_rate = self.scanimage_number_from_software(software, "SI.hRoiManager.scanVolumeRate")
+                if frame_rate is not None and volume_rate is not None and volume_rate > 0:
+                    n_ch_tif = round(frame_rate / volume_rate)
+            if self.analysis_lbm_radio.isChecked():
+                shape, axes = self.load_first_analysis_tif_series_info()
+                if "C" in axes and shape[axes.index("C")] > 1:
+                    n_ch_tif = shape[axes.index("C")]
+                elif len(shape) == 4 and shape[1] > 1:
+                    n_ch_tif = shape[1]
+            if n_ch_tif is None or not np.isfinite(n_ch_tif) or n_ch_tif < 1:
+                return None
+            return int(round(n_ch_tif))
+        except Exception:
+            return None
+
+    def infer_analysis_z_step_um(self) -> float | None:
+        try:
+            software, _artist, _tif_path = self.load_first_analysis_tif_metadata()
+            z_step_um = self.scanimage_number_from_software(software, "SI.hStackManager.stackZStepSize")
+            if z_step_um is None or not np.isfinite(z_step_um) or z_step_um <= 0:
+                return None
+            return float(z_step_um)
+        except Exception:
+            return None
+
+    def infer_analysis_xy_voxel_size_um(self) -> tuple[float, float]:
+        try:
+            software, artist, _tif_path = self.load_first_analysis_tif_metadata()
 
             objective_resolution = self.scanimage_number_from_software(
                 software,
@@ -1155,10 +1636,14 @@ class InfoViewer(QMainWindow):
             if objective_resolution is None:
                 raise ValueError("ScanImage metadata does not contain SI.objectiveResolution.")
 
-            rois = artist["RoiGroups"]["imagingRoiGroup"]["rois"]
+            rois = self.scanimage_items(artist["RoiGroups"]["imagingRoiGroup"]["rois"])
             xy_values = []
             for roi in rois:
-                for scanfield in roi.get("scanfields", []):
+                if not isinstance(roi, dict):
+                    continue
+                for scanfield in self.scanimage_items(roi.get("scanfields", [])):
+                    if not isinstance(scanfield, dict):
+                        continue
                     size_xy = scanfield.get("sizeXY")
                     pix_xy = scanfield.get("pixelResolutionXY")
                     if size_xy is None or pix_xy is None:
@@ -1183,13 +1668,30 @@ class InfoViewer(QMainWindow):
     def scanimage_number_from_software(self, software: str, key: str) -> float | None:
         for line in str(software).splitlines():
             if line.startswith(key):
-                match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", line)
+                value_text = line.split("=", 1)[1] if "=" in line else line
+                match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", value_text)
                 if match:
                     return float(match.group(0))
         return None
 
     def parse_analysis_params(self) -> dict:
         n_ch_tif = int(self.analysis_n_ch_tif_spin.value())
+        lbm = self.analysis_lbm_radio.isChecked()
+        cavity_count = self.analysis_cavity_count(lbm)
+        num_colors = 1 if lbm else int(self.analysis_num_colors_spin.value())
+        if lbm and self.analysis_num_colors_spin.value() != 1:
+            self.analysis_num_colors_spin.setValue(1)
+            self.update_functional_channel_range()
+            self.analysis_functional_channel_spin.setValue(0)
+        functional_color_channel = int(self.analysis_functional_channel_spin.value())
+        if functional_color_channel < 0 or functional_color_channel >= num_colors:
+            raise ValueError(
+                "functional channel must be between 0 and num_colors - 1."
+            )
+        inferred_n_ch_tif = self.infer_analysis_n_ch_tif()
+        if n_ch_tif == 1 and inferred_n_ch_tif is not None and inferred_n_ch_tif > 1:
+            n_ch_tif = inferred_n_ch_tif
+            self.analysis_n_ch_tif_spin.setValue(n_ch_tif)
         planes_text = self.analysis_planes_edit.text().strip()
         if planes_text:
             try:
@@ -1199,13 +1701,36 @@ class InfoViewer(QMainWindow):
             if not planes:
                 raise ValueError("Enter at least one plane or leave planes blank for all planes.")
         else:
-            planes = list(range(n_ch_tif))
+            planes = self.default_analysis_planes(n_ch_tif, lbm, cavity_count)
 
-        tif_dir = Path(self.analysis_tif_dir_edit.text().strip()).expanduser()
-        fs = self.infer_analysis_fs(tif_dir)
-        y_um, x_um = self.infer_analysis_xy_voxel_size_um(tif_dir)
-        lbm = self.analysis_lbm_checkbox.isChecked()
-        cavity_size = 15
+        fs = self.infer_analysis_fs()
+        y_um, x_um = self.infer_analysis_xy_voxel_size_um()
+        if not lbm and not planes_text and len(planes) > 1:
+            planes = planes[:-1]
+        lbm_two_cavity = cavity_count == 2
+        if lbm:
+            planes = arrange_lbm_planes_for_analysis(
+                planes,
+                two_cavity=lbm_two_cavity,
+            )
+            if cavity_count == 2 and (
+                not any(plane % 2 == 0 for plane in planes)
+                or not any(plane % 2 == 1 for plane in planes)
+            ):
+                raise ValueError(
+                    "Two-cavity LBM analysis needs both even raw channels "
+                    "(cavity A) and odd raw channels (cavity B)."
+                )
+            if planes_text:
+                self.analysis_planes_edit.setText(", ".join(str(plane) for plane in planes))
+        cavity_size = (
+            infer_lbm_cavity_size_from_planes(
+                planes,
+                two_cavity=lbm_two_cavity,
+            )
+            if lbm
+            else self.infer_lbm_cavity_size(planes, lbm, cavity_count)
+        )
         subtract_crosstalk = bool(lbm and len(planes) > cavity_size)
 
         return {
@@ -1218,29 +1743,77 @@ class InfoViewer(QMainWindow):
             ),
             "planes": planes,
             "n_ch_tif": n_ch_tif,
+            "num_colors": num_colors,
+            "functional_color_channel": functional_color_channel,
+            "process_structural_channel": False,
             "lbm": lbm,
+            "num_cavities": cavity_count,
             "faced": False,
+            "convert_plane_ids_to_channel_ids": False,
             "3d_reg": self.analysis_3d_reg_checkbox.isChecked(),
             "gpu_reg": self.analysis_gpu_reg_checkbox.isChecked(),
+            "nonrigid": self.analysis_nonrigid_checkbox.isChecked(),
             "cavity_size": cavity_size,
             "subtract_crosstalk": subtract_crosstalk,
-            "fuse_strips": True,
+            "fuse_strips": lbm,
             "neuropil_mask_method": self.analysis_neuropil_mask_method_combo.currentText(),
         }
 
     def start_analysis(self) -> None:
+        self.start_analysis_worker(
+            stop_after_registration=self.analysis_review_registration_checkbox.isChecked(),
+            resume_after_registration=False,
+            overwrite=True,
+            clear_log=True,
+        )
+
+    def continue_analysis_after_registration(self) -> None:
+        if self.analysis_review_job_dir is None:
+            QMessageBox.information(self, "No registration to continue", "Run registration review first.")
+            return
+        self.start_analysis_worker(
+            stop_after_registration=False,
+            resume_after_registration=True,
+            overwrite=False,
+            clear_log=False,
+        )
+
+    def rerun_registration_review(self) -> None:
+        self.start_analysis_worker(
+            stop_after_registration=True,
+            resume_after_registration=False,
+            overwrite=True,
+            clear_log=False,
+        )
+
+    def start_analysis_worker(
+        self,
+        stop_after_registration: bool,
+        resume_after_registration: bool,
+        overwrite: bool,
+        clear_log: bool,
+    ) -> None:
         if self.analysis_worker is not None and self.analysis_worker.isRunning():
             QMessageBox.information(self, "Analysis running", "An analysis is already running.")
             return
 
-        tif_dir_text = self.analysis_tif_dir_edit.text().strip()
+        if overwrite and not resume_after_registration:
+            self.release_recording_files()
+
         output_dir_text = self.analysis_output_dir_edit.text().strip()
-        tif_dir = Path(tif_dir_text).expanduser()
         output_dir = Path(output_dir_text).expanduser()
-        job_id = "gui-analysis"
-        if not tif_dir.exists() or not tif_dir.is_dir():
-            QMessageBox.warning(self, "Invalid TIFF directory", "Choose a directory containing 2P TIFF files.")
+        job_id = self.next_analysis_job_id(output_dir)
+        if resume_after_registration and self.analysis_review_job_dir is not None:
+            output_dir = self.analysis_review_job_dir.parent
+            job_name = self.analysis_review_job_dir.name
+            job_id = job_name[4:] if job_name.startswith("s3d-") else job_name
+        try:
+            tif_paths = self.analysis_tif_paths(validate=True)
+        except ValueError as exc:
+            self.update_analysis_tif_count_label([])
+            QMessageBox.warning(self, "Invalid TIFF inputs", str(exc))
             return
+        self.update_analysis_tif_count_label(tif_paths)
         if not output_dir_text:
             QMessageBox.warning(self, "Invalid saving directory", "Choose a saving directory.")
             return
@@ -1250,23 +1823,41 @@ class InfoViewer(QMainWindow):
             QMessageBox.warning(self, "Invalid parameters", str(exc))
             return
 
-        self.analysis_log.clear()
-        self.analysis_progress.setValue(0)
+        if clear_log:
+            self.analysis_log.clear()
+        self.analysis_progress.setValue(45 if resume_after_registration else 0)
         self.analysis_stage_label.setText("Starting")
         self.analysis_run_button.setEnabled(False)
+        self.analysis_continue_button.setEnabled(False)
+        self.analysis_rerun_registration_button.setEnabled(False)
         self.analysis_worker = Suite3DAnalysisWorker(
-            tif_dir=tif_dir,
+            tif_paths=tif_paths,
             output_dir=output_dir,
             job_id=job_id,
             params=params,
-            overwrite=True,
+            overwrite=overwrite,
             test_batch_only=self.analysis_test_batch_checkbox.isChecked(),
+            stop_after_registration=stop_after_registration,
+            resume_after_registration=resume_after_registration,
             parent=self,
         )
         self.analysis_worker.progress_changed.connect(self.on_analysis_progress)
         self.analysis_worker.log_message.connect(self.append_analysis_log)
         self.analysis_worker.finished_with_status.connect(self.on_analysis_finished)
         self.analysis_worker.start()
+
+    def next_analysis_job_id(self, output_dir: Path) -> str:
+        base_id = "gui-analysis"
+        if not (output_dir / f"s3d-{base_id}").exists():
+            return base_id
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        job_id = f"{base_id}-{timestamp}"
+        suffix = 1
+        while (output_dir / f"s3d-{job_id}").exists():
+            suffix += 1
+            job_id = f"{base_id}-{timestamp}-{suffix}"
+        return job_id
 
     def on_analysis_progress(self, value: int, stage: str) -> None:
         self.analysis_progress.setValue(int(value))
@@ -1281,9 +1872,27 @@ class InfoViewer(QMainWindow):
         self.append_analysis_log(message)
         if not success:
             self.analysis_progress.setValue(0)
+            self.analysis_continue_button.setEnabled(self.analysis_review_job_dir is not None)
+            self.analysis_rerun_registration_button.setEnabled(self.analysis_review_job_dir is not None)
             QMessageBox.critical(self, "Analysis failed", message)
             return
 
+        if message == "Registration review ready":
+            self.analysis_progress.setValue(45)
+            self.analysis_review_job_dir = Path(info_path)
+            self.analysis_continue_button.setEnabled(True)
+            self.analysis_rerun_registration_button.setEnabled(True)
+            self.load_registered_job(self.analysis_review_job_dir)
+            QMessageBox.information(
+                self,
+                "Review registration",
+                "Registered movie is loaded. Inspect it, then accept to continue or change parameters and rerun registration.",
+            )
+            return
+
+        self.analysis_review_job_dir = None
+        self.analysis_continue_button.setEnabled(False)
+        self.analysis_rerun_registration_button.setEnabled(False)
         self.analysis_progress.setValue(100)
         if info_path:
             path = Path(info_path)
@@ -1434,10 +2043,35 @@ class InfoViewer(QMainWindow):
             self,
             "Open Suite3D info.npy",
             start_dir,
-            "NumPy files (*.npy);;All files (*.*)",
+            "NumPy files (*.npy);;TIFF files (*.tif *.tiff);;All files (*.*)",
         )
         if filename:
-            self.load_info(Path(filename))
+            path = Path(filename)
+            if path.suffix.lower() in (".tif", ".tiff"):
+                self.load_raw_tiff(path)
+            else:
+                self.load_info(path)
+
+    def open_raw_tiff_file_dialog(self) -> None:
+        start_dir = str(self.start_directory())
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open raw ScanImage TIFF file",
+            start_dir,
+            "TIFF files (*.tif *.tiff);;All files (*.*)",
+        )
+        if filename:
+            self.load_raw_tiff(Path(filename))
+
+    def open_raw_tiff_dialog(self) -> None:
+        start_dir = str(self.start_directory())
+        dirname = QFileDialog.getExistingDirectory(
+            self,
+            "Open raw ScanImage TIFF folder",
+            start_dir,
+        )
+        if dirname:
+            self.load_raw_tiff(Path(dirname))
 
     def resolve_info_path(self, path: Path) -> Path:
         if path.is_dir():
@@ -1454,6 +2088,18 @@ class InfoViewer(QMainWindow):
         return path
 
     def load_info(self, path: Path) -> None:
+        if path.suffix.lower() in (".tif", ".tiff"):
+            self.load_raw_tiff(path)
+            return
+        if path.is_dir() and not (path / "rois" / "info.npy").exists() and not (path / "info.npy").exists():
+            if any(
+                candidate.is_file() and candidate.suffix.lower() in (".tif", ".tiff")
+                for candidate in path.iterdir()
+            ):
+                self.load_raw_tiff(path)
+                return
+
+        self.release_raw_tiff()
         try:
             path = self.resolve_info_path(path)
             loaded = np.load(path, allow_pickle=True)
@@ -1480,6 +2126,8 @@ class InfoViewer(QMainWindow):
 
         self.info_path = path
         self.info = info
+        self.voxel_size_um = self.load_viewer_voxel_size_um(path)
+        self.raw_plane_ids, self.cavity_labels = self.load_viewer_plane_metadata(path)
         self.file_label.setText(str(path))
         self.load_roi_files(path.parent)
         self.load_recording_files(path.parent)
@@ -1487,6 +2135,8 @@ class InfoViewer(QMainWindow):
         self.data_combo.blockSignals(True)
         self.data_combo.clear()
         self.data_combo.addItems(available)
+        if self.nonrigid_shift_map is not None:
+            self.data_combo.addItem(NONRIGID_DISPLAY_KEY)
         self.data_combo.addItem(BLACK_DISPLAY_KEY)
         if self.recording_files:
             self.data_combo.addItem(RECORDING_DISPLAY_KEY)
@@ -1495,6 +2145,77 @@ class InfoViewer(QMainWindow):
         self.data_combo.blockSignals(False)
 
         self.update_array_selection()
+        self.update_projection_controls_visibility()
+        self.update_image()
+        self.update_raw_registration_controls()
+
+    def load_raw_tiff(self, path: Path) -> None:
+        path = Path(path)
+        try:
+            self.release_recording_files()
+            self.release_raw_tiff()
+            raw_movie = RawTiffMovie(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Could not load raw TIFF", str(exc))
+            return
+
+        self.info_path = path
+        self.info = {}
+        self.current_array = None
+        self.current_image_shape = (
+            int(raw_movie.shape[0]),
+            int(raw_movie.shape[2]),
+            int(raw_movie.shape[3]),
+        )
+        self.raw_tiff_movie = raw_movie
+        self.raw_tiff_path = path
+        self.raw_plane_ids = None
+        self.cavity_labels = None
+        self.voxel_size_um = raw_movie.voxel_size_um
+        self.file_label.setText(str(path))
+        self.load_roi_files(path if path.is_dir() else path.parent)
+
+        total_frames = int(raw_movie.frame_count)
+        self.set_frame_controls(total_frames, value=0, enabled=True)
+
+        self.data_combo.blockSignals(True)
+        self.data_combo.clear()
+        self.data_combo.addItem(RAW_TIFF_DISPLAY_KEY)
+        self.data_combo.setCurrentText(RAW_TIFF_DISPLAY_KEY)
+        self.data_combo.blockSignals(False)
+
+        self.update_array_selection()
+        self.update_projection_controls_visibility()
+        self.update_image()
+        self.update_raw_registration_controls()
+
+    def load_registered_job(self, job_dir: Path) -> None:
+        self.release_raw_tiff()
+        recording_dir = job_dir / "registered_fused_data"
+        self.info_path = None
+        self.info = {}
+        self.voxel_size_um = self.load_viewer_voxel_size_um(job_dir / "rois" / "info.npy")
+        self.raw_plane_ids, self.cavity_labels = self.load_viewer_plane_metadata(
+            job_dir / "rois" / "info.npy"
+        )
+        self.file_label.setText(str(job_dir))
+        self.load_roi_files(job_dir / "rois")
+        self.load_recording_files(job_dir / "rois")
+
+        if not self.recording_files:
+            QMessageBox.warning(self, "No registered movie", f"No registered movie found in:\n{recording_dir}")
+            return
+
+        self.data_combo.blockSignals(True)
+        self.data_combo.clear()
+        if self.nonrigid_shift_map is not None:
+            self.data_combo.addItem(NONRIGID_DISPLAY_KEY)
+        self.data_combo.addItem(RECORDING_DISPLAY_KEY)
+        self.data_combo.setCurrentText(RECORDING_DISPLAY_KEY)
+        self.data_combo.blockSignals(False)
+
+        self.update_array_selection()
+        self.update_projection_controls_visibility()
         self.update_image()
 
     def load_roi_files(self, directory: Path) -> None:
@@ -2377,11 +3098,12 @@ class InfoViewer(QMainWindow):
             self.roi_color_combo.setCurrentText("Random")
 
     def load_recording_files(self, rois_dir: Path) -> None:
+        self.release_recording_files()
         self.recording_files = []
         self.recording_frame_counts = []
         self.recording_frame_starts = None
         self.recording_shape = None
-        self.recording_chunk_cache = None
+        self.nonrigid_shift_map = None
         self.motion_shifts = None
         self.motion_shift_paths = []
         self.motion_checkbox.blockSignals(True)
@@ -2392,10 +3114,8 @@ class InfoViewer(QMainWindow):
         recording_dir = rois_dir.parent / "registered_fused_data"
         files = sorted(recording_dir.glob("fused_reg_data*.npy"))
         if not files:
-            self.frame_slider.setEnabled(False)
             self.stop_frame_play()
-            self.update_play_button_states()
-            self.frame_label.setText("Frame: no recording")
+            self.set_frame_controls(None, enabled=False, label="Frame: no recording")
             self.status_label.setText(f"Registered movie not found in {recording_dir}")
             return
 
@@ -2415,25 +3135,97 @@ class InfoViewer(QMainWindow):
             self.recording_frame_counts.append(int(nt))
 
         if not self.recording_files:
-            self.frame_slider.setEnabled(False)
             self.stop_frame_play()
-            self.update_play_button_states()
-            self.frame_label.setText("Frame: no recording")
+            self.set_frame_controls(None, enabled=False, label="Frame: no recording")
             self.status_label.setText(f"No readable fused_reg_data*.npy files found in {recording_dir}")
             return
 
         starts = np.concatenate([[0], np.cumsum(self.recording_frame_counts)])
         self.recording_frame_starts = starts.astype(int)
         total_frames = int(starts[-1])
-        self.frame_slider.blockSignals(True)
-        self.frame_slider.setMinimum(0)
-        self.frame_slider.setMaximum(max(0, total_frames - 1))
-        self.frame_slider.setValue(0)
-        self.frame_slider.blockSignals(False)
-        self.frame_slider.setEnabled(True)
-        self.frame_label.setText(f"Frame: 0 / {total_frames - 1}")
+        self.set_frame_controls(total_frames, value=0, enabled=True)
         self.load_motion_correction_shifts(recording_dir)
+        self.load_nonrigid_shift_map(recording_dir)
         self.update_play_button_states()
+
+    def release_recording_files(self) -> None:
+        self.stop_frame_play()
+        if self.recording_chunk_cache is not None:
+            chunk = self.recording_chunk_cache[1]
+            mmap = getattr(chunk, "_mmap", None)
+            if mmap is not None:
+                try:
+                    mmap.close()
+                except OSError:
+                    pass
+        self.recording_chunk_cache = None
+        self.recording_files = []
+        self.recording_frame_counts = []
+        self.recording_frame_starts = None
+        self.recording_shape = None
+        self.nonrigid_shift_map = None
+        self.motion_shifts = None
+        self.motion_shift_paths = []
+        gc.collect()
+
+    def release_raw_tiff(self) -> None:
+        if self.raw_tiff_movie is not None:
+            try:
+                self.raw_tiff_movie.close()
+            except Exception:
+                pass
+        self.raw_tiff_movie = None
+        self.raw_tiff_path = None
+        self.raw_plane_registration_result = None
+        self.clear_raw_spot_selection()
+        self.update_raw_registration_controls()
+
+    def add_raw_registered_p99_display_option(self, select: bool = False) -> None:
+        if not hasattr(self, "data_combo"):
+            return
+        options = [self.data_combo.itemText(i) for i in range(self.data_combo.count())]
+        if RAW_TIFF_REGISTERED_P99_DISPLAY_KEY not in options:
+            self.data_combo.addItem(RAW_TIFF_REGISTERED_P99_DISPLAY_KEY)
+        if select:
+            self.data_combo.setCurrentText(RAW_TIFF_REGISTERED_P99_DISPLAY_KEY)
+
+    def load_nonrigid_shift_map(self, recording_dir: Path) -> None:
+        self.nonrigid_shift_map = None
+        offset_files = sorted(recording_dir.glob("offsets*.npy"))
+        if not offset_files:
+            return
+
+        chunks = {"z": [], "y": [], "x": []}
+        for path in offset_files:
+            try:
+                offsets = np.load(path, allow_pickle=True).item()
+                z = offsets.get("nonrigid_zshifts")
+                y = offsets.get("nonrigid_yshifts")
+                x = offsets.get("nonrigid_xshifts")
+            except Exception:
+                continue
+            if z is None or y is None or x is None:
+                continue
+            z = np.asarray(z, dtype=np.float32)
+            y = np.asarray(y, dtype=np.float32)
+            x = np.asarray(x, dtype=np.float32)
+            if z.shape != y.shape or z.shape != x.shape or z.ndim != 4:
+                continue
+            chunks["z"].append(z)
+            chunks["y"].append(y)
+            chunks["x"].append(x)
+
+        if not chunks["z"]:
+            return
+
+        z = np.concatenate(chunks["z"], axis=0)
+        y = np.concatenate(chunks["y"], axis=0)
+        x = np.concatenate(chunks["x"], axis=0)
+        z_map = np.nanmean(np.abs(z), axis=(0, 1))
+        y_map = np.nanmean(np.abs(y), axis=(0, 1))
+        x_map = np.nanmean(np.abs(x), axis=(0, 1))
+        mag_map = np.nanmean(np.sqrt(z * z + y * y + x * x), axis=(0, 1))
+        self.nonrigid_shift_map = np.stack([z_map, y_map, x_map, mag_map]).astype(np.float32, copy=False)
 
     def load_motion_correction_shifts(self, recording_dir: Path) -> None:
         self.motion_shifts = None
@@ -2467,8 +3259,52 @@ class InfoViewer(QMainWindow):
     def is_recording_selected(self) -> bool:
         return self.data_combo.currentText() == RECORDING_DISPLAY_KEY
 
+    def is_raw_tiff_selected(self) -> bool:
+        return self.data_combo.currentText() == RAW_TIFF_DISPLAY_KEY
+
+    def is_raw_tiff_registered_p99_selected(self) -> bool:
+        return self.data_combo.currentText() == RAW_TIFF_REGISTERED_P99_DISPLAY_KEY
+
+    def is_movie_selected(self) -> bool:
+        return self.is_recording_selected() or self.is_raw_tiff_selected()
+
     def is_black_background_selected(self) -> bool:
         return self.data_combo.currentText() == BLACK_DISPLAY_KEY
+
+    def active_movie_total_frames(self) -> int | None:
+        if self.is_recording_selected() and self.recording_frame_starts is not None:
+            return int(self.recording_frame_starts[-1])
+        if self.is_raw_tiff_selected() and self.raw_tiff_movie is not None:
+            return int(self.raw_tiff_movie.frame_count)
+        return None
+
+    def available_movie_total_frames(self) -> int | None:
+        active = self.active_movie_total_frames()
+        if active is not None:
+            return active
+        if self.recording_frame_starts is not None:
+            return int(self.recording_frame_starts[-1])
+        if self.raw_tiff_movie is not None:
+            return int(self.raw_tiff_movie.frame_count)
+        return None
+
+    def active_movie_shape(self) -> tuple[int, int, int] | None:
+        if self.is_recording_selected():
+            return self.recording_shape
+        if self.is_raw_tiff_selected() and self.raw_tiff_movie is not None:
+            nz, _nt, ny, nx = self.raw_tiff_movie.shape
+            return int(nz), int(ny), int(nx)
+        return None
+
+    def active_movie_name(self) -> str:
+        return "raw TIFF" if self.is_raw_tiff_selected() else "registered movie"
+
+    def select_first_movie_source(self) -> None:
+        options = [self.data_combo.itemText(i) for i in range(self.data_combo.count())]
+        if RECORDING_DISPLAY_KEY in options:
+            self.data_combo.setCurrentText(RECORDING_DISPLAY_KEY)
+        elif RAW_TIFF_DISPLAY_KEY in options:
+            self.data_combo.setCurrentText(RAW_TIFF_DISPLAY_KEY)
 
     def recording_frame(self, global_frame: int, plane: int) -> np.ndarray:
         if self.recording_frame_starts is None or not self.recording_files:
@@ -2487,6 +3323,33 @@ class InfoViewer(QMainWindow):
         chunk = self.recording_chunk_cache[1]
         return np.asarray(chunk[int(plane), local_frame])
 
+    def recording_y_slice(self, global_frame: int, y_index: int) -> np.ndarray:
+        if self.recording_frame_starts is None or not self.recording_files:
+            raise RuntimeError("No registered movie files are loaded.")
+
+        total_frames = int(self.recording_frame_starts[-1])
+        global_frame = max(0, min(int(global_frame), total_frames - 1))
+        chunk_idx = int(np.searchsorted(self.recording_frame_starts, global_frame, side="right") - 1)
+        local_frame = int(global_frame - self.recording_frame_starts[chunk_idx])
+
+        if self.recording_chunk_cache is None or self.recording_chunk_cache[0] != chunk_idx:
+            self.recording_chunk_cache = (
+                chunk_idx,
+                np.load(self.recording_files[chunk_idx], mmap_mode="r", allow_pickle=False),
+            )
+        chunk = self.recording_chunk_cache[1]
+        return np.asarray(chunk[:, local_frame, int(y_index), :])
+
+    def raw_tiff_frame(self, global_frame: int, plane: int) -> np.ndarray:
+        if self.raw_tiff_movie is None:
+            raise RuntimeError("No raw TIFF is loaded.")
+        return self.raw_tiff_movie.frame(global_frame, plane)
+
+    def raw_tiff_y_slice(self, global_frame: int, y_index: int) -> np.ndarray:
+        if self.raw_tiff_movie is None:
+            raise RuntimeError("No raw TIFF is loaded.")
+        return self.raw_tiff_movie.y_slice(global_frame, y_index)
+
     def update_array_selection(self) -> None:
         if self.info is None:
             return
@@ -2497,24 +3360,77 @@ class InfoViewer(QMainWindow):
                 self.status_label.setText("Registered movie: no recording files found")
                 return
             nz, ny, nx = self.recording_shape
-            current_plane = min(self.plane_slider.value(), nz - 1)
-            self.plane_slider.blockSignals(True)
-            self.plane_slider.setMaximum(nz - 1)
-            self.plane_slider.setValue(current_plane)
-            self.plane_slider.blockSignals(False)
             self.plane_slider.setEnabled(True)
             self.frame_slider.setEnabled(True)
             self.project_checkbox.setEnabled(False)
             self.projection_combo.setEnabled(False)
             total_frames = int(self.recording_frame_starts[-1])
-            self.frame_label.setText(f"Frame: {self.frame_slider.value()} / {total_frames - 1}")
+            self.set_frame_controls(total_frames, value=self.frame_slider.value(), enabled=True)
             self.current_array = None
             self.current_image_shape = (nz, ny, nx)
+            current_plane = min(self.plane_slider.value(), self.available_plane_count() - 1)
+            self.plane_slider.blockSignals(True)
+            self.plane_slider.setMaximum(max(0, self.available_plane_count() - 1))
+            self.plane_slider.setValue(max(0, current_plane))
+            self.plane_slider.blockSignals(False)
+            self.status_label.setText(f"registered movie: {len(self.recording_files)} chunks")
+            self.update_play_button_states()
+            self.update_multi_plane_controls()
+            return
+
+        if key == RAW_TIFF_DISPLAY_KEY:
+            if self.raw_tiff_movie is None:
+                self.status_label.setText("Raw TIFF: no TIFF loaded")
+                return
+            nz, _nt, ny, nx = self.raw_tiff_movie.shape
+            self.plane_slider.setEnabled(True)
+            self.frame_slider.setEnabled(True)
+            self.project_checkbox.setEnabled(False)
+            self.projection_combo.setEnabled(False)
+            total_frames = int(self.raw_tiff_movie.frame_count)
+            self.set_frame_controls(total_frames, value=self.frame_slider.value(), enabled=True)
+            self.current_array = None
+            self.current_image_shape = (int(nz), int(ny), int(nx))
+            current_plane = min(self.plane_slider.value(), self.available_plane_count() - 1)
+            self.plane_slider.blockSignals(True)
+            self.plane_slider.setMaximum(max(0, self.available_plane_count() - 1))
+            self.plane_slider.setValue(max(0, current_plane))
+            self.plane_slider.blockSignals(False)
             self.status_label.setText(
-                f"registered movie: shape z,t,y,x = {nz}, {total_frames}, {ny}, {nx}; "
-                f"chunks = {len(self.recording_files)}"
+                f"raw TIFF: {len(self.raw_tiff_movie.paths)} files, "
+                f"{self.raw_tiff_movie.axes} {self.raw_tiff_movie.series_shape}; "
+                f"stitched FOV; {self.raw_tiff_movie.dimension_summary_um() or 'micron size unknown'}"
             )
             self.update_play_button_states()
+            self.update_multi_plane_controls()
+            return
+
+        if key == RAW_TIFF_REGISTERED_P99_DISPLAY_KEY:
+            if not self.raw_plane_registration_result:
+                self.status_label.setText("Raw TIFF registered p99: run plane registration first")
+                return
+            registered = self.raw_plane_registration_result.get("registered_p99_images")
+            if registered is None:
+                self.status_label.setText("Raw TIFF registered p99: no registered images available")
+                return
+            self.current_array = np.asarray(registered, dtype=np.float32)
+            nz, ny, nx = self.current_array.shape
+            self.current_image_shape = (int(nz), int(ny), int(nx))
+            current_plane = min(self.plane_slider.value(), self.available_plane_count() - 1)
+            self.plane_slider.blockSignals(True)
+            self.plane_slider.setMaximum(max(0, self.available_plane_count() - 1))
+            self.plane_slider.setValue(max(0, current_plane))
+            self.plane_slider.blockSignals(False)
+            self.plane_slider.setEnabled(not self.project_checkbox.isChecked() or self.is_xz_view())
+            self.set_frame_controls(None, enabled=False, label="Frame: 99th percentile")
+            self.project_checkbox.setEnabled(True)
+            self.projection_combo.setEnabled(True)
+            ref = int(self.raw_plane_registration_result.get("reference_plane", nz // 2))
+            self.status_label.setText(
+                f"raw TIFF registered p99: shifted plane 99th percentile projections; reference plane {ref}"
+            )
+            self.update_play_button_states()
+            self.update_multi_plane_controls()
             return
 
         if key == BLACK_DISPLAY_KEY:
@@ -2532,25 +3448,43 @@ class InfoViewer(QMainWindow):
             nz, ny, nx = shape
             self.current_array = np.zeros((nz, ny, nx), dtype=np.float32)
             self.current_image_shape = (int(nz), int(ny), int(nx))
-            current_plane = min(self.plane_slider.value(), nz - 1)
+            current_plane = min(self.plane_slider.value(), self.available_plane_count() - 1)
             self.plane_slider.blockSignals(True)
-            self.plane_slider.setMaximum(nz - 1)
-            self.plane_slider.setValue(current_plane)
+            self.plane_slider.setMaximum(max(0, self.available_plane_count() - 1))
+            self.plane_slider.setValue(max(0, current_plane))
             self.plane_slider.blockSignals(False)
-            self.plane_slider.setEnabled(not self.project_checkbox.isChecked())
+            self.plane_slider.setEnabled(not self.project_checkbox.isChecked() or self.is_xz_view())
             if self.recording_frame_starts is not None:
                 total_frames = int(self.recording_frame_starts[-1])
-                self.frame_slider.setEnabled(True)
-                self.frame_label.setText(
-                    f"Frame: {self.frame_slider.value()} / {total_frames - 1}"
-                )
+                self.set_frame_controls(total_frames, value=self.frame_slider.value(), enabled=True)
             else:
-                self.frame_slider.setEnabled(False)
-                self.frame_label.setText("Frame: -")
+                self.set_frame_controls(None, enabled=False, label="Frame: -")
             self.project_checkbox.setEnabled(True)
             self.projection_combo.setEnabled(True)
-            self.status_label.setText(f"{key}: shape z,y,x = {nz}, {ny}, {nx}")
+            self.status_label.setText(str(key))
             self.update_play_button_states()
+            self.update_multi_plane_controls()
+            return
+
+        if key == NONRIGID_DISPLAY_KEY:
+            if self.nonrigid_shift_map is None:
+                self.status_label.setText("No nonrigid shift map loaded")
+                return
+            self.current_array = self.nonrigid_shift_map
+            nz, ny, nx = self.current_array.shape
+            self.current_image_shape = (int(nz), int(ny), int(nx))
+            current_plane = min(self.plane_slider.value(), nz - 1)
+            self.plane_slider.blockSignals(True)
+            self.plane_slider.setMaximum(max(0, nz - 1))
+            self.plane_slider.setValue(max(0, current_plane))
+            self.plane_slider.blockSignals(False)
+            self.plane_slider.setEnabled(True)
+            self.set_frame_controls(None, enabled=False, label="Frame: -")
+            self.project_checkbox.setEnabled(False)
+            self.projection_combo.setEnabled(False)
+            self.status_label.setText("nonrigid shift map: mean absolute block shifts")
+            self.update_play_button_states()
+            self.update_multi_plane_controls()
             return
 
         arr = self.info[key]
@@ -2558,26 +3492,23 @@ class InfoViewer(QMainWindow):
 
         nz, ny, nx = self.current_array.shape
         self.current_image_shape = (int(nz), int(ny), int(nx))
-        current_plane = min(self.plane_slider.value(), nz - 1)
+        current_plane = min(self.plane_slider.value(), self.available_plane_count() - 1)
         self.plane_slider.blockSignals(True)
-        self.plane_slider.setMaximum(nz - 1)
-        self.plane_slider.setValue(current_plane)
+        self.plane_slider.setMaximum(max(0, self.available_plane_count() - 1))
+        self.plane_slider.setValue(max(0, current_plane))
         self.plane_slider.blockSignals(False)
-        self.plane_slider.setEnabled(not self.project_checkbox.isChecked())
+        self.plane_slider.setEnabled(not self.project_checkbox.isChecked() or self.is_xz_view())
         if self.recording_frame_starts is not None:
             total_frames = int(self.recording_frame_starts[-1])
-            self.frame_slider.setEnabled(True)
-            self.frame_label.setText(
-                f"Frame: {self.frame_slider.value()} / {total_frames - 1}"
-            )
+            self.set_frame_controls(total_frames, value=self.frame_slider.value(), enabled=True)
         else:
-            self.frame_slider.setEnabled(False)
-            self.frame_label.setText("Frame: -")
+            self.set_frame_controls(None, enabled=False, label="Frame: -")
         self.project_checkbox.setEnabled(True)
         self.projection_combo.setEnabled(True)
 
-        self.status_label.setText(f"{key}: shape z,y,x = {nz}, {ny}, {nx}; dtype = {self.current_array.dtype}")
+        self.status_label.setText(f"{key}: {self.current_array.dtype}")
         self.update_play_button_states()
+        self.update_multi_plane_controls()
 
     def on_display_changed(self) -> None:
         self.update_array_selection()
@@ -2588,6 +3519,542 @@ class InfoViewer(QMainWindow):
         if self.secondary_panel_mode() == "Accepted neuropil" and not self.masks_checkbox.isChecked():
             self.masks_checkbox.setChecked(True)
             return
+        self.on_display_changed()
+
+    def orientation_mode(self) -> str:
+        if hasattr(self, "orientation_combo"):
+            return self.orientation_combo.currentText()
+        return self.display_orientation
+
+    def is_xz_view(self) -> bool:
+        return self.orientation_mode() == "XZ"
+
+    def set_orientation_mode(self, mode: str) -> None:
+        if hasattr(self, "orientation_combo"):
+            self.orientation_combo.setCurrentText(mode)
+        else:
+            self.on_orientation_changed(mode)
+
+    def load_viewer_voxel_size_um(self, path: Path) -> tuple[float, float, float] | None:
+        candidate_run_dirs = []
+        if path.name == "info.npy" and path.parent.name == "rois":
+            candidate_run_dirs.append(path.parent.parent)
+        candidate_run_dirs.append(path.parent)
+
+        for run_dir in candidate_run_dirs:
+            params_path = run_dir / "params.npy"
+            if not params_path.exists():
+                continue
+            try:
+                params = np.load(params_path, allow_pickle=True).item()
+            except Exception:
+                continue
+            voxel_size = self.valid_voxel_size_um(params.get("voxel_size_um") if isinstance(params, dict) else None)
+            if voxel_size is not None:
+                return voxel_size
+        return None
+
+    def load_viewer_plane_metadata(
+        self,
+        path: Path,
+    ) -> tuple[list[int] | None, list[str] | None]:
+        candidate_run_dirs = []
+        if path.name == "info.npy" and path.parent.name == "rois":
+            candidate_run_dirs.append(path.parent.parent)
+        candidate_run_dirs.append(path.parent)
+
+        for run_dir in candidate_run_dirs:
+            params_path = run_dir / "params.npy"
+            if not params_path.exists():
+                continue
+            try:
+                params = np.load(params_path, allow_pickle=True).item()
+            except Exception:
+                continue
+            if not isinstance(params, dict) or not params.get("lbm", False):
+                return None, None
+            planes = params.get("planes")
+            if params.get("num_cavities") is not None:
+                two_cavity = int(params.get("num_cavities")) == 2
+            else:
+                two_cavity = (
+                    len(planes) > params.get("cavity_size", 15)
+                    if planes is not None
+                    else None
+                )
+            return lbm_plane_metadata(planes, two_cavity=two_cavity)
+        return None, None
+
+    def plane_display_label(self, plane: int) -> str:
+        plane = int(plane)
+        if (
+            (self.is_raw_tiff_selected() or self.is_raw_tiff_registered_p99_selected())
+            and self.raw_tiff_movie is not None
+        ):
+            return self.raw_tiff_movie.plane_label(plane)
+        if self.raw_plane_ids is None or plane < 0 or plane >= len(self.raw_plane_ids):
+            return f"Plane {plane}"
+        cavity = ""
+        if self.cavity_labels is not None and plane < len(self.cavity_labels):
+            cavity = f", cavity {self.cavity_labels[plane]}"
+        return f"Plane {plane} (raw {self.raw_plane_ids[plane]}{cavity})"
+
+    def plane_list_label(self, planes: list[int]) -> str:
+        return ", ".join(self.plane_display_label(plane) for plane in planes)
+
+    def valid_voxel_size_um(self, voxel_size) -> tuple[float, float, float] | None:
+        if voxel_size is None:
+            return None
+        try:
+            voxel_size = np.asarray(voxel_size, dtype=float).ravel()
+        except Exception:
+            return None
+        if voxel_size.size < 3:
+            return None
+        z_um_per_plane = float(voxel_size[-3])
+        y_um_per_pixel = float(voxel_size[-2])
+        x_um_per_pixel = float(voxel_size[-1])
+        if not np.all(np.isfinite([z_um_per_plane, y_um_per_pixel, x_um_per_pixel])):
+            return None
+        if z_um_per_plane <= 0 or y_um_per_pixel <= 0 or x_um_per_pixel <= 0:
+            return None
+        return z_um_per_plane, y_um_per_pixel, x_um_per_pixel
+
+    def xz_image_aspect(self):
+        return "auto" if self.is_xz_view() else "equal"
+
+    def style_image_axis(self, ax) -> None:
+        if self.is_xz_view() and self.voxel_size_um is not None:
+            z_um_per_plane, _y_um_per_pixel, x_um_per_pixel = self.voxel_size_um
+            ax.set_xlabel("x (microns)")
+            ax.set_ylabel("z (microns)")
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _pos: f"{value * x_um_per_pixel:g}"))
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _pos: f"{value * z_um_per_plane:g}"))
+            ax.xaxis.set_major_locator(MaxNLocator(nbins=6))
+            ax.yaxis.set_major_locator(MaxNLocator(nbins=6))
+            ax.xaxis.label.set_color(TEXT_FG)
+            ax.yaxis.label.set_color(TEXT_FG)
+            ax.tick_params(colors=TEXT_FG, labelsize=8)
+        else:
+            ax.set_xlabel("")
+            ax.set_ylabel("")
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    def image_view_limits_are_compatible(
+        self,
+        image_shape: tuple[int, int],
+        old_xlim,
+        old_ylim,
+    ) -> bool:
+        if old_xlim is None or old_ylim is None:
+            return False
+        if not self.is_xz_view():
+            return True
+
+        n_rows, n_cols = image_shape
+        x_span = abs(float(old_xlim[1]) - float(old_xlim[0]))
+        y_span = abs(float(old_ylim[1]) - float(old_ylim[0]))
+        return x_span <= max(float(n_cols) * 1.5, 1.0) and y_span <= max(float(n_rows) * 3.0, 1.0)
+
+    def selected_roi_y_index(self) -> int | None:
+        if self.stats is None or self.selected_roi_idx is None:
+            return None
+        if not (0 <= self.selected_roi_idx < len(self.stats)):
+            return None
+        coords = self.roi_mask_coords(self.stats[self.selected_roi_idx], self.selected_mask_kind)
+        if coords is None:
+            return None
+        _z, y, _x = coords
+        y = np.asarray(y, dtype=float)
+        y = y[np.isfinite(y)]
+        if y.size == 0:
+            return None
+        y_median = float(np.median(y))
+        y_index = int(round(float(y[np.argmin(np.abs(y - y_median))])))
+        return max(self.plane_slider.minimum(), min(self.plane_slider.maximum(), y_index))
+
+    def selected_roi_z_index(self) -> int | None:
+        if self.stats is None or self.selected_roi_idx is None:
+            return None
+        if not (0 <= self.selected_roi_idx < len(self.stats)):
+            return None
+        coords = self.roi_mask_coords(self.stats[self.selected_roi_idx], self.selected_mask_kind)
+        if coords is None:
+            return None
+        z, _y, _x = coords
+        z = np.asarray(z, dtype=float)
+        z = z[np.isfinite(z)]
+        if z.size == 0:
+            return None
+        z_median = float(np.median(z))
+        z_index = int(round(float(z[np.argmin(np.abs(z - z_median))])))
+        return max(self.plane_slider.minimum(), min(self.plane_slider.maximum(), z_index))
+
+    def focus_selected_roi_xz_slice(self) -> bool:
+        y_index = self.selected_roi_y_index()
+        if y_index is None:
+            return False
+        if y_index == self.plane_slider.value():
+            return True
+        self.plane_slider.blockSignals(True)
+        self.plane_slider.setValue(y_index)
+        self.plane_slider.blockSignals(False)
+        return True
+
+    def focus_selected_roi_xy_plane(self) -> bool:
+        z_index = self.selected_roi_z_index()
+        if z_index is None:
+            return False
+        if z_index == self.plane_slider.value():
+            return True
+        self.plane_slider.blockSignals(True)
+        self.plane_slider.setValue(z_index)
+        self.plane_slider.blockSignals(False)
+        return True
+
+    def on_orientation_changed(self, mode: str) -> None:
+        self.display_orientation = str(mode)
+        self.overlay_cache = {}
+        if self.is_xz_view():
+            if self.project_checkbox.isChecked():
+                self.project_checkbox.blockSignals(True)
+                self.project_checkbox.setChecked(False)
+                self.project_checkbox.blockSignals(False)
+            if self.multi_plane_checkbox.isChecked():
+                self.multi_plane_checkbox.blockSignals(True)
+                self.multi_plane_checkbox.setChecked(False)
+                self.multi_plane_checkbox.blockSignals(False)
+        self.update_array_selection()
+        self.update_projection_controls_visibility()
+        if self.is_xz_view():
+            should_zoom_to_selected = self.focus_selected_roi_xz_slice()
+        else:
+            should_zoom_to_selected = self.focus_selected_roi_xy_plane()
+        self.update_image(preserve_view=False)
+        if should_zoom_to_selected:
+            self.zoom_to_selected_roi()
+
+    def available_plane_count(self) -> int:
+        movie_shape = self.active_movie_shape()
+        if self.is_movie_selected() and movie_shape is not None:
+            if self.is_xz_view():
+                return int(movie_shape[1])
+            return int(movie_shape[0])
+        if self.current_image_shape is not None:
+            if self.is_xz_view():
+                return int(self.current_image_shape[1])
+            return int(self.current_image_shape[0])
+        return 0
+
+    def selected_multi_planes(self) -> list[int]:
+        nz = self.available_plane_count()
+        if nz <= 0:
+            return []
+        planes = sorted(p for p in self.multi_plane_selected_planes if 0 <= p < nz)
+        if not planes:
+            planes = list(range(nz))
+        return planes
+
+    def is_multi_plane_display(self) -> bool:
+        return (
+            hasattr(self, "multi_plane_checkbox")
+            and self.multi_plane_checkbox.isChecked()
+            and self.available_plane_count() > 1
+        )
+
+    def update_multi_plane_controls(self) -> None:
+        if not hasattr(self, "multi_plane_checkbox"):
+            return
+        enabled = self.available_plane_count() > 1 and not self.is_xz_view()
+        self.multi_plane_checkbox.setEnabled(enabled)
+        self.multi_plane_button.setEnabled(enabled and self.multi_plane_checkbox.isChecked())
+        selected_count = len(self.selected_multi_planes()) if enabled else 0
+        self.multi_plane_button.setText(f"Select planes ({selected_count})" if selected_count else "Select planes")
+        self.update_raw_spot_controls()
+        self.update_raw_registration_controls()
+
+    def update_raw_registration_controls(self) -> None:
+        if not hasattr(self, "register_raw_planes_button"):
+            return
+        running = (
+            self.raw_plane_registration_worker is not None
+            and self.raw_plane_registration_worker.isRunning()
+        )
+        self.register_raw_planes_button.setEnabled(
+            self.raw_tiff_movie is not None
+            and self.raw_tiff_path is not None
+            and not running
+        )
+
+    def start_raw_plane_registration(self) -> None:
+        if self.raw_tiff_path is None or self.raw_tiff_movie is None:
+            QMessageBox.information(self, "No raw TIFF", "Open a raw TIFF file or folder first.")
+            return
+        if self.raw_plane_registration_worker is not None and self.raw_plane_registration_worker.isRunning():
+            return
+
+        reference_plane = int(self.raw_tiff_movie.shape[0] // 2)
+        self.raw_plane_registration_result = None
+        self.raw_plane_registration_worker = RawTiffPlaneRegistrationWorker(
+            self.raw_tiff_path,
+            reference_plane=reference_plane,
+            upsample_factor=10,
+            max_shift_px=100,
+            parent=self,
+        )
+        self.raw_plane_registration_worker.progress_changed.connect(
+            self.on_raw_plane_registration_progress
+        )
+        self.raw_plane_registration_worker.finished_with_result.connect(
+            self.on_raw_plane_registration_finished
+        )
+        self.register_raw_planes_button.setEnabled(False)
+        self.status_label.setText(
+            f"Plane registration: calculating 99th percentile projections; reference plane {reference_plane}."
+        )
+        self.clear_trace_plot("Plane registration: calculating 99th percentile projections")
+        self.raw_plane_registration_worker.start()
+
+    def on_raw_plane_registration_progress(self, message: str) -> None:
+        self.status_label.setText(f"Plane registration: {message}")
+
+    def on_raw_plane_registration_finished(self, success: bool, message: str, result: object) -> None:
+        self.raw_plane_registration_worker = None
+        self.update_raw_registration_controls()
+        if not success:
+            QMessageBox.critical(self, "Plane registration failed", message)
+            self.status_label.setText(f"Plane registration failed: {message}")
+            return
+        if not isinstance(result, dict):
+            self.status_label.setText("Plane registration failed: no result returned.")
+            return
+
+        self.raw_plane_registration_result = result
+        output_dir = self.save_raw_plane_registration_outputs(result)
+        self.add_raw_registered_p99_display_option(select=True)
+        self.update_array_selection()
+        self.update_projection_controls_visibility()
+        self.update_image(preserve_view=False)
+        self.plot_raw_plane_registration(result, output_dir=output_dir)
+
+    def raw_plane_registration_output_dir(self, tif_path: Path) -> Path:
+        if tif_path.is_dir():
+            return tif_path / "plane_crosscorr_registration"
+        return tif_path.parent / f"{tif_path.stem}_plane_crosscorr_registration"
+
+    def save_raw_plane_registration_outputs(self, result: dict[str, object]) -> Path | None:
+        tif_path = Path(result.get("path", self.raw_tiff_path or Path.cwd()))
+        output_dir = self.raw_plane_registration_output_dir(tif_path)
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            p99_images = np.asarray(result["p99_images"], dtype=np.float32)
+            registered_p99_images = np.asarray(
+                result["registered_p99_images"],
+                dtype=np.float32,
+            )
+            shifts = np.asarray(result["shifts"], dtype=np.float32)
+            errors = np.asarray(result["errors"], dtype=np.float32)
+            reference_plane = int(result["reference_plane"])
+            labels = list(result.get("labels", []))
+
+            np.save(output_dir / "p99_images_by_plane.npy", p99_images)
+            np.save(output_dir / "registered_p99_images_by_plane.npy", registered_p99_images)
+            np.save(output_dir / "plane_xy_shifts.npy", shifts)
+            with (output_dir / "plane_xy_shifts.csv").open("w", newline="") as stream:
+                writer = csv.writer(stream)
+                writer.writerow(
+                    [
+                        "plane",
+                        "label",
+                        "reference_plane",
+                        "y_shift_px",
+                        "x_shift_px",
+                        "registration_error",
+                    ]
+                )
+                for plane in range(shifts.shape[0]):
+                    label = labels[plane] if plane < len(labels) else f"Plane {plane}"
+                    writer.writerow(
+                        [
+                            plane,
+                            label,
+                            reference_plane,
+                            float(shifts[plane, 0]),
+                            float(shifts[plane, 1]),
+                            float(errors[plane]),
+                        ]
+                    )
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Could not save registration outputs",
+                f"Registration finished, but saving outputs failed:\n{exc}",
+            )
+            return None
+        return output_dir
+
+    def plot_raw_plane_registration(
+        self,
+        result: dict[str, object],
+        output_dir: Path | None = None,
+    ) -> None:
+        shifts = np.asarray(result["shifts"], dtype=float)
+        errors = np.asarray(result["errors"], dtype=float)
+        reference_plane = int(result["reference_plane"])
+        labels = list(result.get("labels", []))
+        planes = np.arange(shifts.shape[0])
+
+        self.trace_group.setTitle("Plane cross-correlation registration")
+        self.trace_cursor_lines = []
+        self.trace_zoom_axes = None
+        self.trace_figure.clear()
+        self.trace_figure.patch.set_facecolor(GUI_BG)
+        axes = self.trace_figure.subplots(3, 1, sharex=True)
+        self.trace_zoom_axes = axes[-1]
+        for ax in axes:
+            ax.set_facecolor(PLOT_BG)
+            ax.axvline(reference_plane, color="#ffd54f", linewidth=1.0, alpha=0.8)
+            ax.axhline(0, color=GRID_FG, linewidth=0.7, alpha=0.45)
+
+        axes[0].plot(planes, shifts[:, 1], color="#61a5ff", marker="o", linewidth=0.9, markersize=3)
+        axes[1].plot(planes, shifts[:, 0], color="#ffb74d", marker="o", linewidth=0.9, markersize=3)
+        axes[2].plot(planes, errors, color="white", marker="o", linewidth=0.9, markersize=3)
+        axes[2].set_xticks(planes)
+        axes[2].set_xticklabels([str(int(plane)) for plane in planes])
+
+        max_abs_x = float(np.nanmax(np.abs(shifts[:, 1]))) if shifts.size else 0.0
+        max_abs_y = float(np.nanmax(np.abs(shifts[:, 0]))) if shifts.size else 0.0
+        reference_label = labels[reference_plane] if reference_plane < len(labels) else f"Plane {reference_plane}"
+        axes[0].set_title(
+            "Plane shifts from mean-image cross-correlation; "
+            f"reference {reference_label}",
+            color=TEXT_FG,
+            fontsize=10,
+            pad=2,
+        )
+        self.style_trace_axis(axes[0], ylabel="X shift (px)")
+        self.style_trace_axis(axes[1], ylabel="Y shift (px)")
+        self.style_trace_axis(axes[2], xlabel="Plane", ylabel="Error")
+        self.trace_figure.subplots_adjust(left=0.055, right=0.995, top=0.88, bottom=0.16, hspace=0.16)
+        self.trace_canvas.draw_idle()
+
+        save_msg = f" Saved to {output_dir}" if output_dir is not None else ""
+        self.status_label.setText(
+            "Plane registration complete. "
+            f"Max |x|={max_abs_x:.3g} px, max |y|={max_abs_y:.3g} px."
+            f"{save_msg}"
+        )
+
+    def raw_spot_pick_available(self) -> bool:
+        return (
+            self.is_raw_tiff_selected()
+            and self.raw_tiff_movie is not None
+            and self.is_multi_plane_display()
+            and not self.is_xz_view()
+        )
+
+    def update_raw_spot_controls(self) -> None:
+        if not hasattr(self, "pick_raw_spot_button"):
+            return
+        available = self.raw_spot_pick_available()
+        self.pick_raw_spot_button.setEnabled(available)
+        if not available and self.pick_raw_spot_button.isChecked():
+            self.pick_raw_spot_button.blockSignals(True)
+            self.pick_raw_spot_button.setChecked(False)
+            self.pick_raw_spot_button.blockSignals(False)
+        self.plot_raw_spot_button.setEnabled(
+            self.raw_tiff_movie is not None
+            and bool(self.raw_spot_points_px)
+        )
+
+    def clear_raw_spot_selection(self) -> None:
+        self.raw_spot_points_px = {}
+        self.raw_spot_frame = None
+        if hasattr(self, "plot_raw_spot_button"):
+            self.update_raw_spot_controls()
+
+    def on_pick_raw_spot_toggled(self, checked: bool) -> None:
+        if checked and not self.raw_spot_pick_available():
+            self.pick_raw_spot_button.blockSignals(True)
+            self.pick_raw_spot_button.setChecked(False)
+            self.pick_raw_spot_button.blockSignals(False)
+            QMessageBox.information(
+                self,
+                "Pick spot",
+                "Open a raw TIFF folder and enable Show selected planes before picking a spot.",
+            )
+            return
+        if checked:
+            self.clear_raw_spot_selection()
+            self.clear_trace_plot("Spot displacement: pick spots in the selected raw TIFF panels")
+            self.update_image(preserve_view=True)
+            self.status_label.setText(
+                "Click one spot in each raw TIFF channel panel. Click a panel again to replace its spot."
+            )
+
+    def on_multi_plane_toggled(self, state: int) -> None:
+        if state == Qt.Checked:
+            if self.project_checkbox.isChecked():
+                self.project_checkbox.blockSignals(True)
+                self.project_checkbox.setChecked(False)
+                self.project_checkbox.blockSignals(False)
+            if not self.multi_plane_selected_planes:
+                self.multi_plane_selected_planes = set(range(self.available_plane_count()))
+        self.update_multi_plane_controls()
+        self.on_display_changed()
+
+    def open_plane_selection_dialog(self) -> None:
+        nz = self.available_plane_count()
+        if nz <= 0:
+            QMessageBox.information(self, "No planes", "Load an image or movie before selecting planes.")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select planes")
+        layout = QVBoxLayout(dialog)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        grid = QGridLayout(content)
+
+        selected = set(self.selected_multi_planes())
+        checkboxes: list[QCheckBox] = []
+        n_cols = min(6, max(1, int(np.ceil(np.sqrt(nz)))))
+        for plane in range(nz):
+            checkbox = QCheckBox(self.plane_display_label(plane))
+            checkbox.setChecked(plane in selected)
+            checkboxes.append(checkbox)
+            grid.addWidget(checkbox, plane // n_cols, plane % n_cols)
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+
+        button_row = QHBoxLayout()
+        all_button = QPushButton("All")
+        none_button = QPushButton("None")
+        ok_button = QPushButton("OK")
+        cancel_button = QPushButton("Cancel")
+        all_button.clicked.connect(lambda _checked=False: [checkbox.setChecked(True) for checkbox in checkboxes])
+        none_button.clicked.connect(lambda _checked=False: [checkbox.setChecked(False) for checkbox in checkboxes])
+        ok_button.clicked.connect(dialog.accept)
+        cancel_button.clicked.connect(dialog.reject)
+        button_row.addWidget(all_button)
+        button_row.addWidget(none_button)
+        button_row.addStretch(1)
+        button_row.addWidget(ok_button)
+        button_row.addWidget(cancel_button)
+        layout.addLayout(button_row)
+
+        dialog.resize(420, 320)
+        if dialog.exec_() != QDialog.Accepted:
+            return
+
+        chosen = {idx for idx, checkbox in enumerate(checkboxes) if checkbox.isChecked()}
+        if not chosen:
+            chosen = {min(max(self.plane_slider.value(), 0), nz - 1)}
+        self.multi_plane_selected_planes = chosen
+        self.multi_plane_checkbox.setChecked(True)
+        self.update_multi_plane_controls()
         self.on_display_changed()
 
     def on_motion_correction_toggled(self) -> None:
@@ -2601,15 +4068,34 @@ class InfoViewer(QMainWindow):
             self.clear_trace_plot("F trace: select an ROI")
 
     def update_projection_controls_visibility(self) -> None:
-        visible = self.project_checkbox.isChecked() and not self.is_recording_selected()
+        if self.is_xz_view() and self.project_checkbox.isChecked():
+            self.project_checkbox.blockSignals(True)
+            self.project_checkbox.setChecked(False)
+            self.project_checkbox.blockSignals(False)
+        if self.is_multi_plane_display() and self.project_checkbox.isChecked():
+            self.project_checkbox.blockSignals(True)
+            self.project_checkbox.setChecked(False)
+            self.project_checkbox.blockSignals(False)
+        visible = (
+            self.project_checkbox.isChecked()
+            and not self.is_movie_selected()
+            and not self.is_multi_plane_display()
+            and not self.is_xz_view()
+        )
         self.projection_label.setVisible(visible)
         self.projection_combo.setVisible(visible)
+        self.project_checkbox.setEnabled(
+            not self.is_multi_plane_display()
+            and not self.is_xz_view()
+            and not self.is_movie_selected()
+        )
+        self.update_multi_plane_controls()
 
     def update_play_button_states(self) -> None:
         plane_can_play = self.plane_slider.isEnabled() and self.plane_slider.maximum() > self.plane_slider.minimum()
         frame_can_play = (
             self.frame_slider.isEnabled()
-            and self.recording_frame_starts is not None
+            and self.available_movie_total_frames() is not None
             and self.frame_slider.maximum() > self.frame_slider.minimum()
         )
 
@@ -2620,6 +4106,61 @@ class InfoViewer(QMainWindow):
 
         self.plane_play_button.setEnabled(plane_can_play)
         self.frame_play_button.setEnabled(frame_can_play)
+
+    def set_frame_controls(
+        self,
+        total_frames: int | None,
+        value: int | None = None,
+        enabled: bool = True,
+        label: str | None = None,
+    ) -> None:
+        if total_frames is None or total_frames <= 0:
+            self.frame_slider.setEnabled(False)
+            self.frame_spinbox.setEnabled(False)
+            self.frame_label.setText(label or "Frame: -")
+            self.update_play_button_states()
+            return
+
+        maximum = max(0, int(total_frames) - 1)
+        if value is None:
+            value = int(self.frame_slider.value())
+        value = max(0, min(maximum, int(value)))
+
+        self.frame_slider.blockSignals(True)
+        self.frame_spinbox.blockSignals(True)
+        self.frame_slider.setMinimum(0)
+        self.frame_slider.setMaximum(maximum)
+        self.frame_slider.setValue(value)
+        self.frame_spinbox.setMinimum(0)
+        self.frame_spinbox.setMaximum(maximum)
+        self.frame_spinbox.setValue(value)
+        self.frame_slider.blockSignals(False)
+        self.frame_spinbox.blockSignals(False)
+
+        self.frame_slider.setEnabled(bool(enabled))
+        self.frame_spinbox.setEnabled(bool(enabled))
+        self.frame_label.setText(label or f"Frame: {value} / {maximum}")
+        self.update_play_button_states()
+
+    def sync_frame_spinbox_to_slider(self, value: int | None = None) -> None:
+        if value is None:
+            value = int(self.frame_slider.value())
+        maximum = int(self.frame_slider.maximum())
+        value = max(int(self.frame_slider.minimum()), min(maximum, int(value)))
+        self.frame_spinbox.blockSignals(True)
+        self.frame_spinbox.setMinimum(int(self.frame_slider.minimum()))
+        self.frame_spinbox.setMaximum(maximum)
+        self.frame_spinbox.setValue(value)
+        self.frame_spinbox.blockSignals(False)
+
+    def update_frame_label(self, value: int | None = None) -> None:
+        if value is None:
+            value = int(self.frame_slider.value())
+        total_frames = self.available_movie_total_frames()
+        if total_frames is not None:
+            self.frame_label.setText(f"Frame: {int(value)} / {int(total_frames) - 1}")
+        else:
+            self.frame_label.setText(f"Frame: {int(value)}")
 
     def stop_plane_play(self) -> None:
         if self.plane_timer is not None and self.plane_timer.isActive():
@@ -2651,13 +4192,11 @@ class InfoViewer(QMainWindow):
         if self.frame_timer.isActive():
             self.stop_frame_play()
             return
-        if self.recording_frame_starts is None or self.frame_slider.maximum() <= self.frame_slider.minimum():
+        if self.available_movie_total_frames() is None or self.frame_slider.maximum() <= self.frame_slider.minimum():
             self.update_play_button_states()
             return
-        if not self.is_recording_selected() and RECORDING_DISPLAY_KEY in [
-            self.data_combo.itemText(i) for i in range(self.data_combo.count())
-        ]:
-            self.data_combo.setCurrentText(RECORDING_DISPLAY_KEY)
+        if not self.is_movie_selected():
+            self.select_first_movie_source()
         self.frame_play_button.setText("Pause")
         self.frame_timer.start()
 
@@ -2671,37 +4210,58 @@ class InfoViewer(QMainWindow):
             next_value = self.plane_slider.minimum()
         self.plane_slider.setValue(next_value)
 
+    def step_plane(self, step: int) -> None:
+        if not self.plane_slider.isEnabled() or self.plane_slider.maximum() <= self.plane_slider.minimum():
+            return
+        next_value = int(self.plane_slider.value()) + int(step)
+        next_value = max(self.plane_slider.minimum(), min(self.plane_slider.maximum(), next_value))
+        if next_value == self.plane_slider.value():
+            return
+        self.plane_slider.setValue(next_value)
+
     def advance_frame(self) -> None:
-        if self.recording_frame_starts is None or self.frame_slider.maximum() <= self.frame_slider.minimum():
+        if self.available_movie_total_frames() is None or self.frame_slider.maximum() <= self.frame_slider.minimum():
             self.stop_frame_play()
             self.update_play_button_states()
             return
-        if not self.is_recording_selected() and RECORDING_DISPLAY_KEY in [
-            self.data_combo.itemText(i) for i in range(self.data_combo.count())
-        ]:
-            self.data_combo.setCurrentText(RECORDING_DISPLAY_KEY)
+        if not self.is_movie_selected():
+            self.select_first_movie_source()
         next_value = self.frame_slider.value() + 1
         if next_value > self.frame_slider.maximum():
             next_value = self.frame_slider.minimum()
         self.frame_slider.setValue(next_value)
 
     def on_plane_slider_moved(self, value: int) -> None:
-        self.plane_label.setText(f"Plane: {value}")
+        if self.data_combo.currentText() == NONRIGID_DISPLAY_KEY:
+            self.plane_label.setText(f"Map: {value}")
+        else:
+            self.plane_label.setText(
+                f"Y: {value}" if self.is_xz_view() else self.plane_display_label(value)
+            )
 
     def on_plane_changed(self) -> None:
         self.update_image(preserve_view=True)
 
     def on_frame_slider_moved(self, value: int) -> None:
-        if self.recording_frame_starts is not None:
-            total_frames = int(self.recording_frame_starts[-1])
-            self.frame_label.setText(f"Frame: {value} / {total_frames - 1}")
-        else:
-            self.frame_label.setText(f"Frame: {value}")
+        self.sync_frame_spinbox_to_slider(value)
+        self.update_frame_label(value)
         self.update_trace_cursor(value)
 
+    def on_frame_spinbox_changed(self, value: int) -> None:
+        if not self.frame_spinbox.isEnabled():
+            return
+        value = max(self.frame_slider.minimum(), min(self.frame_slider.maximum(), int(value)))
+        if value != self.frame_slider.value():
+            self.frame_slider.setValue(value)
+        else:
+            self.update_frame_label(value)
+            self.update_trace_cursor(value)
+
     def on_frame_changed(self) -> None:
-        if self.recording_frame_starts is not None and not self.is_recording_selected():
-            self.data_combo.setCurrentText(RECORDING_DISPLAY_KEY)
+        self.sync_frame_spinbox_to_slider(self.frame_slider.value())
+        self.update_frame_label(self.frame_slider.value())
+        if self.available_movie_total_frames() is not None and not self.is_movie_selected():
+            self.select_first_movie_source()
             self.update_trace_cursor(self.frame_slider.value())
             return
         self.update_image(preserve_view=True)
@@ -2713,21 +4273,93 @@ class InfoViewer(QMainWindow):
     def is_right_mouse_button(self, button) -> bool:
         return button in (3, MouseButton.RIGHT)
 
+    def tile_plane_images(self, images: list[np.ndarray], planes: list[int]) -> np.ndarray:
+        if not images:
+            self.current_plane_tiles = {}
+            return np.zeros((1, 1), dtype=np.float32)
+
+        image_arrays = [np.asarray(image, dtype=np.float32) for image in images]
+        max_y = max(int(image.shape[0]) for image in image_arrays)
+        max_x = max(int(image.shape[1]) for image in image_arrays)
+        n_planes = len(image_arrays)
+        n_cols = int(np.ceil(np.sqrt(n_planes)))
+        n_rows = int(np.ceil(n_planes / n_cols))
+        gap = 4
+        out_y = n_rows * max_y + max(0, n_rows - 1) * gap
+        out_x = n_cols * max_x + max(0, n_cols - 1) * gap
+        montage = np.full((out_y, out_x), np.nan, dtype=np.float32)
+        self.current_plane_tiles = {}
+
+        for idx, (plane, image) in enumerate(zip(planes, image_arrays)):
+            row = idx // n_cols
+            col = idx % n_cols
+            y0 = row * (max_y + gap)
+            x0 = col * (max_x + gap)
+            ny, nx = image.shape
+            montage[y0 : y0 + ny, x0 : x0 + nx] = image
+            self.current_plane_tiles[int(plane)] = (int(y0), int(x0), int(ny), int(nx))
+
+        return montage
+
     def current_image(self) -> tuple[np.ndarray, str]:
+        self.current_plane_tiles = {}
         if self.is_recording_selected():
             if self.recording_shape is None or self.recording_frame_starts is None:
                 raise RuntimeError("No registered movie loaded.")
-            plane = self.plane_slider.value()
             frame = self.frame_slider.value()
+            if self.is_xz_view():
+                y_index = self.plane_slider.value()
+                image = self.recording_y_slice(frame, y_index)
+                title = f"registered movie, y {y_index}, frame {frame}"
+                return image, title
+            if self.is_multi_plane_display():
+                planes = self.selected_multi_planes()
+                image = self.tile_plane_images([self.recording_frame(frame, plane) for plane in planes], planes)
+                title = f"registered movie, {self.plane_list_label(planes)}, frame {frame}"
+                return image, title
+            plane = self.plane_slider.value()
             image = self.recording_frame(frame, plane)
-            title = f"registered movie, plane {plane}, frame {frame}"
+            title = f"registered movie, {self.plane_display_label(plane)}, frame {frame}"
+            return image, title
+
+        if self.is_raw_tiff_selected():
+            if self.raw_tiff_movie is None:
+                raise RuntimeError("No raw TIFF loaded.")
+            frame = self.frame_slider.value()
+            if self.is_xz_view():
+                y_index = self.plane_slider.value()
+                image = self.raw_tiff_y_slice(frame, y_index)
+                title = f"raw TIFF, y {y_index}, frame {frame}"
+                return image, title
+            if self.is_multi_plane_display():
+                planes = self.selected_multi_planes()
+                image = self.tile_plane_images([self.raw_tiff_frame(frame, plane) for plane in planes], planes)
+                title = f"raw TIFF, {self.plane_list_label(planes)}, frame {frame}"
+                return image, title
+            plane = self.plane_slider.value()
+            image = self.raw_tiff_frame(frame, plane)
+            title = f"raw TIFF, {self.plane_display_label(plane)}, frame {frame}"
             return image, title
 
         if self.current_array is None:
             raise RuntimeError("No image loaded.")
 
         key = self.data_combo.currentText()
-        if self.project_checkbox.isChecked():
+        if key == NONRIGID_DISPLAY_KEY:
+            plane = self.plane_slider.value()
+            image = self.current_array[plane]
+            labels = ("z shift", "y shift", "x shift", "shift magnitude")
+            label = labels[plane] if 0 <= plane < len(labels) else f"plane {plane}"
+            title = f"{key}: {label}"
+        elif self.is_xz_view():
+            y_index = self.plane_slider.value()
+            image = self.current_array[:, y_index, :]
+            title = f"{key}, y {y_index}"
+        elif self.is_multi_plane_display():
+            planes = self.selected_multi_planes()
+            image = self.tile_plane_images([self.current_array[plane] for plane in planes], planes)
+            title = f"{key}, {self.plane_list_label(planes)}"
+        elif self.project_checkbox.isChecked():
             mode = self.projection_combo.currentText()
             if mode == "Max":
                 image = np.nanmax(self.current_array, axis=0)
@@ -2737,7 +4369,7 @@ class InfoViewer(QMainWindow):
         else:
             plane = self.plane_slider.value()
             image = self.current_array[plane]
-            title = f"{key}, plane {plane}"
+            title = f"{key}, {self.plane_display_label(plane)}"
 
         return image, title
 
@@ -2777,8 +4409,14 @@ class InfoViewer(QMainWindow):
         image_shape: tuple[int, int],
         accepted_panel: bool,
         mask_kind: str = "roi",
+        plane_override: int | None = None,
     ) -> tuple[np.ndarray | None, np.ndarray]:
-        overlay, id_map = self.base_mask_overlay(image_shape, accepted_panel, mask_kind=mask_kind)
+        overlay, id_map = self.base_mask_overlay(
+            image_shape,
+            accepted_panel,
+            mask_kind=mask_kind,
+            plane_override=plane_override,
+        )
         if (
             self.selected_roi_idx is None
             or self.stats is None
@@ -2796,6 +4434,7 @@ class InfoViewer(QMainWindow):
             image_shape,
             accepted_panel,
             mask_kind=mask_kind,
+            plane_override=plane_override,
         )
         return selected_overlay, selected_id_map
 
@@ -2804,6 +4443,7 @@ class InfoViewer(QMainWindow):
         image_shape: tuple[int, int],
         accepted_panel: bool,
         mask_kind: str = "roi",
+        plane_override: int | None = None,
     ) -> tuple[np.ndarray | None, np.ndarray]:
         if (
             self.stats is None
@@ -2812,14 +4452,18 @@ class InfoViewer(QMainWindow):
         ):
             return None, np.full(image_shape, -1, dtype=np.int32)
 
-        projected = self.project_checkbox.isChecked() and not self.is_recording_selected()
-        plane = None if projected else int(self.plane_slider.value())
+        xz_view = self.is_xz_view()
+        multi_plane = self.is_multi_plane_display() and bool(self.current_plane_tiles) and plane_override is None
+        projected = self.project_checkbox.isChecked() and not self.is_movie_selected() and not multi_plane and not xz_view
+        plane = int(plane_override) if plane_override is not None else (None if projected or multi_plane else int(self.plane_slider.value()))
+        plane_key = tuple(self.selected_multi_planes()) if multi_plane else plane
         color_mode = self.roi_color_overlay_mode if self.correlation_colors is not None else "Random"
         cache_key = (
             tuple(image_shape),
+            self.orientation_mode(),
             bool(accepted_panel),
             mask_kind,
-            plane,
+            plane_key,
             color_mode,
             self.correlation_seed_roi_idx,
         )
@@ -2827,9 +4471,9 @@ class InfoViewer(QMainWindow):
         if cached is not None:
             return cached
 
-        ny, nx = image_shape
-        overlay = np.zeros((ny, nx, 4), dtype=np.float32)
-        id_map = np.full((ny, nx), -1, dtype=np.int32)
+        n_rows, n_cols = image_shape
+        overlay = np.zeros((n_rows, n_cols, 4), dtype=np.float32)
+        id_map = np.full((n_rows, n_cols), -1, dtype=np.int32)
         alpha = 0.34 if mask_kind == "neuropil" else 0.55
 
         for roi_idx, stat in enumerate(self.stats):
@@ -2840,16 +4484,35 @@ class InfoViewer(QMainWindow):
                 continue
 
             z, y, x = coords
-            if projected:
+            if multi_plane:
+                roi_color = self.roi_mask_color(roi_idx)
+                for tile_plane, (y0, x0, tile_y, tile_x) in self.current_plane_tiles.items():
+                    keep = z == tile_plane
+                    if not np.any(keep):
+                        continue
+                    yy_raw = y[keep].astype(np.int64, copy=False)
+                    xx_raw = x[keep].astype(np.int64, copy=False)
+                    in_tile = (yy_raw >= 0) & (yy_raw < tile_y) & (xx_raw >= 0) & (xx_raw < tile_x)
+                    if not np.any(in_tile):
+                        continue
+                    yy = yy_raw[in_tile] + y0
+                    xx = xx_raw[in_tile] + x0
+                    overlay[yy, xx, :3] = roi_color
+                    overlay[yy, xx, 3] = alpha
+                    id_map[yy, xx] = roi_idx
+                continue
+            if xz_view:
+                keep = y == plane
+            elif projected:
                 keep = np.ones(z.shape, dtype=bool)
             else:
                 keep = z == plane
             if not np.any(keep):
                 continue
 
-            yy = y[keep].astype(np.int64, copy=False)
+            yy = (z if xz_view else y)[keep].astype(np.int64, copy=False)
             xx = x[keep].astype(np.int64, copy=False)
-            in_bounds = (yy >= 0) & (yy < ny) & (xx >= 0) & (xx < nx)
+            in_bounds = (yy >= 0) & (yy < n_rows) & (xx >= 0) & (xx < n_cols)
             if not np.any(in_bounds):
                 continue
 
@@ -2880,6 +4543,7 @@ class InfoViewer(QMainWindow):
         image_shape: tuple[int, int],
         accepted_panel: bool,
         mask_kind: str = "roi",
+        plane_override: int | None = None,
     ) -> tuple[np.ndarray | None, np.ndarray]:
         if self.stats is None or self.selected_roi_idx is None:
             return overlay, id_map
@@ -2891,33 +4555,65 @@ class InfoViewer(QMainWindow):
         if coords is None:
             return overlay, id_map
 
-        ny, nx = image_shape
+        n_rows, n_cols = image_shape
         z, y, x = coords
-        projected = self.project_checkbox.isChecked() and not self.is_recording_selected()
-        if projected:
+        xz_view = self.is_xz_view()
+        multi_plane = self.is_multi_plane_display() and bool(self.current_plane_tiles) and plane_override is None
+        projected = self.project_checkbox.isChecked() and not self.is_movie_selected() and not multi_plane and not xz_view
+        if multi_plane:
+            created_overlay = overlay is None
+            if overlay is None:
+                overlay = np.zeros((n_rows, n_cols, 4), dtype=np.float32)
+            any_pixels = False
+            for tile_plane, (y0, x0, tile_y, tile_x) in self.current_plane_tiles.items():
+                keep = z == tile_plane
+                if not np.any(keep):
+                    continue
+                yy_raw = y[keep].astype(np.int64, copy=False)
+                xx_raw = x[keep].astype(np.int64, copy=False)
+                in_tile = (yy_raw >= 0) & (yy_raw < tile_y) & (xx_raw >= 0) & (xx_raw < tile_x)
+                if not np.any(in_tile):
+                    continue
+                yy = yy_raw[in_tile] + y0
+                xx = xx_raw[in_tile] + x0
+                overlay[yy, xx, :3] = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+                overlay[yy, xx, 3] = 0.95
+                id_map[yy, xx] = self.selected_roi_idx
+                any_pixels = True
+            if any_pixels:
+                return overlay, id_map
+            return (None if created_overlay else overlay), id_map
+        if xz_view:
+            plane = int(plane_override) if plane_override is not None else int(self.plane_slider.value())
+            keep = y == plane
+        elif projected:
             keep = np.ones(z.shape, dtype=bool)
         else:
-            keep = z == self.plane_slider.value()
+            plane = int(plane_override) if plane_override is not None else int(self.plane_slider.value())
+            keep = z == plane
         if not np.any(keep):
             return overlay, id_map
 
-        yy = y[keep].astype(np.int64, copy=False)
+        yy = (z if xz_view else y)[keep].astype(np.int64, copy=False)
         xx = x[keep].astype(np.int64, copy=False)
-        in_bounds = (yy >= 0) & (yy < ny) & (xx >= 0) & (xx < nx)
+        in_bounds = (yy >= 0) & (yy < n_rows) & (xx >= 0) & (xx < n_cols)
         yy = yy[in_bounds]
         xx = xx[in_bounds]
         if not yy.size:
             return overlay, id_map
 
         if overlay is None:
-            overlay = np.zeros((ny, nx, 4), dtype=np.float32)
+            overlay = np.zeros((n_rows, n_cols, 4), dtype=np.float32)
         overlay[yy, xx, :3] = np.array([1.0, 1.0, 1.0], dtype=np.float32)
         overlay[yy, xx, 3] = 0.95
         id_map[yy, xx] = self.selected_roi_idx
         return overlay, id_map
 
     def update_image(self, preserve_view: bool = False) -> None:
-        if self.current_array is None and not self.is_recording_selected():
+        if self.current_array is None and not self.is_movie_selected():
+            return
+        if self.is_multi_plane_display():
+            self.update_multi_plane_image(preserve_view=preserve_view)
             return
 
         old_xlim = None
@@ -2937,35 +4633,51 @@ class InfoViewer(QMainWindow):
                 lo = float(np.nanmin(image))
                 hi = float(np.nanmax(image))
 
-        self.plane_label.setText(f"Plane: {self.plane_slider.value()}")
-        if self.is_recording_selected():
-            self.plane_slider.setEnabled(True)
-            if self.recording_frame_starts is not None:
-                total_frames = int(self.recording_frame_starts[-1])
-                self.frame_label.setText(f"Frame: {self.frame_slider.value()} / {total_frames - 1}")
+        if self.data_combo.currentText() == NONRIGID_DISPLAY_KEY:
+            self.plane_label.setText(f"Map: {self.plane_slider.value()}")
         else:
-            self.plane_slider.setEnabled(not self.project_checkbox.isChecked())
+            self.plane_label.setText(
+                f"Y: {self.plane_slider.value()}"
+                if self.is_xz_view()
+                else self.plane_display_label(self.plane_slider.value())
+            )
+        if self.is_movie_selected():
+            self.plane_slider.setEnabled(True)
+            total_frames = self.active_movie_total_frames()
+            if total_frames is not None:
+                self.sync_frame_spinbox_to_slider(self.frame_slider.value())
+                self.update_frame_label(self.frame_slider.value())
+        else:
+            self.plane_slider.setEnabled(not self.project_checkbox.isChecked() or self.is_xz_view())
         self.update_play_button_states()
 
         self.figure.clear()
+        if hasattr(self.figure, "set_layout_engine"):
+            self.figure.set_layout_engine("constrained")
+        else:
+            self.figure.set_constrained_layout(True)
         self.figure.patch.set_facecolor(GUI_BG)
         self.current_id_maps = {}
         self.image_axes = []
         self.image_axes_panels = {}
         self.image_axes_roles = {}
+        self.image_axes_planes = {}
 
         show_nonaccepted = not hasattr(self, "show_nonaccepted_checkbox") or self.show_nonaccepted_checkbox.isChecked()
         secondary_mode = self.secondary_panel_mode()
+        image_aspect = self.xz_image_aspect()
         ax_left = self.figure.add_subplot(1, 2, 1) if show_nonaccepted else self.figure.add_subplot(1, 1, 1)
         self.current_axes = ax_left
         self.image_axes = [ax_left]
         self.image_axes_panels = {ax_left: True}
         self.image_axes_roles = {ax_left: "accepted"}
+        self.image_axes_planes = {ax_left: None}
 
         panel_specs = [(ax_left, True, "Accepted cells", "roi", "accepted")]
         if show_nonaccepted:
             ax_right = self.figure.add_subplot(1, 2, 2, sharex=ax_left, sharey=ax_left)
             self.image_axes.append(ax_right)
+            self.image_axes_planes[ax_right] = None
             if secondary_mode == "Accepted neuropil":
                 self.image_axes_panels[ax_right] = True
                 self.image_axes_roles[ax_right] = "neuropil"
@@ -2977,11 +4689,27 @@ class InfoViewer(QMainWindow):
 
         for ax, accepted_panel, panel_name, mask_kind, role in panel_specs:
             ax.set_facecolor(PLOT_BG)
-            ax.imshow(image, cmap="gray", vmin=lo, vmax=hi, aspect="equal")
+            ax.imshow(image, cmap="gray", vmin=lo, vmax=hi, aspect=image_aspect)
+            self.draw_raw_spot_marker(
+                ax,
+                self.plane_slider.value() if self.is_raw_tiff_selected() and not self.is_xz_view() else None,
+            )
+            if self.is_multi_plane_display() and self.current_plane_tiles:
+                for tile_plane, (y0, x0, _tile_y, _tile_x) in self.current_plane_tiles.items():
+                    ax.text(
+                        x0 + 6,
+                        y0 + 18,
+                        f"Plane {tile_plane}",
+                        color=TEXT_FG,
+                        fontsize=9,
+                        ha="left",
+                        va="top",
+                        bbox={"facecolor": PLOT_BG, "edgecolor": GRID_FG, "alpha": 0.78, "pad": 2},
+                    )
             overlay, id_map = self.build_mask_overlay(image.shape, accepted_panel, mask_kind=mask_kind)
             self.current_id_maps[ax] = id_map
             if overlay is not None:
-                ax.imshow(overlay, interpolation="nearest", aspect="equal")
+                ax.imshow(overlay, interpolation="nearest", aspect=image_aspect)
             elif role == "neuropil":
                 message = "No saved npcoords for accepted ROIs" if not self.has_neuropil_coords() else "No neuropil pixels on this plane"
                 ax.text(
@@ -3000,11 +4728,7 @@ class InfoViewer(QMainWindow):
             if overlay_label is not None:
                 title = f"{panel_name}; {overlay_label}"
             ax.set_title(title, color=TEXT_FG)
-            ax.set_xlabel("x")
-            ax.set_ylabel("y")
-            ax.xaxis.label.set_color(TEXT_FG)
-            ax.yaxis.label.set_color(TEXT_FG)
-            ax.tick_params(colors=TEXT_FG)
+            self.style_image_axis(ax)
             for spine in ax.spines.values():
                 spine.set_color(GRID_FG)
 
@@ -3012,6 +4736,157 @@ class InfoViewer(QMainWindow):
             for ax in self.image_axes:
                 ax.set_xlim(old_xlim)
                 ax.set_ylim(old_ylim)
+        self.canvas.draw_idle()
+
+    def plane_image(self, plane: int) -> np.ndarray:
+        if self.is_recording_selected():
+            return self.recording_frame(self.frame_slider.value(), plane)
+        if self.is_raw_tiff_selected():
+            return self.raw_tiff_frame(self.frame_slider.value(), plane)
+        if self.current_array is None:
+            raise RuntimeError("No image loaded.")
+        return np.asarray(self.current_array[plane])
+
+    def update_multi_plane_image(self, preserve_view: bool = False) -> None:
+        planes = self.selected_multi_planes()
+        if not planes:
+            return
+
+        old_xlim = None
+        old_ylim = None
+        if preserve_view and self.image_axes:
+            old_xlim = self.image_axes[0].get_xlim()
+            old_ylim = self.image_axes[0].get_ylim()
+
+        images = [np.asarray(self.plane_image(plane)) for plane in planes]
+        if self.is_black_background_selected():
+            lo, hi = 0.0, 1.0
+        else:
+            finite_parts = [image[np.isfinite(image)] for image in images if np.any(np.isfinite(image))]
+            if finite_parts:
+                all_values = np.concatenate(finite_parts)
+                lo, hi = np.percentile(all_values, [1, 99.8])
+            else:
+                lo, hi = 0.0, 1.0
+            if hi <= lo:
+                lo = float(np.nanmin(images[0]))
+                hi = float(np.nanmax(images[0]))
+
+        self.plane_label.setText(f"Planes: {self.plane_list_label(planes)}")
+        self.plane_slider.setEnabled(False)
+        self.update_play_button_states()
+        if self.is_movie_selected():
+            total_frames = self.active_movie_total_frames()
+            if total_frames is not None:
+                self.sync_frame_spinbox_to_slider(self.frame_slider.value())
+                self.update_frame_label(self.frame_slider.value())
+
+        self.figure.clear()
+        if hasattr(self.figure, "set_layout_engine"):
+            self.figure.set_layout_engine(None)
+        else:
+            self.figure.set_constrained_layout(False)
+        self.figure.patch.set_facecolor(GUI_BG)
+        self.current_plane_tiles = {}
+        self.current_id_maps = {}
+        self.image_axes = []
+        self.image_axes_panels = {}
+        self.image_axes_roles = {}
+        self.image_axes_planes = {}
+
+        show_right = not hasattr(self, "show_nonaccepted_checkbox") or self.show_nonaccepted_checkbox.isChecked()
+        secondary_mode = self.secondary_panel_mode()
+        overlay_label = self.roi_color_overlay_title()
+        section_specs = [(True, "Accepted cells", "roi", "accepted")]
+        if show_right:
+            if secondary_mode == "Accepted neuropil":
+                section_specs.append((True, "Accepted neuropil", "neuropil", "neuropil"))
+            else:
+                section_specs.append((False, "Non-accepted cells", "roi", "nonaccepted"))
+
+        n_planes = len(planes)
+        plane_cols = min(n_planes, max(1, int(np.ceil(np.sqrt(n_planes * 0.85)))))
+        plane_rows = int(np.ceil(n_planes / plane_cols))
+        total_rows = plane_rows
+        total_cols = plane_cols * len(section_specs)
+        grid = self.figure.add_gridspec(
+            total_rows,
+            total_cols,
+        )
+        first_ax = None
+
+        for section_idx, (accepted_panel, panel_name, mask_kind, role) in enumerate(section_specs):
+            col0 = section_idx * plane_cols
+            section_title = panel_name
+            if overlay_label is not None:
+                section_title = f"{section_title}; {overlay_label}"
+            self.figure.text(
+                0.012 + section_idx / len(section_specs),
+                0.982,
+                section_title,
+                color=TEXT_FG,
+                fontsize=10,
+                fontweight="bold",
+                ha="left",
+                va="center",
+            )
+
+            for plane_idx, (plane, image) in enumerate(zip(planes, images)):
+                row = plane_idx // plane_cols
+                col = col0 + plane_idx % plane_cols
+                ax = self.figure.add_subplot(grid[row, col])
+                if first_ax is None:
+                    first_ax = ax
+                    self.current_axes = ax
+                self.image_axes.append(ax)
+                self.image_axes_panels[ax] = bool(accepted_panel)
+                self.image_axes_roles[ax] = role
+                self.image_axes_planes[ax] = int(plane)
+
+                ax.set_facecolor(PLOT_BG)
+                ax.imshow(image, cmap="gray", vmin=lo, vmax=hi, aspect="equal")
+                self.draw_raw_spot_marker(ax, plane if self.is_raw_tiff_selected() else None)
+                overlay, id_map = self.build_mask_overlay(
+                    image.shape,
+                    accepted_panel,
+                    mask_kind=mask_kind,
+                    plane_override=plane,
+                )
+                self.current_id_maps[ax] = id_map
+                if overlay is not None:
+                    ax.imshow(overlay, interpolation="nearest", aspect="equal")
+                elif role == "neuropil":
+                    message = "No saved npcoords for accepted ROIs" if not self.has_neuropil_coords() else "No neuropil pixels on this plane"
+                    ax.text(
+                        0.5,
+                        0.5,
+                        message,
+                        ha="center",
+                        va="center",
+                        transform=ax.transAxes,
+                        color=TEXT_FG,
+                        fontsize=9,
+                        bbox={"facecolor": PLOT_BG, "edgecolor": GRID_FG, "alpha": 0.82, "pad": 5},
+                    )
+
+                ax.set_title(self.plane_display_label(plane), color=TEXT_FG, fontsize=8, pad=1)
+                ax.set_xlabel("")
+                ax.set_ylabel("")
+                ax.set_xticks([])
+                ax.set_yticks([])
+                for spine in ax.spines.values():
+                    spine.set_color(GRID_FG)
+
+        if not self.image_view_limits_are_compatible(image.shape, old_xlim, old_ylim):
+            old_xlim = None
+            old_ylim = None
+
+        if old_xlim is not None and old_ylim is not None:
+            for ax in self.image_axes:
+                ax.set_xlim(old_xlim)
+                ax.set_ylim(old_ylim)
+
+        self.figure.subplots_adjust(left=0.01, right=0.995, top=0.955, bottom=0.015, wspace=0.015, hspace=0.10)
         self.canvas.draw_idle()
 
     def roi_color_overlay_title(self) -> str | None:
@@ -3284,8 +5159,12 @@ class InfoViewer(QMainWindow):
 
         shifts = np.asarray(self.motion_shifts, dtype=float)
         frames = np.arange(shifts.shape[0])
+        z_shift = shifts[:, 0]
         y_shift = shifts[:, 1]
         x_shift = shifts[:, 2]
+
+
+
         xy_motion = np.sqrt(y_shift**2 + x_shift**2)
         frame = min(max(self.frame_slider.value(), 0), shifts.shape[0] - 1)
 
@@ -3293,12 +5172,13 @@ class InfoViewer(QMainWindow):
         self.trace_figure.clear()
         self.trace_figure.patch.set_facecolor(GUI_BG)
         self.trace_cursor_lines = []
-        axes = self.trace_figure.subplots(3, 1, sharex=True)
+        axes = self.trace_figure.subplots(4, 1, sharex=True)
         self.trace_zoom_axes = axes[-1]
         plot_specs = [
-            (axes[0], y_shift, "#61a5ff", "Y shift", "Y pixels"),
-            (axes[1], x_shift, "#ffb74d", "X shift", "X pixels"),
-            (axes[2], xy_motion, "white", "X-Y motion", "pixels"),
+            (axes[0], z_shift, "#81c784", "Z shift", "Z planes"),
+            (axes[1], y_shift, "#61a5ff", "Y shift", "Y pixels"),
+            (axes[2], x_shift, "#ffb74d", "X shift", "X pixels"),
+            (axes[3], xy_motion, "white", "X-Y motion", "pixels"),
         ]
 
         for ax, values, color, label, ylabel in plot_specs:
@@ -3319,14 +5199,15 @@ class InfoViewer(QMainWindow):
 
         axes[0].set_title(
             f"Motion correction shifts; frame {frame}; "
-            f"y={y_shift[frame]:.3g}, x={x_shift[frame]:.3g}, x-y={xy_motion[frame]:.3g} pixels",
+            f"z={z_shift[frame]:.3g}, y={y_shift[frame]:.3g}, "
+            f"x={x_shift[frame]:.3g}, x-y={xy_motion[frame]:.3g}",
             color=TEXT_FG,
             fontsize=10,
             pad=2,
         )
         axes[-1].set_xlabel("Frame", fontsize=8, labelpad=1)
         axes[-1].xaxis.label.set_color(TEXT_FG)
-        self.trace_figure.subplots_adjust(left=0.045, right=0.995, top=0.91, bottom=0.12, hspace=0.14)
+        self.trace_figure.subplots_adjust(left=0.045, right=0.995, top=0.90, bottom=0.12, hspace=0.18)
         self.trace_canvas.draw_idle()
 
     def trace_for_roi(self, trace_key: str, roi_idx: int) -> np.ndarray | None:
@@ -3513,6 +5394,12 @@ class InfoViewer(QMainWindow):
         if mode == "curate":
             self.toggle_roi_at(drag_start["axes"], float(drag_start["xdata"]), float(drag_start["ydata"]))
         else:
+            if self.handle_raw_spot_click(
+                drag_start["axes"],
+                float(drag_start["xdata"]),
+                float(drag_start["ydata"]),
+            ):
+                return
             self.select_roi_at(
                 drag_start["axes"],
                 float(drag_start["xdata"]),
@@ -3521,9 +5408,224 @@ class InfoViewer(QMainWindow):
 
     def data_point_from_mouse_event(self, event, axes) -> tuple[float, float]:
         if event.xdata is not None and event.ydata is not None and event.inaxes is axes:
+
+
+
+
+
             return float(event.xdata), float(event.ydata)
         xdata, ydata = axes.transData.inverted().transform((event.x, event.y))
         return float(xdata), float(ydata)
+
+    def handle_raw_spot_click(self, axes, xdata: float, ydata: float) -> bool:
+        if (
+            not hasattr(self, "pick_raw_spot_button")
+            or not self.pick_raw_spot_button.isChecked()
+            or not self.raw_spot_pick_available()
+        ):
+            return False
+        channel = self.image_axes_planes.get(axes)
+        if channel is None:
+            return False
+        image = self.plane_image(int(channel))
+        ny, nx = image.shape
+        x = float(np.clip(xdata, 0, nx - 1))
+        y = float(np.clip(ydata, 0, ny - 1))
+        self.raw_spot_points_px[int(channel)] = (x, y)
+        self.raw_spot_frame = int(self.frame_slider.value())
+        self.update_raw_spot_controls()
+
+        if self.raw_tiff_movie is not None and self.raw_tiff_movie.voxel_size_um is not None:
+            _z_um, y_um_per_px, x_um_per_px = self.raw_tiff_movie.voxel_size_um
+            location = f"x={x * x_um_per_px:.2f} um, y={y * y_um_per_px:.2f} um"
+        else:
+            location = f"x={x:.1f} px, y={y:.1f} px"
+        self.status_label.setText(
+            f"Spot picked on {self.plane_display_label(channel)} at {location}; "
+            f"{len(self.raw_spot_points_px)} panel(s) picked."
+        )
+        self.update_image(preserve_view=True)
+        return True
+
+    def draw_raw_spot_marker(self, ax, channel: int | None) -> None:
+        if (
+            channel is None
+            or int(channel) not in self.raw_spot_points_px
+        ):
+            return
+        x, y = self.raw_spot_points_px[int(channel)]
+        ax.plot(
+            [x],
+            [y],
+            marker="+",
+            markersize=12,
+            markeredgewidth=1.8,
+            color="#ffd54f",
+            zorder=30,
+        )
+
+    def raw_spot_search_radius_px(self) -> int:
+        if self.raw_tiff_movie is None or self.raw_tiff_movie.voxel_size_um is None:
+            return 10
+        _z_um, y_um_per_px, x_um_per_px = self.raw_tiff_movie.voxel_size_um
+        xy_um_per_px = max(min(float(x_um_per_px), float(y_um_per_px)), 1e-6)
+        return max(3, int(round(RAW_SPOT_SEARCH_RADIUS_UM / xy_um_per_px)))
+
+    def detect_raw_spot_displacement(self) -> dict[str, np.ndarray]:
+        if (
+            self.raw_tiff_movie is None
+            or not self.raw_spot_points_px
+        ):
+            raise RuntimeError("Pick at least one raw TIFF spot before plotting displacement.")
+
+        frame = int(self.raw_spot_frame if self.raw_spot_frame is not None else self.frame_slider.value())
+        selected = set(self.selected_multi_planes()) if self.is_multi_plane_display() else set(self.raw_spot_points_px)
+        channels = [channel for channel in sorted(self.raw_spot_points_px) if channel in selected]
+        if not channels:
+            raise RuntimeError("None of the picked spots are in the currently selected planes.")
+        radius = self.raw_spot_search_radius_px()
+        centroid_radius = RAW_SPOT_CENTROID_RADIUS_PX
+        if self.raw_tiff_movie.voxel_size_um is not None:
+            _z_um, y_um_per_px, x_um_per_px = self.raw_tiff_movie.voxel_size_um
+        else:
+            y_um_per_px = 1.0
+            x_um_per_px = 1.0
+
+        detected_planes = []
+        x_positions_um = []
+        y_positions_um = []
+        dx_um = []
+        dy_um = []
+        snrs = []
+        for idx, channel in enumerate(channels):
+            self.status_label.setText(
+                f"Detecting spot positions: picked panel {idx + 1} / {len(channels)}"
+            )
+            QApplication.processEvents()
+
+            x0, y0 = self.raw_spot_points_px[channel]
+            image = np.asarray(self.raw_tiff_movie.frame(frame, channel), dtype=np.float32)
+            ny, nx = image.shape
+            x = int(round(x0))
+            y = int(round(y0))
+            xmin = max(0, x - radius)
+            xmax = min(nx, x + radius + 1)
+            ymin = max(0, y - radius)
+            ymax = min(ny, y + radius + 1)
+            crop = image[ymin:ymax, xmin:xmax]
+            finite = crop[np.isfinite(crop)]
+            if finite.size == 0:
+                continue
+
+            bg = float(np.median(finite))
+            mad = float(np.median(np.abs(finite - bg)))
+            noise = 1.4826 * mad
+            if not np.isfinite(noise) or noise <= 0:
+                noise = float(np.nanstd(finite))
+            if not np.isfinite(noise) or noise <= 0:
+                noise = 1.0
+
+            peak_flat = int(np.nanargmax(crop))
+            peak_y, peak_x = np.unravel_index(peak_flat, crop.shape)
+            signal = float(crop[peak_y, peak_x]) - bg
+            snr = signal / noise
+            if not np.isfinite(snr) or snr < RAW_SPOT_DETECTION_SNR:
+                continue
+
+            py = ymin + int(peak_y)
+            px = xmin + int(peak_x)
+            wy0 = max(0, py - centroid_radius)
+            wy1 = min(ny, py + centroid_radius + 1)
+            wx0 = max(0, px - centroid_radius)
+            wx1 = min(nx, px + centroid_radius + 1)
+            patch = image[wy0:wy1, wx0:wx1]
+            weights = np.clip(np.nan_to_num(patch, nan=bg) - bg, 0, None)
+            weight_sum = float(weights.sum())
+            if weight_sum <= 0:
+                cx = float(px)
+                cy = float(py)
+            else:
+                yy, xx = np.indices(weights.shape, dtype=float)
+                cx = float(np.sum((xx + wx0) * weights) / weight_sum)
+                cy = float(np.sum((yy + wy0) * weights) / weight_sum)
+
+            detected_planes.append(channel)
+            x_positions_um.append(cx * float(x_um_per_px))
+            y_positions_um.append(cy * float(y_um_per_px))
+            snrs.append(snr)
+
+        if x_positions_um:
+            x_ref = float(x_positions_um[0])
+            y_ref = float(y_positions_um[0])
+            dx_um = [x - x_ref for x in x_positions_um]
+            dy_um = [y - y_ref for y in y_positions_um]
+
+        return {
+            "planes": np.asarray(detected_planes, dtype=int),
+            "frame": np.asarray([frame], dtype=int),
+            "x_um": np.asarray(x_positions_um, dtype=float),
+            "y_um": np.asarray(y_positions_um, dtype=float),
+            "dx_um": np.asarray(dx_um, dtype=float),
+            "dy_um": np.asarray(dy_um, dtype=float),
+            "snr": np.asarray(snrs, dtype=float),
+        }
+
+    def plot_raw_spot_displacement(self) -> None:
+        if self.raw_tiff_movie is None:
+            QMessageBox.information(self, "No raw TIFF", "Open a raw TIFF folder first.")
+            return
+        if not self.raw_spot_points_px:
+            QMessageBox.information(
+                self,
+                "No spot picked",
+                "Enable Show selected planes, click Pick spot, then click one spot in each channel panel you want to compare.",
+            )
+            return
+
+        try:
+            result = self.detect_raw_spot_displacement()
+        except Exception as exc:
+            QMessageBox.critical(self, "Could not plot displacement", str(exc))
+            return
+
+        planes = result["planes"]
+        if planes.size == 0:
+            self.clear_trace_plot("Spot displacement: no detected planes passed the local SNR threshold")
+            return
+
+        x_axis = planes.astype(float)
+        x_label = "Plane / channel"
+
+        self.trace_group.setTitle("Spot displacement")
+        self.trace_cursor_lines = []
+        self.trace_zoom_axes = None
+        self.trace_figure.clear()
+        self.trace_figure.patch.set_facecolor(GUI_BG)
+        axes = self.trace_figure.subplots(2, 1, sharex=True)
+        for ax in axes:
+            ax.set_facecolor(PLOT_BG)
+
+        axes[0].plot(x_axis, result["dx_um"], color="#61a5ff", marker="o", linewidth=0.9, markersize=3)
+        axes[1].plot(x_axis, result["dy_um"], color="#ffb74d", marker="o", linewidth=0.9, markersize=3)
+        axes[0].axhline(0, color=GRID_FG, linewidth=0.7, alpha=0.5)
+        axes[1].axhline(0, color=GRID_FG, linewidth=0.7, alpha=0.5)
+        axes[1].set_xticks(x_axis)
+        axes[1].set_xticklabels([str(int(plane)) for plane in planes])
+
+        axes[0].set_title(
+            f"Picked spot displacement; {planes.size}/{len(self.raw_spot_points_px)} detected picked planes; "
+            f"frame {int(result['frame'][0])}; reference plane {int(planes[0])}",
+            color=TEXT_FG,
+            fontsize=10,
+            pad=2,
+        )
+        self.style_trace_axis(axes[0], ylabel="X disp. (um)")
+        self.style_trace_axis(axes[1], xlabel=x_label, ylabel="Y disp. (um)")
+        self.trace_figure.subplots_adjust(left=0.055, right=0.995, top=0.88, bottom=0.16, hspace=0.16)
+        self.trace_canvas.draw_idle()
+        self.status_label.setText(
+            f"Spot displacement plotted for {planes.size}/{len(self.raw_spot_points_px)} detected picked planes."
+        )
 
     def update_selection_rectangle(self, xdata: float, ydata: float) -> None:
         if self.drag_start is None:
@@ -3721,7 +5823,34 @@ class InfoViewer(QMainWindow):
         if coords is None:
             return None
         z, y, x = coords
-        if self.project_checkbox.isChecked() and not self.is_recording_selected():
+        if self.is_xz_view():
+            keep = y == self.plane_slider.value()
+            if not np.any(keep):
+                return None
+            return x[keep], z[keep]
+        if self.is_multi_plane_display() and self.current_plane_tiles:
+            x_parts = []
+            y_parts = []
+            for tile_plane, (y0, x0, tile_y, tile_x) in self.current_plane_tiles.items():
+                keep = z == tile_plane
+                if not np.any(keep):
+                    continue
+                yy_raw = y[keep].astype(np.int64, copy=False)
+                xx_raw = x[keep].astype(np.int64, copy=False)
+                in_tile = (yy_raw >= 0) & (yy_raw < tile_y) & (xx_raw >= 0) & (xx_raw < tile_x)
+                if not np.any(in_tile):
+                    continue
+                x_parts.append(xx_raw[in_tile] + x0)
+                y_parts.append(yy_raw[in_tile] + y0)
+            if not x_parts:
+                return None
+            return np.concatenate(x_parts), np.concatenate(y_parts)
+        if self.is_multi_plane_display():
+            keep = np.isin(z, self.selected_multi_planes())
+            if not np.any(keep):
+                return None
+            return x[keep], y[keep]
+        if self.project_checkbox.isChecked() and not self.is_movie_selected():
             keep = np.ones(z.shape, dtype=bool)
         else:
             keep = z == self.plane_slider.value()
@@ -3736,9 +5865,10 @@ class InfoViewer(QMainWindow):
         if xy is None:
             return
         x, y = xy
-        margin = 35
-        new_xlim = (float(x.min()) - margin, float(x.max()) + margin)
-        new_ylim = (float(y.max()) + margin, float(y.min()) - margin)
+        x_margin = 35
+        y_margin = 3 if self.is_xz_view() else 35
+        new_xlim = (float(x.min()) - x_margin, float(x.max()) + x_margin)
+        new_ylim = (float(y.max()) + y_margin, float(y.min()) - y_margin)
         for ax in self.image_axes:
             ax.set_xlim(new_xlim)
             ax.set_ylim(new_ylim)
@@ -3775,7 +5905,7 @@ class InfoViewer(QMainWindow):
             self.roi_3d_windows.remove(window)
 
     def reset_zoom(self) -> None:
-        if (self.current_array is None and not self.is_recording_selected()) or not self.image_axes:
+        if (self.current_array is None and not self.is_movie_selected()) or not self.image_axes:
             return
         image, _ = self.current_image()
         ny, nx = image.shape
@@ -3792,7 +5922,7 @@ def parse_args() -> argparse.Namespace:
         nargs="?",
         type=Path,
         default=None,
-        help="Optional path to a Suite3D run folder, rois folder, or info.npy file.",
+        help="Optional path to a Suite3D run folder, rois folder, info.npy file, raw TIFF file, or raw TIFF folder.",
     )
     parser.add_argument(
         "--no-default",

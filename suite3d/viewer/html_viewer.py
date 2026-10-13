@@ -17,6 +17,7 @@ import numpy as np
 from . import curation as cur
 from .encode import b64, quantize_traces, rle
 from .movies import normalize_spec, write_movie_snippets
+from suite3d.io.lbmio import lbm_plane_metadata
 
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
@@ -242,10 +243,19 @@ def make_html_viewer(job, export_path=None, result_dir_name="rois", traces="auto
     # ---- meta
     fs, fs_msg = _resolve_fs_vol(job.params, nz, fs_vol)
     table = cur.stat_table(stats)
+    raw_planes, cavity_labels = (
+        lbm_plane_metadata(
+            job.params.get("planes"),
+            two_cavity=len(job.params.get("planes", ())) > job.params.get("cavity_size", 15),
+        )
+        if job.params.get("lbm", False)
+        else (None, None)
+    )
     meta = dict(
         job_id=str(job.job_id), n_rois=int(n_rois), shape=[int(x) for x in shape],
         voxel_size_um=[float(x) for x in job.params.get("voxel_size_um", (1, 1, 1))],
         fs_vol=float(fs), fs_warning=fs_msg, n_frames=int(nt),
+        raw_planes=raw_planes, cavity_labels=cavity_labels,
         has_traces=bool(want), n_chunks=int(n_chunks), chunk_rois=int(chunk_rois),
         trace_dtype=trace_dtype, movies=movies,
         stats={k: b64(v) for k, v in table.items()},

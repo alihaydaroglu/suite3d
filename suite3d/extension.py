@@ -130,7 +130,7 @@ def detect_cells(
                 len(active_frames),
                 npix,
             ),
-            3,
+            11,
         )
         if savepath is not None and iter_idx % 250 == 0 and iter_idx > 0:
             n.save(savepath, stats)
@@ -370,7 +370,7 @@ def log_cell_addition(log, batch_stats, stats_len):
     npix = len(batch_stats["lam"])
     log(
         f"Added cell {stats_len} at {med[0]:02d}, {med[1]:03d}, {med[2]:03d}, peak: {peak_val:.3f}, {len(batch_stats['active_frames'])} frames, {npix} pixels",
-        3,
+        11,
     )
 
 
@@ -1230,6 +1230,9 @@ def _finalize_overmerge(om_sum, om_ssq, om_n, om_p, ns, max_pix, n_pcs=5):
 
 
 def prune_overlapping_cells(stats, dist_thresh=5, lam_overlap_thresh=0.5):
+    if len(stats) == 0:
+        return stats, n.zeros(0, dtype=bool)
+
     meds = n.array([s["med"] for s in stats])
     lams = [n.array(s["lam"]) for s in stats]
     # med_patchs = n.array([s['med_patch'] for s in stats])

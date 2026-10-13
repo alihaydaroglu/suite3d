@@ -100,6 +100,22 @@ class Job:
                 assert k in def_params.keys(), "%s not a valid parameter" % k
                 self.log("Updating param %s" % (str(k)), 2)
                 def_params[k] = v
+            if def_params.get("lbm", False):
+                planes = def_params["planes"]
+                two_cavity = (
+                    len(planes) > def_params.get("cavity_size", 15)
+                    if planes is not None
+                    else None
+                )
+                def_params["planes"] = lbmio.arrange_lbm_planes_for_analysis(
+                    planes,
+                    two_cavity=two_cavity,
+                )
+                def_params["cavity_size"] = lbmio.infer_lbm_cavity_size_from_planes(
+                    def_params["planes"],
+                    default=def_params.get("cavity_size", 15),
+                    two_cavity=two_cavity,
+                )
             self.params = def_params
             assert tifs is not None, "Must provide tiff files"
             self.params["tifs"] = tifs
@@ -617,6 +633,52 @@ class Job:
             if summary["fuse_shifts"] is not None:
                 utils.plot_fuse_shifts(summary["fuse_shifts"], summary["fuse_ccs"])
 
+    def clear_registration_outputs(self):
+        """
+        Remove generated registration files before rerunning registration.
+
+        Rerunning into an existing registration directory can otherwise leave
+        stale files behind or fail on Windows when NumPy tries to overwrite a
+        large .npy file that the viewer still has open.
+        """
+        reg_dir = self.dirs.get("registered_fused_data")
+        if reg_dir is None or not os.path.isdir(reg_dir):
+            return
+
+        patterns = (
+            "fused_reg_data*.npy",
+            "reg_data*.npy",
+            "offsets*.npy",
+            "reg_metrics_*.npy",
+            "mean_img_*.npy",
+            "nonrigid_refs_3d.npy",
+        )
+        removed = 0
+        locked_files = []
+        for pattern in patterns:
+            for path in Path(reg_dir).glob(pattern):
+                try:
+                    path.unlink()
+                    removed += 1
+                except OSError as exc:
+                    locked_files.append((path, exc))
+
+        if locked_files:
+            locked_paths = "\n".join(str(path) for path, _ in locked_files[:5])
+            raise OSError(
+                "Could not clear old registration outputs. Close any Suite3D "
+                "viewer windows using this run, or choose a new saving "
+                "directory, then rerun registration. Locked files:\n"
+                f"{locked_paths}"
+            ) from locked_files[0][1]
+
+        if removed:
+            self.log(
+                "Removed %d old registration output files from %s"
+                % (removed, reg_dir),
+                1,
+            )
+
     def register(self, tifs=None):
         """
         Register the dataset using the method specified in job.params.
@@ -626,6 +688,7 @@ class Job:
             start_batch_idx (int): Starting batch index.
         """
         self.make_new_dir("registered_fused_data")
+        self.clear_registration_outputs()
         params = self.params
         if tifs is None:
             tifs = self.tifs

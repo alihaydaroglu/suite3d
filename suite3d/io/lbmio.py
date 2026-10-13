@@ -10,6 +10,56 @@ import json
 from ..developer import deprecated_inputs, todo
 
 
+def arrange_lbm_planes_for_analysis(planes, two_cavity=None):
+    """Return LBM planes in physical z order, deepest to shallowest.
+
+    LBM two-cavity TIFFs are interleaved by ScanImage. Suite3D analyzes and
+    displays them as cavity A first, then cavity B. Within one cavity, lower raw
+    plane IDs are deeper.
+    """
+    if planes is None:
+        return None
+
+    plane_ids = [int(plane) for plane in planes]
+    even_planes = sorted(plane for plane in plane_ids if plane % 2 == 0)
+    odd_planes = sorted(plane for plane in plane_ids if plane % 2 == 1)
+
+    if two_cavity is None:
+        two_cavity = bool(even_planes and odd_planes)
+
+    if two_cavity:
+        return even_planes + odd_planes
+    return sorted(plane_ids)
+
+
+def infer_lbm_cavity_size_from_planes(planes, default=15, two_cavity=None):
+    """Infer the first-cavity size from planes already in LBM z order."""
+    if planes is None:
+        return int(default)
+
+    arranged = arrange_lbm_planes_for_analysis(planes, two_cavity=two_cavity)
+    if not arranged:
+        return int(default)
+
+    even_count = sum(plane % 2 == 0 for plane in arranged)
+    odd_count = len(arranged) - even_count
+    if two_cavity is None:
+        two_cavity = bool(even_count and odd_count)
+
+    if two_cavity and even_count:
+        return int(even_count)
+    return int(len(arranged))
+
+
+def lbm_plane_metadata(planes, two_cavity=None):
+    """Return raw plane IDs and cavity labels in Suite3D LBM z order."""
+    arranged = arrange_lbm_planes_for_analysis(planes, two_cavity=two_cavity)
+    if arranged is None:
+        return None, None
+    labels = ["A" if plane % 2 == 0 else "B" for plane in arranged]
+    return arranged, labels
+
+
 @deprecated_inputs(
     "Translation is never set to anything except None or zeros, so it's effectively ignored."
 )
@@ -203,8 +253,8 @@ def load_and_stitch_full_tif_worker(
 def get_meso_rois(
     tif_path, max_roi_width_pix=145, fix_fastZ=False, debug=False, skip_roi=None
 ):
-    tf = tifffile.TiffFile(tif_path)
-    artists_json = tf.pages[0].tags["Artist"].value
+    with tifffile.TiffFile(tif_path) as tf:
+        artists_json = tf.pages[0].tags["Artist"].value
 
     si_rois = json.loads(artists_json)["RoiGroups"]["imagingRoiGroup"]["rois"]
     all_zs = [roi["zs"] for roi in si_rois]
