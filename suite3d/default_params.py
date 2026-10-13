@@ -31,6 +31,7 @@ PARAM_SECTIONS = {
     "n_ch_tif":                     "data",
     "skip_roi":                     "data",
     "lbm":                          "data",
+    "num_cavities":                 "data",
     "faced":                        "data",
     "faced_nz":                     "data",
     "multiplane_2p_use_planes":     "data",
@@ -153,6 +154,7 @@ PARAM_SECTIONS = {
     # --- extraction: neuropil subtraction, trace extraction, deconvolution ---
     "batchsize_frames":             "extraction",
     "npil_coeff":                   "extraction",
+    "neuropil_mask_method":         "extraction",
     "npil_to_roi_npix_ratio":       "extraction",
     "min_npil_npix":                "extraction",
     "dcnv_baseline":                "extraction",
@@ -234,11 +236,13 @@ params = {
     "fs": 2.8,                          # volume rate (Hz)
     "tau": 1.3,                         # GCaMP decay time (s). 1.3 for GCaMP6s
     "voxel_size_um": (15, 2.5, 2.5),    # voxel size in microns (z, y, x)
-    "planes": n.arange(0, 30),          # planes to analyze (0 = deepest)
+    # LBM z order: cavity A even planes, then cavity B odd planes; 0 = deepest.
+    "planes": n.r_[n.arange(0, 30, 2), n.arange(1, 30, 2)],
     "convert_plane_ids_to_channel_ids": False,
     "n_ch_tif": 30,                     # number of planes per volume in TIFF
     "skip_roi": None,                   # skip this mROI index (None = don't skip)
     "lbm": True,                        # True for Light Beads Microscopy data
+    "num_cavities": 2,                  # LBM cavities: 1 or 2
     "faced": False,                     # True for FACED microscopy data
     "faced_nz": None,                   # number of z-planes in FACED data
     "multiplane_2p_use_planes": None,   # which planes for standard multiplane 2P
@@ -395,6 +399,7 @@ params = {
     # boundary makes dask read two chunks, costing more memory AND more time.
     "batchsize_frames": 500,
     "npil_coeff": 0.7,                  # neuropil subtraction coefficient
+    "neuropil_mask_method": "rectangular",  # "rectangular" keeps legacy behavior; "expanding" grows from the cell mask
     "npil_to_roi_npix_ratio": None,
     "min_npil_npix": 100,               # minimum neuropil pixels
     # Deconvolution (OASIS via suite2p)

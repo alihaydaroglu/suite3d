@@ -37,19 +37,66 @@ def get_si_params(tif_path):
 
 
 
-def get_tif_paths(dir_path, regex_filter=None, sort=True, natsort=False):
+def get_tif_paths(
+    dir_path,
+    regex_filter=None,
+    sort=True,
+    natsort=False,
+    look_one_level_down=False,
+):
     """
-    Get a list of absolute paths for all tif files in this directory
+    Get paths for TIFF files from one or more files/directories.
 
     Args:
-        dir_path (str): Directory containing tifs
+        dir_path (str or list): TIFF file, directory containing TIFFs, or a
+            list of files/directories.
         regex_filter (string, optional): Optional regex filter for tif names. Defaults to None.
+        look_one_level_down (bool, optional): Also include TIFFs from direct
+            child directories of each input directory.
 
     Returns:
         list: list of tif paths
     """
-    dir_path_ls = os.listdir(dir_path)
-    tif_paths = [os.path.join(dir_path, e) for e in dir_path_ls if e.endswith(".tif")]
+    if isinstance(dir_path, (str, os.PathLike)):
+        input_paths = [dir_path]
+    else:
+        input_paths = list(dir_path)
+
+    def is_tif_path(path):
+        return os.path.splitext(os.fspath(path))[1].lower() in (".tif", ".tiff")
+
+    def dir_tifs(path):
+        return [
+            os.path.join(path, entry)
+            for entry in os.listdir(path)
+            if is_tif_path(entry)
+        ]
+
+    tif_paths = []
+    seen = set()
+    for input_path in input_paths:
+        input_path = os.fspath(input_path)
+        candidates = []
+        if os.path.isfile(input_path):
+            if is_tif_path(input_path):
+                candidates.append(input_path)
+        elif os.path.isdir(input_path):
+            candidates.extend(dir_tifs(input_path))
+            if look_one_level_down:
+                for entry in os.listdir(input_path):
+                    child_path = os.path.join(input_path, entry)
+                    if os.path.isdir(child_path):
+                        candidates.extend(dir_tifs(child_path))
+        else:
+            continue
+
+        for tif_path in candidates:
+            abs_path = os.path.abspath(tif_path)
+            if abs_path in seen:
+                continue
+            seen.add(abs_path)
+            tif_paths.append(tif_path)
+
     if regex_filter is not None:
         tif_paths_filtered = []
         for tif_path in tif_paths:

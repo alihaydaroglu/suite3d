@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>How the Suite3D GUI Works &#8212; Suite3D documentation</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=5ecbeea2" />
+    <link rel="stylesheet" type="text/css" href="_static/basic.css?v=b08954a9" />
+    <link rel="stylesheet" type="text/css" href="_static/alabaster.css?v=27fed22d" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=f5056de7" />
+    <script src="_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Suite3D Documentation" href="index.html" />
+   
+  <link rel="stylesheet" href="_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <section id="how-the-suite3d-gui-works">
+<h1>How the Suite3D GUI Works<a class="headerlink" href="#how-the-suite3d-gui-works" title="Link to this heading">¶</a></h1>
+<p>Suite3D includes an interactive desktop viewer for inspecting <code class="docutils literal notranslate"><span class="pre">info.npy</span></code> and
+ROI outputs, plus a separate portable HTML viewer that can be exported from a
+finished job. The desktop GUI is implemented in
+<code class="docutils literal notranslate"><span class="pre">suite3d/viewer/info_viewer_gui.py</span></code>.</p>
+<section id="running-suite3d-without-the-gui">
+<h2>Running Suite3D Without the GUI<a class="headerlink" href="#running-suite3d-without-the-gui" title="Link to this heading">¶</a></h2>
+<p>To analyze data from the command line instead of opening the GUI, use
+<code class="docutils literal notranslate"><span class="pre">suite3d-pipeline</span></code>.</p>
+<p>The command asks for a few paths and names:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">job-dir</span></code> is the base output folder. This is where Suite3D stores analysis
+runs. You can choose any folder where you want the results to be saved.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">job-id</span></code> is a short name for one analysis run. Suite3D adds <code class="docutils literal notranslate"><span class="pre">s3d-</span></code> before
+this name to create the final run folder.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">tif-dir</span></code> is the folder that contains the raw ScanImage TIFF files that you
+want to analyze.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">--all</span></code> tells Suite3D to run the main analysis stages instead of only
+creating or loading a job.</p></li>
+</ul>
+<p>For example, if <code class="docutils literal notranslate"><span class="pre">job-dir</span></code> is <code class="docutils literal notranslate"><span class="pre">C:\example\suite3d-runs</span></code> and <code class="docutils literal notranslate"><span class="pre">job-id</span></code>
+is <code class="docutils literal notranslate"><span class="pre">test1</span></code>, Suite3D creates this output folder:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\example\suite3d-runs\s3d-test1</span>
+</pre></div>
+</div>
+<ol class="arabic">
+<li><p>Activate the Suite3D conda environment:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">conda activate s3d</span>
+</pre></div>
+</div>
+</li>
+<li><p>Start the command-line pipeline:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">suite3d-pipeline</span>
+</pre></div>
+</div>
+</li>
+<li><p>When prompted for the base job directory, enter the <code class="docutils literal notranslate"><span class="pre">job-dir</span></code> folder where
+Suite3D should save the output. For example:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\example\suite3d-runs</span>
+</pre></div>
+</div>
+</li>
+<li><p>When prompted for the job ID, enter the <code class="docutils literal notranslate"><span class="pre">job-id</span></code> name for this analysis.
+For example:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">test1</span>
+</pre></div>
+</div>
+<p>Suite3D will save the run in:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\example\suite3d-runs\s3d-test1</span>
+</pre></div>
+</div>
+</li>
+<li><p>When prompted for the raw ScanImage TIFF folder, enter the <code class="docutils literal notranslate"><span class="pre">tif-dir</span></code>
+directory that contains the TIFF files. For example:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">C:\example\raw-tiffs\session01</span>
+</pre></div>
+</div>
+</li>
+<li><p>Choose which stages to run. To run the full non-GUI pipeline directly without
+prompts, pass all values on the command line:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">suite3d-pipeline --job-dir C:\example\suite3d-runs --job-id test1 --tif-dir C:\example\raw-tiffs\session01 --all</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">--all</span></code> option runs initialization, registration, correlation-map
+calculation, and ROI segmentation.</p>
+</li>
+</ol>
+</section>
+<section id="starting-the-gui">
+<h2>Starting the GUI<a class="headerlink" href="#starting-the-gui" title="Link to this heading">¶</a></h2>
+<p>After installing Suite3D into a conda environment, activate that environment and
+run the <code class="docutils literal notranslate"><span class="pre">suite3d</span></code> command:</p>
+<div class="highlight-console notranslate"><div class="highlight"><pre><span></span><span class="go">conda activate s3d</span>
+<span class="go">suite3d</span>
+</pre></div>
+</div>
+</section>
+<section id="suite3d-analyze">
+<h2>Suite3D Analyze<a class="headerlink" href="#suite3d-analyze" title="Link to this heading">¶</a></h2>
+<section id="running-analysis-from-the-gui">
+<h3>Running Analysis from the GUI<a class="headerlink" href="#running-analysis-from-the-gui" title="Link to this heading">¶</a></h3>
+<p>The Analyze Data dialog lets a user choose a TIFF directory, choose an output
+directory, set key Suite3D parameter overrides, and launch the pipeline. Before
+starting, the GUI tries to infer:</p>
+<ul class="simple">
+<li><p>volume or frame rate from ScanImage TIFF metadata</p></li>
+<li><p>y and x voxel size from ScanImage ROI metadata</p></li>
+<li><p>planes from <code class="docutils literal notranslate"><span class="pre">n_ch_tif</span></code> unless a comma-separated plane list is provided</p></li>
+</ul>
+<p>The worker creates a <code class="docutils literal notranslate"><span class="pre">Job</span></code> named <code class="docutils literal notranslate"><span class="pre">gui-analysis</span></code> and runs:</p>
+<ol class="arabic simple">
+<li><p>initialization</p></li>
+<li><p>registration</p></li>
+<li><p>correlation map calculation</p></li>
+<li><p>ROI segmentation</p></li>
+<li><p>neuropil mask computation</p></li>
+<li><p>trace extraction and deconvolution</p></li>
+</ol>
+<section id="to-be-filled">
+<h4>To Be Filled<a class="headerlink" href="#to-be-filled" title="Link to this heading">¶</a></h4>
+</section>
+</section>
+</section>
+<section id="suite3d-data-viewer">
+<h2>Suite3D Data Viewer<a class="headerlink" href="#suite3d-data-viewer" title="Link to this heading">¶</a></h2>
+<section id="input">
+<h3>Input<a class="headerlink" href="#input" title="Link to this heading">¶</a></h3>
+<p>The data viewer opens a completed Suite3D output. The user can select a
+Suite3D job directory, its <code class="docutils literal notranslate"><span class="pre">rois</span></code> folder, or the <code class="docutils literal notranslate"><span class="pre">info.npy</span></code> file directly.
+When a directory is selected, the GUI looks for <code class="docutils literal notranslate"><span class="pre">rois/info.npy</span></code>.</p>
+<p>Input for image viewing is:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">info.npy</span></code>: provides the background images shown in the viewer. The file
+should include at least one 3D image volume, such as <code class="docutils literal notranslate"><span class="pre">max_img</span></code>,
+<code class="docutils literal notranslate"><span class="pre">mean_img</span></code>, <code class="docutils literal notranslate"><span class="pre">vmap</span></code>, or <code class="docutils literal notranslate"><span class="pre">vmap_raw</span></code>. Any available volumes appear in the
+image selector.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">stats.npy</span></code>: enables ROI mask overlays and ROI selection. It stores the ROI
+coordinate dictionaries, including <code class="docutils literal notranslate"><span class="pre">coords</span></code> for cell masks and optionally
+<code class="docutils literal notranslate"><span class="pre">npcoords</span></code> for neuropil masks.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">iscell.npy</span></code>: provides the accepted/non-accepted ROI labels used by the curation panels. If it is missing, the GUI can still display ROI
+masks from <code class="docutils literal notranslate"><span class="pre">stats.npy</span></code> and creates an in-memory accepted array before
+saving.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">F.npy</span></code>: enables the ROI fluorescence trace.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Fneu.npy</span></code>: enables the neuropil trace and the <code class="docutils literal notranslate"><span class="pre">Reject</span> <span class="pre">Fneu</span> <span class="pre">&gt;</span> <span class="pre">F</span></code> curation
+action.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">spks.npy</span></code>: enables the deconvolved activity trace.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">registered_fused_data/fused_reg_data*.npy</span></code>: enables registered movie frame
+playback.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">registered_fused_data/offsets*.npy</span></code>: enables the motion correction plot.</p></li>
+</ul>
+</section>
+<section id="layout-and-controls">
+<h3>Layout and Controls<a class="headerlink" href="#layout-and-controls" title="Link to this heading">¶</a></h3>
+<p>The main window is built in <code class="docutils literal notranslate"><span class="pre">InfoViewer._build_ui()</span></code>. It contains five working
+areas:</p>
+<ul class="simple">
+<li><p>File controls for opening a run folder, opening an <code class="docutils literal notranslate"><span class="pre">info.npy</span></code> directly, or
+starting analysis from raw TIFF data.</p></li>
+<li><p>Display controls for image source, z-plane projection, ROI mask overlays,
+ROI color mode, right-panel mode, motion correction display, z-plane playback,
+and registered-frame playback.</p></li>
+<li><p>An image canvas that shows accepted ROIs on the left and either non-accepted
+ROIs or accepted neuropil on the right.</p></li>
+<li><p>An ROI curation panel with metric histograms, draggable thresholds, manual
+curation actions, undo, and saving to <code class="docutils literal notranslate"><span class="pre">iscell.npy</span></code>.</p></li>
+<li><p>A trace canvas that shows <code class="docutils literal notranslate"><span class="pre">F</span></code>, <code class="docutils literal notranslate"><span class="pre">Fneu</span></code>, and <code class="docutils literal notranslate"><span class="pre">spks</span></code> for the selected ROI,
+or motion correction shifts when motion display is enabled.</p></li>
+</ul>
+</section>
+<section id="display-panel">
+<h3>Display Panel<a class="headerlink" href="#display-panel" title="Link to this heading">¶</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">Display</span></code> panel controls what image is shown, which ROI overlays are
+visible, and how the viewer navigates through planes and movie frames.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">Image</span></code>: chooses the background image. The available entries come from
+<code class="docutils literal notranslate"><span class="pre">info.npy</span></code> and can include <code class="docutils literal notranslate"><span class="pre">max_img</span></code>, <code class="docutils literal notranslate"><span class="pre">mean_img</span></code>, <code class="docutils literal notranslate"><span class="pre">vmap</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">vmap_raw</span></code>. <code class="docutils literal notranslate"><span class="pre">Black</span></code> shows ROI masks on a plain black background.
+<code class="docutils literal notranslate"><span class="pre">registered</span> <span class="pre">movie</span></code> appears when registered movie chunks are available.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Project</span> <span class="pre">across</span> <span class="pre">planes</span></code>: shows a projection across all z-planes instead of
+a single plane. When this is enabled, the plane slider is disabled because the
+image no longer represents one plane.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ROI</span> <span class="pre">colors</span></code>: chooses how ROI masks are colored. <code class="docutils literal notranslate"><span class="pre">Random</span></code> assigns each ROI
+a stable random color. Other modes color ROIs by computed values, such as
+correlation, skewness, voxel count, peak value, or voxel SNR, when those
+values are available.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Show</span> <span class="pre">cell</span> <span class="pre">ROIs</span></code>: toggles the ROI mask overlay on top of the background
+image.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Show</span> <span class="pre">right</span> <span class="pre">panel</span></code>: shows or hides the second image panel. When it is hidden,
+only the accepted-cell panel is displayed.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Right</span> <span class="pre">panel</span></code>: chooses what the second panel displays. <code class="docutils literal notranslate"><span class="pre">Non-accepted</span>
+<span class="pre">cells</span></code> shows rejected/non-cell ROIs. <code class="docutils literal notranslate"><span class="pre">Accepted</span> <span class="pre">neuropil</span></code> shows neuropil
+masks for accepted ROIs when <code class="docutils literal notranslate"><span class="pre">npcoords</span></code> are present in <code class="docutils literal notranslate"><span class="pre">stats.npy</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Motion</span> <span class="pre">correction</span></code>: switches the lower trace plot to motion correction
+shifts when <code class="docutils literal notranslate"><span class="pre">offsets*.npy</span></code> files are available.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Plane</span></code> slider and <code class="docutils literal notranslate"><span class="pre">Play</span></code>: select or animate the z-plane shown in the
+image panels.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Frame</span></code> slider and <code class="docutils literal notranslate"><span class="pre">Play</span></code>: select or animate registered movie frames when
+registered movie chunks are available.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Zoom</span> <span class="pre">selected</span> <span class="pre">ROI</span></code>: zooms all image panels to the selected ROI mask.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Reset</span> <span class="pre">zoom</span></code>: restores the full image view.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Show</span> <span class="pre">selected</span> <span class="pre">ROI</span> <span class="pre">in</span> <span class="pre">3D</span></code>: opens a separate 3D view for the selected ROI or
+neuropil mask.</p></li>
+</ul>
+</section>
+<section id="image-display-and-roi-overlays">
+<h3>Image Display and ROI Overlays<a class="headerlink" href="#image-display-and-roi-overlays" title="Link to this heading">¶</a></h3>
+<p>The image view can show a single z-plane, a max or mean projection across
+planes, a black background, or a registered movie frame. Contrast is computed
+from the 1st and 99.8th percentiles unless the black background is selected.</p>
+<p>ROI overlays are generated from the coordinate arrays stored in each ROI’s
+<code class="docutils literal notranslate"><span class="pre">stats.npy</span></code> entry:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">coords</span></code> supplies cell ROI voxels.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">npcoords</span></code> supplies neuropil voxels when available.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">iscell[:,</span> <span class="pre">0]</span></code> decides whether each ROI appears in the accepted or
+non-accepted panel.</p></li>
+</ul>
+</section>
+<section id="selection-navigation-and-zoom">
+<h3>Selection, Navigation, and Zoom<a class="headerlink" href="#selection-navigation-and-zoom" title="Link to this heading">¶</a></h3>
+<p>Mouse and keyboard actions are handled directly on the Matplotlib canvases:</p>
+<ul class="simple">
+<li><p>Mouse wheel zooms around the cursor.</p></li>
+<li><p>Right click toggles the ROI under the cursor between accepted and
+non-accepted.</p></li>
+<li><p>Right drag draws a rectangle and moves every ROI in that rectangle between the
+accepted and non-accepted curation panels.</p></li>
+<li><p>Left and right arrow keys step through ROIs in the current accepted or
+non-accepted pool.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Ctrl+Z</span></code> restores the previous curation state from the undo stack.</p></li>
+</ul>
+<p>The selected ROI is drawn in white on top of the regular mask overlay.</p>
+</section>
+<section id="curation-workflow">
+<h3>Curation Workflow<a class="headerlink" href="#curation-workflow" title="Link to this heading">¶</a></h3>
+<p>The right-side curation panel computes metrics from <code class="docutils literal notranslate"><span class="pre">stats.npy</span></code> and trace
+files:</p>
+<ul class="simple">
+<li><p>voxel count: ROI footprint size in voxels.</p></li>
+<li><p>number of z-planes touched by the ROI: how many imaging planes contain ROI
+voxels.</p></li>
+<li><p>peak detection value: strength of the seed peak in the Suite3D detection map.</p></li>
+<li><p>median voxel SNR: median per-voxel signal-to-noise ratio inside the ROI,
+where higher values mean the ROI-related signal stands out more clearly above
+voxel-level noise or residual background variation.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">F</span></code> trace skewness: skewness of the ROI fluorescence trace computed by the
+viewer.</p></li>
+</ul>
+<p>Each visible histogram has draggable low and high threshold lines. Once a
+threshold is changed, <code class="docutils literal notranslate"><span class="pre">apply_curation_filters()</span></code> recomputes
+<code class="docutils literal notranslate"><span class="pre">iscell[:,</span> <span class="pre">0]</span></code> from all active metric ranges. Manual ROI overrides are kept
+separately and are applied through click or rectangle actions. The GUI stores up
+to 50 undo snapshots for curation operations.</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">Reject</span> <span class="pre">Fneu</span> <span class="pre">&gt;</span> <span class="pre">F</span></code> command rejects ROIs whose mean neuropil trace is larger
+than the mean ROI fluorescence trace. Those rejected ROIs are tracked separately
+so the adjacent <code class="docutils literal notranslate"><span class="pre">Undo</span></code> button can restore them without disturbing other
+curation edits.</p>
+<p><code class="docutils literal notranslate"><span class="pre">Save</span> <span class="pre">to</span> <span class="pre">iscell.npy</span></code> writes the current curation state back to the loaded ROI
+directory. It does not rewrite <code class="docutils literal notranslate"><span class="pre">stats.npy</span></code> or trace files.</p>
+</section>
+<section id="trace-and-motion-views">
+<h3>Trace and Motion Views<a class="headerlink" href="#trace-and-motion-views" title="Link to this heading">¶</a></h3>
+<p>When an ROI is selected, <code class="docutils literal notranslate"><span class="pre">update_trace_plot()</span></code> extracts the matching row or
+column from each loaded trace file. The trace panel can show:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">F</span></code> fluorescence trace</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Fneu</span></code> neuropil trace</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">spks</span></code> deconvolved activity estimate</p></li>
+</ul>
+<p>The trace canvas supports scroll zoom, drag panning, full-view reset, and a
+vertical frame cursor tied to the registered movie frame slider.</p>
+<p>If registered movie chunks and <code class="docutils literal notranslate"><span class="pre">offsets*.npy</span></code> files are available, the Motion
+Correction checkbox switches the trace canvas to a motion plot. That plot shows
+y shift, x shift, and combined xy motion across frames, with the current frame
+highlighted.</p>
+</section>
+<section id="output">
+<h3>Output<a class="headerlink" href="#output" title="Link to this heading">¶</a></h3>
+<p>The desktop GUI can produce or update a small number of files:</p>
+<ul class="simple">
+<li><p>Running analysis from the GUI writes a normal Suite3D job into the selected
+output directory. On success, the GUI automatically loads the generated
+<code class="docutils literal notranslate"><span class="pre">rois/info.npy</span></code> from that job.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">Save</span> <span class="pre">to</span> <span class="pre">iscell.npy</span></code> writes the current accepted or non-accepted ROI labels
+to <code class="docutils literal notranslate"><span class="pre">rois/iscell.npy</span></code>. This is the main persistent output of manual or
+histogram-based curation in the desktop viewer.</p></li>
+<li><p>If <code class="docutils literal notranslate"><span class="pre">iscell.npy</span></code> was missing when the run was opened, the GUI creates the
+accepted-array state in memory first and writes it only when the user saves.</p></li>
+<li><p>Actions such as ROI selection, zooming, trace inspection, motion viewing,
+ROI color changes, and 3D ROI display update only the current session unless
+they are followed by saving <code class="docutils literal notranslate"><span class="pre">iscell.npy</span></code>.</p></li>
+</ul>
+</section>
+</section>
+</section>
+
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="index.html">Suite3D</a></h1>
+
+
+
+
+
+
+
+
+
+<search id="searchbox" style="display: none" role="search">
+    <div class="searchformwrapper">
+    <form class="search" action="search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="Search"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script><h3>Navigation</h3>
+<p class="caption" role="heading"><span class="caption-text">Guides</span></p>
+<ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">How the Suite3D GUI Works</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#running-suite3d-without-the-gui">Running Suite3D Without the GUI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#starting-the-gui">Starting the GUI</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#suite3d-analyze">Suite3D Analyze</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#suite3d-data-viewer">Suite3D Data Viewer</a></li>
+</ul>
+</li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="index.html">Documentation overview</a><ul>
+      <li>Previous: <a href="index.html" title="previous chapter">Suite3D Documentation</a></li>
+  </ul></li>
+</ul>
+</div>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2026, Suite3D contributors.
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 9.1.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 1.0.0</a>
+      
+      |
+      <a href="_sources/gui.rst.txt"
+          rel="nofollow">Page source</a>
+    </div>
+
+    
+
+    
+  </body>
+</html>

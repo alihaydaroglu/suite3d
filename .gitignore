@@ -24,3 +24,6 @@ dev/
 .vscode
 models
 *.npy
+docs/_build/html/.doctrees/
+docs/_build/html/.buildinfo.bak
+docs/_build/html/objects.inv

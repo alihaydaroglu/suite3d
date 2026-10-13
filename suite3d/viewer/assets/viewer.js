@@ -44,6 +44,21 @@ for (const k in META.stats) STAT[k] = dec(META.stats[k], Float32Array);
 const NZ = META.shape[0], NY = META.shape[1], NX = META.shape[2];
 const NROI = META.n_rois;
 const NRUN = M.z.length;
+const RAW_PLANES = META.raw_planes || null;
+const CAVITY_LABELS = META.cavity_labels || null;
+
+function planeText(z) {
+  const base = `plane ${z} / ${NZ - 1}`;
+  if (!RAW_PLANES || z < 0 || z >= RAW_PLANES.length) return base;
+  const cavity = CAVITY_LABELS && CAVITY_LABELS[z] ? `, cavity ${CAVITY_LABELS[z]}` : "";
+  return `${base}, raw ${RAW_PLANES[z]}${cavity}`;
+}
+
+function planeShortText(z) {
+  if (!RAW_PLANES || z < 0 || z >= RAW_PLANES.length) return String(z);
+  const cavity = CAVITY_LABELS && CAVITY_LABELS[z] ? ` ${CAVITY_LABELS[z]}` : "";
+  return `${z} (raw ${RAW_PLANES[z]}${cavity})`;
+}
 
 /* ---------- colours: golden angle, matches the figure scripts ---------- */
 function roiRGB(i) {
@@ -198,8 +213,8 @@ function updateCounts() {
   const pct = NROI ? (100 * n / NROI).toFixed(0) : 0;
   $("counts").innerHTML = `<b>${n.toLocaleString()}</b> / ${NROI.toLocaleString()} ROIs pass · ${pct}%`;
   $("hud").textContent = state.hover >= 0
-    ? `ROI ${state.hover}   ·   plane ${state.plane} / ${NZ - 1}`
-    : `plane ${state.plane} / ${NZ - 1}   ·   ${NY}×${NX}`;
+    ? `ROI ${state.hover}   ·   ${planeText(state.plane)}`
+    : `${planeText(state.plane)}   ·   ${NY}×${NX}`;
 }
 
 /* ---------- background planes ---------- */
@@ -214,7 +229,7 @@ function prefetchPlanes() {
 }
 function setPlane() {
   $("plane").value = state.plane;
-  $("hudp").textContent = state.plane;
+  $("hudp").textContent = planeShortText(state.plane);
   setBackground(); prefetchPlanes(); prefetchMovie(); showFrame(); schedule(true);
 }
 
@@ -248,7 +263,7 @@ function showFrame() {
   if (!state.movie) { movImg.hidden = true; return; }
   if (!hasPlane(state.movie, state.plane)) {
     movImg.hidden = true;
-    $("movhint").textContent = `no movie frames for plane ${state.plane} (snippet covers ${MOVIES[state.movie].planes.join(", ")})`;
+    $("movhint").textContent = `no movie frames for ${planeText(state.plane)} (snippet covers ${MOVIES[state.movie].planes.join(", ")})`;
     return;
   }
   const m = MOVIES[state.movie];
@@ -685,7 +700,7 @@ function boot() {
   bg.width = NX; bg.height = NY;
   movImg.style.width = NX + "px"; movImg.style.height = NY + "px";
   ov.style.cursor = "grab";
-  $("hudp").textContent = state.plane;
+  $("hudp").textContent = planeShortText(state.plane);
   bg.addEventListener("load", () => { fit(); }, { once: true });   // fit ONCE, not on every plane
   setBackground();
   prefetchPlanes();
