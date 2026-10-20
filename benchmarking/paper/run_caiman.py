@@ -8,14 +8,19 @@ so the comparison covers both common CaImAn usage modes.
 
 Phases timed (per run):
   registration       — MotionCorrect (NoRMCorre); run once.
-  detection_onacid   — OnACID.fit_online (init batch + online refit).
-  detection_offline  — offline CNMF.fit + estimates.evaluate_components.
+  detection_online   — OnACID.fit_online (init batch + online refit).
+  detection_offline  — offline CNMF.fit + estimates.evaluate_components
+                       + CNMF.refit.
 
 Each "tool" string in the CSV is namespaced so the figures can split:
-  caiman_onacid, caiman_offline.
+  caiman_onacid_p0, caiman_offline.
 
 Both share the same registration wall time (same motion-corrected
 memmap), which is appended under each tool to keep totals coherent.
+
+Parameters come from `config.CAIMAN_PARAMS` (the corrected round-2
+set). `--legacy-params` selects `config.CAIMAN_PARAMS_LEGACY`, the set
+shipped with round 1, so the correction can be reproduced.
 """
 from __future__ import annotations
 
@@ -82,19 +87,32 @@ def _ensure_preprocessed_tifs(prep_dir: Path, subset: int | None) -> list[str]:
     return out
 
 
-def _run_registration(tifs, dview, timer_kwargs, tool_label):
+def _n_workers(dview, fallback: int) -> int:
+    """Worker count of a multiprocessing.Pool dview (CaImAn's own idiom)."""
+    return int(getattr(dview, "_processes", None) or fallback)
+
+
+def _run_registration(tifs, dview, timer_kwargs, tool_label, params, n_proc=None):
     """Time NoRMCorre under the given tool label. Returns (memmap, wall_s)."""
     import caiman as cm
     from caiman.motion_correction import MotionCorrect
     from caiman.source_extraction.cnmf import params as cnmf_params
 
+    # `fnames` is intentionally omitted from this CNMFParams: when it is
+    # present, CNMFParams.change_params() reads T from the files and
+    # overwrites splits_rig / splits_els with T // num_frames_split
+    # (default 80), i.e. 2 splits for a ~222-frame TIF, so motion
+    # correction ran on 2 worker processes whatever --n-cores said. The
+    # TIF list is passed straight to MotionCorrect below.
+    n_splits = _n_workers(dview, n_proc or 1)
     mc_opts = cnmf_params.CNMFParams(params_dict={
-        "fnames": tifs,
-        "strides": config.CAIMAN_PARAMS["strides"],
-        "overlaps": config.CAIMAN_PARAMS["overlaps"],
-        "max_shifts": config.CAIMAN_PARAMS["max_shifts"],
-        "max_deviation_rigid": config.CAIMAN_PARAMS["max_deviation_rigid"],
-        "pw_rigid": config.CAIMAN_PARAMS["pw_rigid"],
+        "strides": params["strides"],
+        "overlaps": params["overlaps"],
+        "max_shifts": params["max_shifts"],
+        "max_deviation_rigid": params["max_deviation_rigid"],
+        "pw_rigid": params["pw_rigid"],
+        "splits_rig": n_splits,
+        "splits_els": n_splits,
         "is3D": True,
     })
     mc = MotionCorrect(tifs, dview=dview, **mc_opts.get_group("motion"))
@@ -111,27 +129,57 @@ def _run_registration(tifs, dview, timer_kwargs, tool_label):
     return fname_new, t.wall_s
 
 
-def _run_onacid(memmap_path, dview, n_proc, timer_kwargs, results_dir):
-    """OnACID online CNMF — mirrors `demo_realtime_cnmfE.ipynb`. Returns wall_s."""
+def onacid_params_dict(params: dict, memmap_path: str, p: int = 0, K: int | None = None) -> dict:
+    """Build the CNMFParams dict for OnACID on an already-registered memmap.
+
+    p=0 is the default because CaImAn 1.12.2 cannot run OnACID on 3D
+    data otherwise: CNMF.fit leaves estimates.g / lam / bl / neurons_sn
+    as None for 3D and OnACID._prepare_object iterates over them; the
+    p=0 branch skips that code. With p=0 there is no deconvolution.
+
+    K overrides params["K"] for the OnACID initialisation. In every 3D
+    run we have made, OnACID returned exactly K components — the online
+    detection never added any — so K sets the size of the model that is
+    timed, not an upper bound on detection.
+    """
+    K = params["K"] if K is None else int(K)
+    # The patch parameters (rf / stride / only_init) are deliberately NOT
+    # passed: OnACID initialises on the init_batch with K components over the
+    # whole FOV and adds components online, which is how the round-1 script
+    # ran and how the reviewer measured it. Seeding the init with
+    # rf=40 / K=22-per-patch hands the online phase ~60x more components and
+    # was measured 8x slower (3053 s vs 372 s on the reviewer's box).
+    return {
+        "fnames": [memmap_path],
+        "fr": params["fr"], "decay_time": params["decay_time"],
+        "gSig": params["gSig"], "p": p, "K": K,
+        "merge_thr": params["merge_thresh"], "rval_thr": params["rval_thr"],
+        "min_SNR": params["min_SNR"], "use_cnn": params["use_cnn"],
+        "is3D": True,
+        "init_method": params["init_method"],
+        "init_batch": params["init_batch"],
+        "epochs": params["epochs"], "n_refit": params["n_refit"],
+        # Whether fit_online motion-corrects its input again. The memmap
+        # it is given has already been through NoRMCorre, so the
+        # corrected parameter set turns this off.
+        "motion_correct": params["motion_correct"],
+        # Motion params are still needed when motion_correct is True.
+        "strides": params["strides"], "overlaps": params["overlaps"],
+        "max_shifts": params["max_shifts"],
+        "max_deviation_rigid": params["max_deviation_rigid"],
+        "pw_rigid": params["pw_rigid"],
+    }
+
+
+def _run_onacid(memmap_path, dview, n_proc, timer_kwargs, results_dir, params):
+    """OnACID online CNMF (p=0, see onacid_params_dict). Returns wall_s."""
     from caiman.source_extraction.cnmf import params as cnmf_params
     from caiman.source_extraction.cnmf.online_cnmf import OnACID
 
-    p = config.CAIMAN_PARAMS
-    opacid_dict = {
-        "fnames": [memmap_path],
-        "fr": p["fr"], "decay_time": p["decay_time"],
-        "gSig": p["gSig"], "p": p["p"], "K": p["K"],
-        "merge_thr": p["merge_thresh"], "rval_thr": p["rval_thr"],
-        "min_SNR": p["min_SNR"], "use_cnn": p["use_cnn"],
-        "is3D": True,
-        "init_method": p["init_method"],
-        "init_batch": p["init_batch"],
-        "epochs": p["epochs"], "n_refit": p["n_refit"],
-    }
-    opts = cnmf_params.CNMFParams(params_dict=opacid_dict)
+    opts = cnmf_params.CNMFParams(params_dict=onacid_params_dict(params, memmap_path))
     cnm = OnACID(params=opts, dview=dview)
 
-    with PhaseTimer("caiman_onacid", "detection", **timer_kwargs) as t:
+    with PhaseTimer("caiman_onacid_p0", "detection_online", **timer_kwargs) as t:
         cnm.fit_online()
 
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -139,13 +187,13 @@ def _run_onacid(memmap_path, dview, n_proc, timer_kwargs, results_dir):
     return t.wall_s
 
 
-def _run_offline(memmap_path, dview, n_proc, timer_kwargs, results_dir):
-    """Offline CNMF — matches the existing fig-comparison-contained
-    pipeline (step2_caiman.py). Returns dict of sub-phase wall times."""
+def _run_offline(memmap_path, dview, n_proc, timer_kwargs, results_dir, params):
+    """Offline CNMF — fit (in patches when rf is set), evaluate, refit.
+    Returns dict of sub-phase wall times."""
     import caiman as cm
     from caiman.source_extraction.cnmf.cnmf import CNMF
 
-    p = config.CAIMAN_PARAMS
+    p = params
     Yr, dims, T = cm.load_memmap(memmap_path)
     images = np.reshape(Yr.T, [T] + list(dims), order="F")
 
@@ -153,8 +201,13 @@ def _run_offline(memmap_path, dview, n_proc, timer_kwargs, results_dir):
         n_proc,
         k=p["K"], gSig=list(p["gSig"]),
         merge_thresh=p["merge_thresh"], p=p["p"], dview=dview,
+        # Patch approach: the FOV is split into patches of side 2*rf
+        # (stride = overlap) and n_proc of them are initialised in
+        # parallel; K is per patch. rf=None (legacy) runs the whole FOV
+        # in one process.
+        rf=p["rf"], stride=p["stride"], only_init_patch=p["only_init_patch"],
     )
-    cnm.params.set("spatial", {"se": np.ones((3, 3, 1), dtype=np.uint8)})
+    cnm.params.set("spatial", {"se": p["se"]})
 
     walls: dict[str, float] = {}
 
@@ -175,9 +228,10 @@ def _run_offline(memmap_path, dview, n_proc, timer_kwargs, results_dir):
     # Refit pass — same step run by the existing fig-comparison-contained
     # pipeline (step2_caiman.py). Re-runs spatial/temporal updates with
     # proper AR(p) deconvolution after components have been filtered.
+    # dview must be passed explicitly or refit runs single-process.
     cnm.params.set("temporal", {"p": p["p"]})
     with PhaseTimer("caiman_offline", "detection_refit", **timer_kwargs) as t:
-        cnm2 = cnm.refit(images)
+        cnm2 = cnm.refit(images, dview=dview)
     walls["detection_refit"] = t.wall_s
 
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -201,15 +255,17 @@ def main() -> None:
         "--instance", default=os.environ.get("INSTANCE_LABEL", "local"),
     )
     ap.add_argument(
-        "--n-cores", type=int, default=16,
-        help="Worker processes. Locked to 16 to match the AWS plan.",
+        "--n-cores", type=int, default=8,
+        help="Worker processes (default 8, matching the r6a.2xlarge plan).",
     )
     ap.add_argument(
         "--mode", choices=["both", "onacid", "offline"], default="offline",
-        help=("Which detection paths to time. Default 'offline' — OnACID "
-              "is currently shelved (upstream caiman 1.12.2 doesn't support "
-              "3D OnACID; the reviewer's '3D modifications' aren't "
-              "reproducible without their attached script)."),
+        help="Which detection paths to time (default: offline).",
+    )
+    ap.add_argument(
+        "--legacy-params", action="store_true",
+        help="Run with the parameter set shipped in round 1 "
+             "(config.CAIMAN_PARAMS_LEGACY) instead of the corrected set.",
     )
     args = ap.parse_args()
 
@@ -224,9 +280,11 @@ def main() -> None:
     os.environ.setdefault("CAIMAN_DATA", str(scratch / "caiman_data"))
     Path(os.environ["CAIMAN_DATA"]).mkdir(parents=True, exist_ok=True)
 
+    params = config.caiman_params(legacy=args.legacy_params)
     prep_dir = scratch / "preprocessed_tifs"
     print(f"CaImAn speed-run on {args.dataset} (mode={args.mode}, "
-          f"n_cores={args.n_cores})")
+          f"n_cores={args.n_cores}, "
+          f"params={'LEGACY' if args.legacy_params else 'corrected'})")
     print(f"  cwd={os.getcwd()}  CAIMAN_DATA={os.environ['CAIMAN_DATA']}")
     tifs = _ensure_preprocessed_tifs(prep_dir, args.subset)
     print(f"  {len(tifs)} preprocessed TIF(s) at {prep_dir}")
@@ -251,24 +309,30 @@ def main() -> None:
         # tool totals so the table stays coherent.
         memmap_path, mc_wall = _run_registration(
             tifs, dview, timer_kwargs, tool_label="caiman_motion",
+            params=params, n_proc=n_proc,
         )
+        # Persist the memmap path so run_caiman_onacid.py can reuse this
+        # registration instead of paying for a second one.
+        out_root = Path(args.out_csv).parent
+        out_root.mkdir(parents=True, exist_ok=True)
+        (out_root / "memmap.txt").write_text(str(memmap_path) + "\n")
 
         if args.mode in ("both", "onacid"):
-            results_dir = Path("/results") / "caiman_onacid" / args.dataset
+            results_dir = out_root / "caiman_onacid_p0" / args.dataset
             det_wall = _run_onacid(
-                memmap_path, dview, n_proc, timer_kwargs, results_dir,
+                memmap_path, dview, n_proc, timer_kwargs, results_dir, params,
             )
             write_total_row(
-                args.out_csv, tool="caiman_onacid",
+                args.out_csv, tool="caiman_onacid_p0",
                 dataset=args.dataset, instance=args.instance,
                 subset=args.subset,
-                walls_s={"registration": mc_wall, "detection": det_wall},
+                walls_s={"registration": mc_wall, "detection_online": det_wall},
             )
 
         if args.mode in ("both", "offline"):
-            results_dir = Path("/results") / "caiman_offline" / args.dataset
+            results_dir = out_root / "caiman_offline" / args.dataset
             offline_walls = _run_offline(
-                memmap_path, dview, n_proc, timer_kwargs, results_dir,
+                memmap_path, dview, n_proc, timer_kwargs, results_dir, params,
             )
             walls = {"registration": mc_wall, **offline_walls}
             write_total_row(

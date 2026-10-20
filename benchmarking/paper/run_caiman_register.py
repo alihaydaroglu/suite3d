@@ -35,6 +35,11 @@ def main() -> None:
     ap.add_argument(
         "--instance", default=os.environ.get("INSTANCE_LABEL", "local"),
     )
+    ap.add_argument(
+        "--legacy-params", action="store_true",
+        help="Run with the parameter set shipped in round 1 "
+             "(config.CAIMAN_PARAMS_LEGACY) instead of the corrected set.",
+    )
     args = ap.parse_args()
 
     _cap_blas_threads(1)
@@ -45,8 +50,12 @@ def main() -> None:
     os.environ.setdefault("CAIMAN_DATA", str(scratch / "caiman_data"))
     Path(os.environ["CAIMAN_DATA"]).mkdir(parents=True, exist_ok=True)
 
+    params = config.caiman_params(legacy=args.legacy_params)
     prep_dir = scratch / "preprocessed_tifs"
     tifs = _ensure_preprocessed_tifs(prep_dir, args.subset)
+    print(f"Registration params: {'LEGACY' if args.legacy_params else 'corrected'} "
+          f"(strides={params['strides']}, overlaps={params['overlaps']}, "
+          f"max_shifts={params['max_shifts']}, pw_rigid={params['pw_rigid']})")
     print(f"{len(tifs)} preprocessed TIF(s) at {prep_dir}")
 
     import caiman as cm
@@ -65,11 +74,13 @@ def main() -> None:
     try:
         memmap_path, mc_wall = _run_registration(
             tifs, dview, timer_kwargs, tool_label="caiman_motion",
+            params=params, n_proc=n_proc,
         )
     finally:
         cm.stop_server(dview=dview)
 
-    memmap_path_file = Path("/results") / "memmap.txt"
+    memmap_path_file = Path(args.out_csv).parent / "memmap.txt"
+    memmap_path_file.parent.mkdir(parents=True, exist_ok=True)
     memmap_path_file.write_text(str(memmap_path) + "\n")
     print(f"Memmap path saved to {memmap_path_file}: {memmap_path}")
     print(f"Registration wall: {mc_wall:.1f}s")

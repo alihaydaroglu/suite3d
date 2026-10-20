@@ -8,8 +8,13 @@ crash site (online_cnmf.py line 244) is gated by
 Trade-off: no AR(p) deconvolution / no inferred spikes — F-trace only.
 
 This runner expects an existing C-order memmap path (the registration
-output from run_caiman_register.py or a prior full run) so we don't
-re-do registration. Run with --memmap-path-file /results/memmap.txt.
+output from run_caiman_register.py, or the memmap.txt that run_caiman.py
+now writes) so we don't re-do registration. Run with
+--memmap-path-file /results/memmap.txt.
+
+Parameters come from `config.CAIMAN_PARAMS` (corrected, round 2);
+`--legacy-params` selects the round-1 set, which also re-runs motion
+correction inside fit_online (`motion_correct=True`).
 """
 from __future__ import annotations
 
@@ -22,11 +27,11 @@ _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 
 import config  # noqa: E402
-from run_caiman import _cap_blas_threads  # noqa: E402
+from run_caiman import _cap_blas_threads, onacid_params_dict  # noqa: E402
 from timing_harness import PhaseTimer, write_total_row  # noqa: E402
 
 
-def _run_onacid_p0(memmap_path, dview, timer_kwargs, results_dir):
+def _run_onacid_p0(memmap_path, dview, timer_kwargs, results_dir, params, K=None):
     """OnACID 3D with p=0 to dodge the missing-estimates crash.
 
     Returns dict of phase wall times.
@@ -34,27 +39,16 @@ def _run_onacid_p0(memmap_path, dview, timer_kwargs, results_dir):
     from caiman.source_extraction.cnmf import params as cnmf_params
     from caiman.source_extraction.cnmf.online_cnmf import OnACID
 
-    p = config.CAIMAN_PARAMS
-    opacid_dict = {
-        "fnames": [memmap_path],
-        "fr": p["fr"], "decay_time": p["decay_time"],
-        "gSig": p["gSig"],
-        "p": 0,                            # ← workaround
-        "K": p["K"],
-        "merge_thr": p["merge_thresh"], "rval_thr": p["rval_thr"],
-        "min_SNR": p["min_SNR"], "use_cnn": p["use_cnn"],
-        "is3D": True,
-        "init_method": p["init_method"],    # "cnmf"
-        "init_batch": p["init_batch"],      # 200 frames offline init
-        "epochs": p["epochs"], "n_refit": p["n_refit"],
-    }
-    opts = cnmf_params.CNMFParams(params_dict=opacid_dict)
+    opts = cnmf_params.CNMFParams(
+        params_dict=onacid_params_dict(params, memmap_path, p=0, K=K))
     cnm = OnACID(params=opts, dview=dview)
 
     walls: dict[str, float] = {}
-    with PhaseTimer("caiman_onacid_p0", "detection_online", **timer_kwargs) as t:
+    with PhaseTimer(f"caiman_onacid_p0_K{K if K is not None else params['K']}", "detection_online", **timer_kwargs) as t:
         cnm.fit_online()
     walls["detection_online"] = t.wall_s
+    n_comp = cnm.estimates.C.shape[0] if cnm.estimates.C is not None else -1
+    print(f"OnACID returned {n_comp} components", flush=True)
 
     results_dir.mkdir(parents=True, exist_ok=True)
     cnm.save(str(results_dir / "results.hdf5"))
@@ -78,6 +72,18 @@ def main() -> None:
     ap.add_argument(
         "--instance", default=os.environ.get("INSTANCE_LABEL", "local"),
     )
+    ap.add_argument(
+        "--legacy-params", action="store_true",
+        help="Run with the parameter set shipped in round 1 "
+             "(config.CAIMAN_PARAMS_LEGACY) instead of the corrected set.",
+    )
+    ap.add_argument(
+        "--K", type=int, default=None,
+        help="Override the number of components for the OnACID "
+             "initialisation (default: config K). 3D OnACID returns exactly "
+             "K components, so this sets the size of the timed model. The "
+             "published N = 19 bars used K = 200.",
+    )
     args = ap.parse_args()
 
     _cap_blas_threads(1)
@@ -88,10 +94,14 @@ def main() -> None:
     os.environ.setdefault("CAIMAN_DATA", str(scratch / "caiman_data"))
     Path(os.environ["CAIMAN_DATA"]).mkdir(parents=True, exist_ok=True)
 
+    params = config.caiman_params(legacy=args.legacy_params)
     memmap_path = Path(args.memmap_path_file).read_text().strip()
-    print(f"OnACID-3D (p=0) on {args.dataset}")
+    print(f"OnACID-3D (p=0) on {args.dataset} "
+          f"(params={'LEGACY' if args.legacy_params else 'corrected'})")
     print(f"  memmap: {memmap_path}")
-    print(f"  n_cores={args.n_cores}, K={config.CAIMAN_PARAMS['K']}")
+    K = params["K"] if args.K is None else args.K
+    print(f"  n_cores={args.n_cores}, K={K} (whole-FOV init), "
+          f"motion_correct={params['motion_correct']}")
     if not Path(memmap_path).exists():
         raise SystemExit(f"Memmap missing: {memmap_path}")
 
@@ -110,8 +120,8 @@ def main() -> None:
     )
 
     try:
-        results_dir = Path("/results") / "caiman_onacid_p0" / args.dataset
-        walls = _run_onacid_p0(memmap_path, dview, timer_kwargs, results_dir)
+        results_dir = Path(args.out_csv).parent / "caiman_onacid_p0" / args.dataset
+        walls = _run_onacid_p0(memmap_path, dview, timer_kwargs, results_dir, params, K=args.K)
     finally:
         cm.stop_server(dview=dview)
 

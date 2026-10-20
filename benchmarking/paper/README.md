@@ -135,10 +135,9 @@ docker run --rm --cpus=8 --shm-size=8g $MOUNTS \
   s3d-bench:caiman --subset 2 --n-cores 8 --mode offline
 ```
 
-`--mode` defaults to `offline`. **Do not pass `--mode onacid` or `--mode both`**:
-they run OnACID with `p = 2`, which is exactly the 3D crash that
-`run_caiman_onacid.py` exists to work around (see §5). Use the two-step recipe
-below instead.
+`--mode` defaults to `offline`. `--mode both` also runs OnACID (with `p = 0`,
+see §5) on the same registration, in one container. The two-step recipe below
+is equivalent and lets you re-run OnACID without re-registering.
 
 **OnACID** (on `r6a.2xlarge`). Register once, then run OnACID against the
 resulting memmap, so registration is not timed twice *within the OnACID arm*:
@@ -154,26 +153,34 @@ docker run --rm --cpus=8 --shm-size=8g $MOUNTS \
     --memmap-path-file /results/memmap.txt
 ```
 
-Note that if you have *already* run `--mode offline`, this registers a second
-time: `run_caiman.py` never writes `memmap.txt`, and has no flag to reuse an
-existing memmap. Expect the extra ~11 min (subset 2) / ~55 min (subset 10), and
-see the `samples_*.npz` overwrite warning in §7.
+`run_caiman.py` also writes `results/memmap.txt` after its registration, so if
+you have already run `--mode offline` you can skip `run_caiman_register.py` and
+go straight to `run_caiman_onacid.py` against the same memmap.
 
-Replace `--subset 2` with `--subset 10` for the longer run — **except for the
-offline CNMF arm**, which is OOM-killed in 64 GiB at that length (§7.4). Reference
-wall times at `--subset 10`, 8 vCPU: Suite3D 635 s total (on NVMe); CaImAn
-NoRMCorre 3417 s; OnACID `detection_online` 2126 s.
+Replace `--subset 2` with `--subset 10` for the longer run. Reference wall
+times at `--subset 10`, 8 vCPU, with the **round-1 parameters**: Suite3D 635 s
+total (on NVMe); CaImAn NoRMCorre 3417 s; OnACID `detection_online` 2126 s; the
+offline CNMF arm was OOM-killed in 64 GiB at that length (§7.4). With the
+corrected parameters (§8) the offline arm is far lighter — see the table there.
 
 ## 5. Parameters
 
-All parameters live in `config.py` and are applied by every runner. Notably
-`K = 1000` and `pw_rigid = True` for CaImAn; Suite3D runs 3D non-rigid
-registration on the GPU and is given the 7 functional planes (2–8), while CaImAn
-is given all 9 acquired planes.
+All parameters live in `config.py` and are applied by every runner. CaImAn
+runs with `config.CAIMAN_PARAMS`, the **corrected round-2 set** (§8): `p = 1`,
+`gSig = (1, 5, 5)`, patches with `K = 22` per patch (`rf = 40`, `stride = 18`,
+`only_init_patch = True`), piecewise-rigid NoRMCorre with
+`strides = (3, 96, 96)`, `overlaps = (1, 32, 32)`, `max_shifts = (1, 5, 5)`.
+All per-axis tuples are in the data's `(z, y, x)` order. Suite3D runs 3D
+non-rigid registration on the GPU and is given the 7 functional planes (2–8),
+while CaImAn is given all 9 acquired planes.
 
-There are no CLI flags for `K` or for `pw_rigid` — edit `config.py` to change
-them. The published `N = 19` OnACID bars were produced with `K = 200` (and a
-`rigid` variant), not with the `K = 1000` shipped here.
+`--legacy-params` on any CaImAn runner selects `config.CAIMAN_PARAMS_LEGACY`,
+the set shipped with the round-1 benchmark (`K = 1000` over the whole FOV,
+`gSig = (5, 5, 2)`, `p = 2`, motion tuples in `(x, y, z)` order, and OnACID
+re-running motion correction). It exists so the correction can be reproduced;
+do not use it for new measurements. There are no CLI flags for individual
+parameters — edit `config.py`. The published `N = 19` OnACID bars were produced
+with `K = 200` (and a `rigid` variant) of the legacy set.
 
 `run_caiman_onacid.py` sets `p = 0`. CaImAn 1.12.2 cannot run OnACID on 3D data
 otherwise: `CNMF.fit` leaves `estimates.g/lam/bl/neurons_sn` as `None` for 3D,
@@ -235,9 +242,10 @@ Things that will bite you, roughly in the order you hit them.
    and appends a *second* `caiman_motion,registration` row to `timings.csv`.
    Running the README in order does this. Move `results/` aside between arms if
    you care about the traces.
-7. **OnACID exits 137 at the end, and loses two outputs.** With the shipped
-   `K = 1000`, `cnm.save()` is OOM-killed after `fit_online()` returns (observed:
-   63.3 GB RSS on the 64 GiB box). Consequences:
+7. **OnACID exits 137 at the end, and loses two outputs — with the legacy
+   `K = 1000`.** `cnm.save()` is OOM-killed after `fit_online()` returns
+   (observed: 63.3 GB RSS on the 64 GiB box). Not seen with the corrected
+   parameters. Consequences, if you run `--legacy-params`:
    - the `caiman_onacid_p0,detection_online` row and its `.npz` **are** written
      first, so the wall time is valid;
    - `write_total_row()` runs *after* `cnm.save()`, so there is **no
@@ -248,26 +256,22 @@ Things that will bite you, roughly in the order you hit them.
 
    The published `K = 200` runs did not hit this, which is why their CSVs *do*
    carry a `total` row.
-8. **OnACID motion-corrects a second time, inside `detection_online`.**
-   `run_caiman_onacid.py` does not set `online.motion_correct`, and CaImAn's
-   default is `True`. `fit_online()` therefore re-registers a memmap that
-   `run_caiman_register.py` has already registered: a full `MotionCorrect` on the
-   `init_batch` frames, then a per-frame 3D rigid `register_translation_3d` on
-   every streamed frame. You can see it on disk as
-   `tmp_mov_mot_corr_rig__..._frames_200.mmap`.
-
-   **The `detection_online` wall time is therefore not clean detection.** Rerunning
-   subset 2 on the identical memmap with `motion_correct` toggled (`r6a.2xlarge`):
-   564.8 s → **439.8 s**, i.e. **22 % of the phase is redundant MC**. The benchmark
-   double-counts motion correction. Set `motion_correct: False` in the OnACID
-   params dict if you want detection alone — or drop the NoRMCorre pre-pass and let
-   OnACID do its own MC. Do not do both.
+8. **OnACID used to motion-correct a second time, inside `detection_online`.**
+   The round-1 runner did not set `online.motion_correct`, and CaImAn's default
+   is `True`, so `fit_online()` re-registered a memmap that NoRMCorre had already
+   registered (a full `MotionCorrect` on the `init_batch` frames, then a
+   per-frame 3D rigid `register_translation_3d` on every streamed frame — visible
+   on disk as `tmp_mov_mot_corr_rig__..._frames_200.mmap`). Measured on
+   `r6a.2xlarge`, subset 2: 564.8 s with it, **439.8 s** without, i.e. 22 % of
+   the phase was redundant MC. The corrected parameter set sets
+   `motion_correct = False`; `--legacy-params` keeps the old behaviour.
 
 9. **CaImAn is silent for the first ~10 min** (subset 2) while it rewrites the
    TIFFs to single-channel 3D stacks under `scratch/preprocessed_tifs/`. It is
    not hung. This is cached across runs.
-10. **`--n-cores` help text says "locked to 16"**; it defaults to 16, but the
-   instances above have 8 vCPU and every command here passes `--n-cores 8`.
+10. **`--n-cores` defaults to 8** for the CaImAn runners (the instances above
+   have 8 vCPU) and to 16 for `run_suite3d.py`; every command here passes
+   `--n-cores 8` explicitly.
 11. **`--instance` defaults to `local`** and only labels the CSV column. Forget
     it and your rows are mislabelled.
 12. **Frame rate.** `run_suite3d.py` sets `fs` from
@@ -281,3 +285,98 @@ Things that will bite you, roughly in the order you hit them.
     the whole command fails and the `|| pip install psutil torch` fallback pulls
     the full CUDA torch from PyPI. (`pip install -e` has already pulled torch
     anyway.)
+
+## 8. Round-2 corrections to the CaImAn arm
+
+In revision round 2 a reviewer re-ran these scripts and found the CaImAn
+configuration wrong in several concrete ways. Their corrections are adopted
+verbatim in `config.CAIMAN_PARAMS` and the runners; the round-1 configuration
+is kept as `CAIMAN_PARAMS_LEGACY` (`--legacy-params`) so the before/after can be
+reproduced. What was wrong:
+
+1. **Axis order.** CaImAn's demo assumes `(t, x, y, z)`; this data is
+   `(t, z, y, x)`. Every per-axis tuple was therefore transposed:
+   `gSig = (5, 5, 2)` → `(1, 5, 5)`, `se = (3, 3, 1)` → `(1, 3, 3)`,
+   `strides = (24, 24, 10)` → `(3, 96, 96)`, `overlaps = (12, 12, 2)` →
+   `(1, 32, 32)`, `max_shifts = (4, 4, 2)` → `(1, 5, 5)`. The motion-correction
+   patch (strides + overlaps) is now 4 × 128 × 128, the size of Suite3D's
+   non-rigid blocks.
+2. **No patches.** `K = 1000` components were sought over the whole FOV in a
+   single process. Now `rf = 40`, `stride = 18`, `K = 22` per patch,
+   `only_init_patch = True` (the `CNMFParams` default): initialisation runs in
+   1 × 8 × 8 patches of 9 × 80 × 80 voxels in parallel, refinement in `refit`.
+   `p = 1` instead of 2 at a 4 Hz volume rate.
+3. **Multi-core paths not used.** `dview` was not passed to `refit()`, so the
+   refit ran single-process. And because `fnames` was given to the
+   motion-correction `CNMFParams`, `change_params()` reset `splits_rig/els` to
+   `T // 80 = 2`, so NoRMCorre ran on 2 processes whatever `--n-cores` said.
+   `fnames` is now omitted there and the splits are set to the worker count.
+4. **(From round 1's own audit)** OnACID re-ran motion correction on registered
+   input (§7.8); now off. `run_caiman.py` writes `memmap.txt` so the OnACID
+   arm reuses the registration instead of paying for it twice.
+
+Two things the corrections do **not** change, and that the OnACID numbers
+must be read with:
+
+- **3D OnACID returns exactly `K` components.** In every run we have made
+  (K = 22, 200, 500, 1000; subsets 2, 10 and the full recording) the online
+  phase never added a component, so `K` sets the size of the model being
+  timed rather than a ceiling on detection. The reviewer's corrected
+  `K = 22` therefore gives an OnACID run that "detects" 22 cells on a field
+  with several hundred. `run_caiman_onacid.py --K` overrides it; the table
+  below reports both K = 22 (the reviewer's configuration as run) and
+  K = 500 (a model the size of Suite3D's cell count).
+- **The patch parameters apply to offline CNMF only.** Passing `rf` / `stride`
+  into the OnACID initialisation seeds the online phase with ~950 components
+  and was 8× slower (3053 s vs 372 s at subset 2); the OnACID dict does not
+  carry them, matching the script the reviewer timed.
+
+### Before / after, measured on one machine
+
+All rows below were run on the same box (72-core Xeon w9-3475, 503 GB, RTX
+A4500) inside the `s3d-bench:caiman` image (caiman 1.12.2) with
+`--cpus=8 --n-cores 8`, so the two CaImAn columns differ only in the scripts:
+"shipped" is the round-1 tree at commit `fb87bef`, "corrected" is this one.
+Wall seconds; peak RAM is system-wide. The reviewer's own numbers (10-core
+W-2255, `--n-cores 20`) are given for reference.
+
+**`--subset 2` (444 volumes, 9 × 512 × 512)**
+
+| phase | shipped | corrected | speed-up | peak RAM shipped → corrected | reviewer: shipped → fixed |
+|---|---:|---:|---:|---|---|
+| NoRMCorre registration (pw-rigid) | 600 | **171** | 3.5× | 50 → 27 GB | 852 → 293 |
+| CNMF fit | 893 | **120** | 7.5× | 57 → 24 GB | 922 → 78 |
+| evaluate_components | 3.3 | 3.0 | — | | 7.2 → 6.9 |
+| CNMF refit | 2,642 | **527** | 5.0× | 24 → 29 GB | 3,213 → 383 |
+| **offline total** | **4,138** | **821** | **5.0×** | | 4,994 → 761 |
+| OnACID `detection_online`, shipped K = 1000 (+ double MC) → corrected K = 22 | 1,037 | **165** | 6.3× | 53 → 32 GB | 1,061 → 372 |
+| OnACID `detection_online`, corrected K = 500 | 1,037 | **413** | 2.5× | 53 → 39 GB | |
+| Suite3D, same box, GPU (164 ROIs) | | **242** | | | 134 (reviewer's box) |
+
+**`--subset 10` (2,220 volumes)**
+
+| phase | shipped | corrected | speed-up | peak RAM shipped → corrected |
+|---|---:|---:|---:|---|
+| NoRMCorre registration (pw-rigid) | 4,455 | **833** | 5.3× | 26 → 28 GB |
+| CNMF fit | OOM at 63 GB (AWS, round 1) | **165** | | → 40 GB |
+| evaluate_components | | 7.7 | | |
+| CNMF refit | | **623** | | → 45 GB |
+| **offline total** | did not finish | **1,629** | | |
+| OnACID `detection_online`, shipped K = 1000 (+ double MC) → corrected K = 22 | 4,807 | **890** | 5.4× | 52 → 32 GB |
+| OnACID `detection_online`, corrected K = 500 | 4,807 | **1,818** | 2.6× | 52 → 39 GB |
+| Suite3D, same box, GPU (408 ROIs) | | **301** | | |
+
+Component counts with the corrected parameters: offline CNMF 378 (subset 2)
+and 558 (subset 10) after refit; OnACID exactly K. Suite3D found 164 and 408
+ROIs.
+
+**What this means for the comparison.** Against the corrected CaImAn on this
+machine, Suite3D end-to-end is 3.4× (subset 2) and 5.4× (subset 10) faster
+than offline CNMF, and 2.4× / 8.8× faster than NoRMCorre + OnACID with a
+500-component model (1.4× / 5.7× with the reviewer's 22-component model). The
+round-1 configuration overstated CaImAn's offline time by 5× and its
+registration by 3.5–5.3×; the corrected offline CNMF also fits comfortably in
+64 GB at subset 10, where the shipped configuration was OOM-killed. The
+published `N = 19` numbers were measured on AWS with the shipped
+configuration and have not been re-measured there.
+
